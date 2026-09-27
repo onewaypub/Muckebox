@@ -76,16 +76,33 @@ def test_seed_ip_and_room_name_select_the_room(kids, living):
     assert not info.grouped
 
 
-def test_seed_ip_alone_selects_the_seed_room(kids, living):
-    zones = household(kids, living)
-    assert backend_for(zones, room=None, seed="192.0.2.10").resolve().name == "Kinderzimmer"
+def test_room_is_required():
+    with pytest.raises(ValueError):
+        SocoBackend(room="", seed_ip="192.0.2.10")
 
 
-def test_invisible_stereo_partner_maps_to_its_visible_room(kids, living):
+def test_invisible_stereo_partner_as_seed(kids, living):
     partner = FakeZone("Kinderzimmer", "192.0.2.12", "RINCON_000000000002001400", visible=False)
     zones = household(kids, living, partner, groups=[(kids, kids, partner), (living, living)])
-    info = backend_for(zones, room=None, seed="192.0.2.12").resolve()
-    assert info.player_ip == "192.0.2.10"
+    info = backend_for(zones, room="Kinderzimmer", seed="192.0.2.12").resolve()
+    assert info.player_ip == "192.0.2.10"  # the visible speaker of the room
+
+
+def test_room_is_found_by_its_id_after_a_rename(kids, living):
+    zones = household(kids, living)
+    backend = backend_for(zones, room="Old name")
+    backend._room_uid = kids.uid  # as stored with the settings
+    info = backend.resolve()
+    assert (info.name, info.player_uid) == ("Kinderzimmer", kids.uid)
+
+
+def test_swapped_room_names_keep_the_same_speaker(kids, living):
+    zones = household(kids, living)
+    backend = backend_for(zones, room="Kinderzimmer")
+    assert backend.resolve().player_uid == kids.uid
+    kids.player_name, living.player_name = "Wohnzimmer", "Kinderzimmer"
+    household(kids, living)
+    assert backend.resolve().player_uid == kids.uid  # not the living room
 
 
 def test_grouped_room_reports_coordinator(kids, living):
@@ -106,7 +123,7 @@ def test_room_by_discovery_without_ip(kids, living):
     backend = SocoBackend(
         room="Kinderzimmer",
         seed_ip=None,
-        discover=lambda timeout, allow_network_scan: {kids, living},
+        discover=lambda **kwargs: {kids, living},
         soco_factory=lambda ip: zones[ip],
     )
     assert backend.resolve().player_ip == "192.0.2.10"
@@ -585,3 +602,45 @@ def test_other_art_goes_through_the_restricted_fetcher(kids):
     # not trusted: it goes through the fetcher and its address checks.
     with pytest.raises(CommandRejected):
         backend.fetch_art("http://lan.example:1400/getaa")
+
+
+# -- finding rooms --------------------------------------------------------------------
+
+
+def test_find_rooms_lists_visible_rooms_once(kids, living):
+    from muckebox.sonos.soco_backend import find_rooms
+
+    partner = FakeZone("Kinderzimmer", "192.0.2.12", "RINCON_000000000002001400", visible=False)
+    zones = household(kids, living, partner, groups=[(living, living, kids, partner)])
+    rooms = find_rooms(
+        "192.0.2.11", soco_factory=lambda ip: zones[ip], resolve_host=lambda host: host
+    )
+    assert [(r.name, r.uid, r.ip, r.grouped) for r in rooms] == [
+        ("Kinderzimmer", kids.uid, "192.0.2.10", True),
+        ("Wohnzimmer", living.uid, "192.0.2.11", True),
+    ]
+
+
+def test_find_rooms_by_discovery_scans_gently(kids):
+    from muckebox.sonos.soco_backend import SCAN_THREADS, find_rooms
+
+    zones = household(kids)
+    seen = {}
+
+    def discover(**kwargs):
+        seen.update(kwargs)
+        return {kids}
+
+    rooms = find_rooms(None, soco_factory=lambda ip: zones[ip], discover=discover)
+    assert [r.name for r in rooms] == ["Kinderzimmer"]
+    assert seen["allow_network_scan"] is True
+    assert seen["max_threads"] == SCAN_THREADS
+
+
+def test_find_rooms_with_an_unreachable_seed(kids):
+    from muckebox.sonos.soco_backend import find_rooms
+
+    zones = household(kids)
+    switch_off(kids)
+    with pytest.raises(SonosUnreachable):
+        find_rooms("192.0.2.10", soco_factory=lambda ip: zones[ip], resolve_host=lambda h: h)

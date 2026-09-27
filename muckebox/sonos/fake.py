@@ -13,8 +13,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from . import routing
-from .errors import ActionNotAvailable, SonosError, SonosUnreachable
-from .model import Favorite, FavoriteRef, Playback, RoomInfo, Route, ShareLinkRef
+from .errors import ActionNotAvailable, RoomNotFound, SonosError, SonosUnreachable
+from .model import Favorite, FavoriteRef, Playback, RoomChoice, RoomInfo, Route, ShareLinkRef
 
 _DIDL = (
     '<DIDL-Lite xmlns:dc="http://purl.org/dc/elements/1.1/" '
@@ -39,6 +39,10 @@ _DEMO_FAVORITES = [
      "object.item.audioItem.audioBook", (244, 162, 97)),
     ("Fernseher", "TV", "x-sonos-htastream:RINCON_000000000000001400:spdif", "", (120, 120, 120)),
 ]  # fmt: skip
+
+
+def _fake_uid(index: int) -> str:
+    return f"RINCON_{index:012d}01400"
 
 
 def demo_favorites() -> list[Favorite]:
@@ -71,6 +75,8 @@ class FakeSonos:
     """Behaves like one speaker. Tests can inject failures and inspect calls."""
 
     room_name: str = "Kinderzimmer"
+    #: The rooms of the simulated household.
+    rooms: list[str] = field(default_factory=lambda: ["Kinderzimmer", "Wohnzimmer"])
     volume: int = 10
     favorites: list[Favorite] = field(default_factory=demo_favorites)
     reachable: bool = True
@@ -101,12 +107,23 @@ class FakeSonos:
 
     def resolve(self) -> RoomInfo:
         self._enter("resolve")
+        if self.room_name not in self.rooms:
+            raise RoomNotFound(f"room {self.room_name!r} not found; rooms: {', '.join(self.rooms)}")
+        index = self.rooms.index(self.room_name)
         return RoomInfo(
             name=self.room_name,
-            player_ip="192.0.2.10",
-            coordinator_ip="192.0.2.10",
-            coordinator_uid="RINCON_000000000000001400",
+            player_ip=f"192.0.2.{10 + index}",
+            coordinator_ip=f"192.0.2.{10 + index}",
+            coordinator_uid=_fake_uid(index),
+            player_uid=_fake_uid(index),
         )
+
+    def find_rooms(self, seed_ip: str | None = None) -> list[RoomChoice]:
+        self._enter("find_rooms", seed_ip)
+        return [
+            RoomChoice(name=name, uid=_fake_uid(index), ip=f"192.0.2.{10 + index}")
+            for index, name in enumerate(self.rooms)
+        ]
 
     def list_favorites(self) -> list[Favorite]:
         self._enter("list_favorites")
