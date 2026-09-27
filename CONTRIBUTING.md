@@ -52,13 +52,14 @@ python -m playwright install webkit chromium   # optional: browser tests
 Run Muckebox without a speaker (a simulated one with demo favorites):
 
 ```sh
-MUCKEBOX_FAKE_SONOS=1 SONOS_IP=192.0.2.10 DATA_DIR=./data ADMIN_PIN=... python -m muckebox
+MUCKEBOX_FAKE_SONOS=1 DATA_DIR=./data python -m muckebox
 ```
 
-Replace `...` with a PIN of your choice (at least 4 characters). Add
-`LISTEN=localhost` to keep it reachable from this computer only. Then open
-<http://localhost:8484/> (kids view) and <http://localhost:8484/admin>
-(parents' page).
+Add `LISTEN=localhost` to keep it reachable from this computer only. The log
+shows the PIN for the first login. Open <http://localhost:8484/admin>
+(parents' page), log in and choose a room of the simulated household
+("Kinderzimmer" or "Wohnzimmer"); the kids view is at
+<http://localhost:8484/>.
 
 ## Checks
 

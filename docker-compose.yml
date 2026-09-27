@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
 # Muckebox on a NAS or any Docker host. See README.md ("Installation").
-# Replace the example values below before the first start, and keep a copy
-# of this file when you update Muckebox: updates replace it.
+# Set "user:" below before the first start. Room, volume limit and PIN are
+# set on the parents' page (/admin) and saved in ./data; on the first start
+# the log shows a PIN for the first login.
 
 services:
   muckebox:
@@ -14,10 +15,11 @@ services:
     init: true
 
     # Host networking is needed because
-    # - finding the speakers by room name uses multicast (SSDP), which does
-    #   not pass through Docker's bridge network, and
+    # - the room search on the parents' page uses multicast (SSDP), which
+    #   does not pass through Docker's bridge network, and
     # - the tablets reach Muckebox directly on the host's address and PORT.
-    # With SONOS_IP set, a bridge network with "ports:" would also work.
+    # If you always enter a speaker's IP address on the parents' page, a
+    # bridge network with "ports:" would also work.
     network_mode: host
 
     # The user and group that own the data folder on the host.
@@ -26,17 +28,11 @@ services:
     user: "1026:100"
 
     environment:
-      # Room name as shown in the Sonos app.
-      SONOS_ROOM: "Kids room"
-      # Only if the speakers are in another VLAN: the IP address of a Sonos
-      # speaker (best the kids room's own). Remove the "#" to use it.
-      # SONOS_IP: "192.0.2.10"
-      # Highest volume the kids can reach (1-100) and the step per tap.
-      MAX_VOLUME: "25"
-      VOLUME_STEP: "3"
-      # PIN for the parents' page (/admin). Without it the page stays locked.
-      ADMIN_PIN: "change-me"
       PORT: "8484"
+      # Where Muckebox can be reached: all (the whole network, the default),
+      # localhost (this computer only) or one IPv4 address of this host.
+      # Remove the "#" to use it.
+      # LISTEN: "all"
       TZ: "Europe/Berlin"
 
     volumes:
