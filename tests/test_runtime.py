@@ -8,6 +8,7 @@ import time
 import pytest
 
 from muckebox.library import Library, favorite_source, sharelink_source
+from muckebox.localtime import ZoneResolver
 from muckebox.runtime.breaker import CircuitBreaker
 from muckebox.runtime.clock import FakeClock
 from muckebox.runtime.lanes import InlineLane, Lane
@@ -46,9 +47,9 @@ def make_runtime(tmp_path, household, library, clock, make_store):
     """A runtime for ``room`` (None: not set up yet); inline lanes unless ``threaded``."""
 
     def make(room="Kinderzimmer", *, threaded=False):
-        options = {}
+        options = {"zones": ZoneResolver({"TZ": "Europe/Berlin"})}
         if not threaded:
-            options = {
+            options |= {
                 "clock": clock,
                 "lane_factory": lambda name, idle, interval: InlineLane(name),
             }
@@ -215,7 +216,7 @@ def test_first_poll_resolves_the_room(runtime):
     doc = runtime.state_document()
     assert doc["sonos"]["status"] == "ok"
     assert doc["sonos"]["room"] == "Kinderzimmer"
-    assert doc["volume"] == {"value": None, "max": 25, "step": 3}
+    assert doc["volume"] == {"value": None, "max": 25, "limit": 25, "step": 3}
     assert doc["api"] == 1
 
 
@@ -808,3 +809,189 @@ def test_guard_keeps_the_limit_while_settings_json_is_broken(runtime, fake, tmp_
     fake.volume = 90
     runtime.poll_volume()
     assert fake.volume == 25
+
+
+# -- usage times, override and sleep timer -----------------------------------------------
+
+from datetime import datetime as _datetime  # noqa: E402
+from zoneinfo import ZoneInfo  # noqa: E402
+
+from muckebox.runtime.timekeeper import Refused  # noqa: E402
+
+BERLIN = ZoneInfo("Europe/Berlin")
+DAILY = {
+    "enabled": True,
+    "fade_minutes": 10,
+    "days": {
+        day: {"from": "07:00", "to": "19:00"}
+        for day in ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+    },
+}
+
+
+def at(clock, text):
+    """Set the wall clock to a local Berlin time (2026-09-28 is a Monday)."""
+    clock.set_time(_datetime.fromisoformat(text).replace(tzinfo=BERLIN).timestamp())
+
+
+@pytest.fixture
+def evening(runtime, fake, library, clock):
+    """Kids listening to a Muckebox tile shortly before the end of the usage time."""
+    runtime.store.set_schedule(DAILY)
+    at(clock, "2026-09-28 18:40")
+    tile = add_favorite(library, fake, 0)
+    runtime.play_tile(tile.id)
+    fake.volume = 20
+    runtime.poll_volume()
+    return tile
+
+
+def test_the_fade_lowers_the_volume_step_by_step(runtime, fake, clock, evening):
+    at(clock, "2026-09-28 18:55")  # halfway through the fade
+    runtime.poll_volume()
+    assert fake.volume == 12  # 20 x (1 - 0.8 / 2)
+    doc = runtime.state_document()
+    assert doc["schedule"]["phase"] == "fading"
+    assert (doc["volume"]["max"], doc["volume"]["limit"]) == (25, 12)
+    assert runtime.status()["volume_guard"]["corrections"] == 0  # fading is no correction
+    assert runtime.change_volume("up")["value"] == 12  # "louder" stops at the fade
+    at(clock, "2026-09-28 18:59:30")
+    runtime.poll_volume()
+    assert fake.volume == 5
+
+
+def test_the_end_pauses_once_and_restores_the_volume(runtime, fake, clock, evening):
+    at(clock, "2026-09-28 18:58")
+    runtime.poll_volume()
+    at(clock, "2026-09-28 19:00:10")
+    runtime.poll_transport()
+    assert fake.state == "paused"
+    runtime.poll_transport()  # confirmed: the volume from before the fade comes back
+    assert fake.volume == 20
+    doc = runtime.state_document()
+    assert doc["schedule"]["phase"] == "closed"
+    assert doc["playback"]["can_next"] is False
+    fake.state = "playing"  # an adult starts music from the Sonos app
+    at(clock, "2026-09-28 19:05")
+    runtime.poll_transport()
+    assert fake.state == "playing"  # left alone
+
+
+def test_bedtime_allows_only_pause_and_quieter(runtime, fake, library, clock, evening):
+    at(clock, "2026-09-28 19:00:10")
+    for command in (
+        lambda: runtime.play_tile(evening.id),
+        lambda: runtime.change_volume("up"),
+        lambda: runtime.transport("next"),
+    ):
+        with pytest.raises(Refused) as info:
+            command()
+        assert info.value.code == "bedtime"
+    assert runtime.transport("toggle")["state"] == "paused"  # pausing is fine
+    with pytest.raises(Refused):
+        runtime.transport("toggle")  # playing again is not
+    assert runtime.change_volume("down")["value"] == 17
+
+
+def test_a_restart_just_after_the_end_still_pauses(make_runtime, fake, library, clock, evening):
+    at(clock, "2026-09-28 19:05")
+    restarted = make_runtime()
+    restarted.poll_transport()
+    assert fake.state == "paused"
+
+
+def test_long_after_the_end_nothing_is_paused(make_runtime, fake, clock, evening):
+    at(clock, "2026-09-28 19:20")
+    restarted = make_runtime()
+    restarted.poll_transport()
+    assert fake.state == "playing"
+
+
+def test_a_grouped_room_with_other_music_is_only_faded(runtime, fake, clock, evening):
+    fake.media_uri, fake.queue = "x-sonosapi-stream:other", []  # the living room's radio
+    runtime.poll_transport()
+    runtime.state.update(sonos={"status": "ok", "room": "Kinderzimmer", "grouped": True})
+    at(clock, "2026-09-28 19:00:10")
+    runtime.poll_transport()
+    assert fake.state == "playing"  # pausing would stop the living room too
+    runtime.poll_transport()
+    assert fake.state == "playing"
+
+
+def test_transitioning_is_paused_on_the_next_poll(runtime, fake, clock, evening):
+    at(clock, "2026-09-28 19:00:10")
+    fake.state = "transitioning"  # a pause may not take effect yet
+    runtime.poll_transport()
+    fake.state = "playing"
+    runtime.poll_transport()  # not given up: tried again
+    assert fake.state == "paused"
+
+
+def test_an_override_opens_and_ends_with_a_fade_again(runtime, fake, clock, evening):
+    at(clock, "2026-09-28 19:00:10")
+    runtime.poll_transport()
+    runtime.poll_transport()
+    runtime.keeper.override(minutes=15)
+    assert runtime.play_tile(evening.id) == "resumed"
+    assert runtime.state_document()["schedule"]["phase"] == "open"
+    at(clock, "2026-09-28 19:16")
+    assert runtime.state_document()["schedule"]["phase"] == "closed"
+    runtime.poll_transport()
+    assert fake.state == "paused"  # the override's own end
+
+
+def test_override_needs_a_schedule_or_a_sleep_lock(runtime):
+    with pytest.raises(Refused) as info:
+        runtime.keeper.override(minutes=15)
+    assert info.value.code == "schedule_off"
+
+
+def test_sleep_timer_fades_pauses_and_locks_until_morning(runtime, fake, library, clock):
+    runtime.store.set_sleep_timer({"enabled": True, "minutes": 30, "wake": "07:00"})
+    at(clock, "2026-09-28 18:00")
+    tile = add_favorite(library, fake, 0)
+    runtime.play_tile(tile.id)
+    fake.volume = 20
+    sleep = runtime.keeper.start_sleep_timer()
+    assert runtime.state_document()["sleep_timer"]["ends_at"] == int(sleep.ends_at)
+    at(clock, "2026-09-28 18:25")  # the last 10 minutes fade
+    runtime.poll_volume()
+    assert fake.volume < 20
+    at(clock, "2026-09-28 18:30:05")
+    runtime.poll_transport()
+    assert fake.state == "paused"
+    with pytest.raises(Refused):
+        runtime.play_tile(tile.id)
+    at(clock, "2026-09-29 06:59")
+    assert runtime.state_document()["schedule"]["phase"] == "closed"
+    at(clock, "2026-09-29 07:00:01")
+    assert runtime.state_document()["schedule"]["phase"] == "off"
+
+
+def test_a_parent_ends_the_sleep_lock(runtime, fake, library, clock):
+    runtime.store.set_sleep_timer({"enabled": True, "minutes": 5})
+    at(clock, "2026-09-28 18:00")
+    runtime.keeper.start_sleep_timer()
+    at(clock, "2026-09-28 18:10")
+    assert runtime.state_document()["schedule"]["phase"] == "closed"
+    runtime.keeper.override(minutes=30)
+    tile = add_favorite(library, fake, 0)
+    assert runtime.play_tile(tile.id) == "accepted"
+
+
+def test_sleep_timer_rules(runtime, clock):
+    with pytest.raises(Refused) as info:
+        runtime.keeper.start_sleep_timer()
+    assert info.value.code == "sleep_timer_off"
+    runtime.store.set_sleep_timer({"enabled": True, "minutes": 30})
+    runtime.keeper.start_sleep_timer()
+    runtime.keeper.cancel_sleep_timer()
+    assert runtime.state_document()["sleep_timer"]["ends_at"] is None
+
+
+def test_timers_survive_a_restart(runtime, make_runtime, clock, evening):
+    at(clock, "2026-09-28 19:05")
+    runtime.keeper.override(minutes=30)
+    runtime.poll_transport()  # saves timers.json
+    restarted = make_runtime()
+    assert restarted.state_document()["schedule"]["phase"] == "open"

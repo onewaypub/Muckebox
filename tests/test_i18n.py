@@ -78,7 +78,7 @@ def test_every_error_class_has_a_text():
 
 
 def test_every_literal_error_code_in_the_code_has_a_text():
-    pattern = re.compile(r'(?:ApiError\(\d+, |Unavailable\(|SettingsError\()"([a-z_]+)"')
+    pattern = re.compile(r'(?:ApiError\(\d+, |Unavailable\(|SettingsError\(|Refused\()"([a-z_]+)"')
     codes = {
         code
         for path in PACKAGE.rglob("*.py")

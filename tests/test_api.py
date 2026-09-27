@@ -130,7 +130,7 @@ def test_transport(client, connected):
 def test_volume(client, connected, fake_sonos):
     fake_sonos.volume = 23
     response = client.post("/api/volume/up", headers=POST)
-    assert response.get_json()["volume"] == {"value": 25, "max": 25, "step": 3}
+    assert response.get_json()["volume"] == {"value": 25, "max": 25, "limit": 25, "step": 3}
     assert client.post("/api/volume/sideways", headers=POST).status_code == 404
     fake_sonos.fail_next["get_volume"] = SonosUnreachable()
     failed = client.post("/api/volume/down", headers=POST)

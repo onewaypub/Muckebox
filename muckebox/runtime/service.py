@@ -49,6 +49,8 @@ from .breaker import CircuitBreaker
 from .clock import Clock, SystemClock
 from .lanes import Lane
 from .state import StateCache
+from .timekeeper import TimeKeeper
+from .timers import TimersFile
 from .volume_guard import VolumeGuard
 
 log = logging.getLogger(__name__)
@@ -115,9 +117,15 @@ RoomFinder = Callable[["str | None"], list[RoomChoice]]
 class RoomSession:
     """Everything that belongs to the chosen room."""
 
-    def __init__(self, backend: SonosBackend, max_volume: Callable[[], int], clock: Clock) -> None:
+    def __init__(
+        self,
+        backend: SonosBackend,
+        max_volume: Callable[[], int],
+        clock: Clock,
+        soft_limit: Callable[[int], int | None] | None = None,
+    ) -> None:
         self.backend = backend
-        self.guard = VolumeGuard(backend, max_volume, clock)
+        self.guard = VolumeGuard(backend, max_volume, clock, soft_limit)
         self.transport_breaker = CircuitBreaker(clock, min_cooldown=2, max_cooldown=30)
         # The guard must never pause for long, so its breaker caps at 5 s.
         self.volume_breaker = CircuitBreaker(clock, min_cooldown=1, max_cooldown=5)
@@ -148,6 +156,9 @@ class Runtime:
         self.clock = clock or SystemClock()
         self.policy = policy or CommandPolicy()
         self.zones = zones or ZoneResolver()
+        self.timers = TimersFile(data_dir / "timers.json")
+        self.keeper = TimeKeeper(store, self.timers, self.clock, self.zones)
+        self._pause_sent: float | None = None
         self.transport_lane = lane_factory(
             "transport", self.poll_transport, TRANSPORT_POLL_INTERVAL
         )
@@ -182,11 +193,7 @@ class Runtime:
             self._room_uid = current.room_uid
             self._now_playing = self._load_now_playing(current.room_uid)
             self._install(
-                RoomSession(
-                    backend_factory(current.room, current.room_uid, current.seed_ip),
-                    self.max_volume,
-                    self.clock,
-                ),
+                self._new_session(backend_factory(current.room, current.room_uid, current.seed_ip)),
                 current.room,
             )
 
@@ -206,6 +213,15 @@ class Runtime:
         deadline = self.clock.monotonic() + timeout
         for lane in lanes:
             lane.join(deadline - self.clock.monotonic())
+        self.timers.save()
+
+    def _new_session(self, backend: SonosBackend) -> RoomSession:
+        return RoomSession(backend, self.max_volume, self.clock, self.keeper.soft_limit)
+
+    def volume_limit(self) -> int:
+        """The limit right now: the parents' maximum, lower while fading."""
+        soft = self.keeper.current_limit()
+        return self.max_volume() if soft is None else min(self.max_volume(), soft)
 
     def max_volume(self) -> int:
         return self.store.current().max_volume
@@ -238,6 +254,9 @@ class Runtime:
         actions = set(data["actions"])
         playing = playback["state"] in ("playing", "transitioning")
         volume = data["volume"]
+        times = self.keeper.document()
+        if times["schedule"]["phase"] == "closed":
+            actions = set()  # only pause stays possible, and only while playing
         return {
             "ok": True,
             "api": API_VERSION,
@@ -255,10 +274,12 @@ class Runtime:
             "volume": {
                 "value": volume,
                 "max": self.max_volume(),
+                "limit": self.volume_limit(),
                 "step": self.volume_step(),
             },
             "pending": data["pending"],
             "last_error": last_error,
+            **times,
         }
 
     # -- commands from the kids view ----------------------------------------
@@ -266,7 +287,7 @@ class Runtime:
     def play_tile(self, tile_id: str) -> str:
         """Start a tile. Returns "accepted", "resumed" or "noop"."""
         tile = self.library.get(tile_id)  # raises TileNotFound
-        session = self._check_available("play")
+        session = self._check_available("play_tile")
         playback = self.state.get("playback")
         if playback["tile_id"] == tile.id:
             if playback["state"] in ("playing", "transitioning"):
@@ -280,11 +301,11 @@ class Runtime:
     def transport(self, action: str) -> dict[str, Any]:
         if action not in (*TRANSPORT_ACTIONS, "toggle"):
             raise ValueError(action)
-        session = self._check_available(action)
         playing = self.state.get("playback")["state"] in ("playing", "transitioning")
         if action == "toggle":
             action = "pause" if playing else "play"
-        elif (action == "pause" and not playing) or (action == "play" and playing):
+        session = self._check_available(action)
+        if (action == "pause" and not playing) or (action == "play" and playing):
             # Already done: a double tap must not undo the first tap.
             return self.state_document()["playback"]
         future = self._submit_exclusive(lambda: self._transport_job(session, action), pending=None)
@@ -294,7 +315,7 @@ class Runtime:
     def change_volume(self, direction: str) -> dict[str, Any]:
         if direction not in ("up", "down"):
             raise ValueError(direction)
-        session = self._check_available("volume")
+        session = self._check_available(f"volume_{direction}")
         with self._volume_lock:
             # One tap at a time: taps must not pile up while the speaker is slow.
             if self.volume_lane.busy:
@@ -405,9 +426,7 @@ class Runtime:
         if not self._search_lock.acquire(blocking=False):
             raise Busy()
         try:
-            session = RoomSession(
-                self.backend_factory(room, uid, seed_ip), self.max_volume, self.clock
-            )
+            session = self._new_session(self.backend_factory(room, uid, seed_ip))
             future = self.setup_lane.submit(lambda: self._test_room(session))
             info = self._wait(future, SETUP_WAIT)
         finally:
@@ -465,15 +484,59 @@ class Runtime:
 
     def poll_transport(self) -> None:
         """Idle task of the transport lane."""
+        self.keeper.tidy()
+        self.timers.save()  # here, never in a web request or under a lock
         session = self._session
         if session is None or not session.transport_breaker.allow():
             return
         try:
             self._ensure_room(session)
-            self._refresh_playback(session)
+            playback = self._refresh_playback(session)
+            self._enforce_time(session, playback)
             session.transport_breaker.success()
         except SonosError as exc:
             self._on_error(session, exc)
+
+    def _enforce_time(self, session: RoomSession, playback: Playback) -> None:
+        """Pause once at the end of the usage time or the sleep timer."""
+        end = self.keeper.due_pause()
+        if end is None or not self._current(session):
+            return
+        if playback.state in ("playing", "transitioning"):
+            sonos, shown = self.state.get("sonos"), self.state.get("playback")
+            if sonos.get("grouped") and not shown["tile_id"]:
+                # Pausing would stop the whole group (e.g. the living room too):
+                # leave it; the kids room itself has been faded down.
+                log.info("Usage time over; the room plays in a group, so it was only faded")
+                self.keeper.mark_done(end)
+                return
+            if self._pause_sent != end:
+                log.info("Usage time over: pausing")
+                self._pause_sent = end
+            try:
+                session.backend.transport("pause")
+            except ActionNotAvailable:
+                log.debug("Pause not available yet; trying again")
+            return  # confirmed by the next poll
+        if playback.state == "unknown":
+            return
+        volume = self.keeper.mark_done(end)
+        if volume is not None:
+            self._restore_volume(session, volume)
+
+    def _restore_volume(self, session: RoomSession, volume: int) -> None:
+        """After the pause: back to the volume before the fade, for the next morning."""
+        target = min(volume, self.max_volume())
+
+        def job() -> None:
+            try:
+                session.backend.set_volume(target)
+            except SonosError as exc:
+                log.info("Could not restore the volume: %s", exc)
+                return
+            self._publish(session, volume=target)
+
+        self.volume_lane.submit(job)
 
     def poll_volume(self) -> None:
         """Idle task of the volume lane: the volume guard."""
@@ -670,6 +733,7 @@ class Runtime:
         if session.transport_breaker.is_open:
             status = self.state.get("sonos").get("status")
             raise Unavailable(status or "sonos_unreachable", session.transport_breaker.retry_in())
+        self.keeper.check(command)
         self.policy.check(command)
         return session
 

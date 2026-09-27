@@ -497,7 +497,12 @@ def test_volume_settings_apply_at_once(admin, services):
     )
     assert response.status_code == 200
     assert response.get_json()["settings"]["max_volume"] == 18
-    assert services.runtime.state_document()["volume"] == {"value": None, "max": 18, "step": 2}
+    assert services.runtime.state_document()["volume"] == {
+        "value": None,
+        "max": 18,
+        "limit": 18,
+        "step": 2,
+    }
 
 
 @pytest.mark.parametrize(

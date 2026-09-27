@@ -24,13 +24,24 @@ class VolumeGuard:
     """Reads the room player's volume and sets it back if it is too high.
 
     ``step()`` runs about once per second on the volume lane. The limit is
-    read from ``max_volume()`` on every step, so a later night mode can lower
-    it at runtime.
+    read from ``max_volume()`` on every step, so it applies at once when the
+    parents change it.
+
+    ``soft_limit(volume)`` may lower it further for a while (the fade before
+    the end of the usage time). Lowering to a soft limit is not a correction:
+    it is neither counted nor logged as one.
     """
 
-    def __init__(self, backend: SonosBackend, max_volume: Callable[[], int], clock: Clock) -> None:
+    def __init__(
+        self,
+        backend: SonosBackend,
+        max_volume: Callable[[], int],
+        clock: Clock,
+        soft_limit: Callable[[int], int | None] | None = None,
+    ) -> None:
         self._backend = backend
         self._max_volume = max_volume
+        self._soft_limit = soft_limit
         self._clock = clock
         self._recent: deque[float] = deque()
         self.corrections = 0
@@ -44,22 +55,30 @@ class VolumeGuard:
 
     def on_volume_observed(self, volume: int) -> int:
         """Handle a volume reading from any source (poll now, events later)."""
-        limit = self._max_volume()
+        hard = self._max_volume()
+        limit = self._limit(volume, hard)
         if volume > limit:
             self._backend.set_volume(limit)
-            self._record_correction(volume, limit)
+            if volume > hard:
+                self._record_correction(volume, hard)
+            else:
+                log.debug("Fading: volume %d lowered to %d", volume, limit)
             volume = limit
         else:
             self._update_fight(self._clock.monotonic())
         self.last_volume = volume
         return volume
 
+    def _limit(self, volume: int, hard: int) -> int:
+        soft = self._soft_limit(volume) if self._soft_limit else None
+        return hard if soft is None else min(hard, soft)
+
     def change(self, direction: str, step: int) -> int:
         """Louder/quieter from the kids view: absolute, clamped, never over the limit."""
         if direction not in ("up", "down"):
             raise ValueError("direction must be 'up' or 'down'")
-        limit = self._max_volume()
         current = self._backend.get_volume()
+        limit = self._limit(current, self._max_volume())
         target = current + step if direction == "up" else current - step
         target = max(0, min(limit, target))
         if target != current:

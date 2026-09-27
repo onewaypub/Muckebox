@@ -204,6 +204,9 @@ MESSAGES: dict[str, str] = {
     "error.pin_invalid": (
         "Die PIN darf höchstens 64 Zeichen lang sein und keine Steuerzeichen enthalten."
     ),
+    "error.bedtime": "Jetzt ist Schlafenszeit.",
+    "error.schedule_off": "Es sind keine Nutzungszeiten eingestellt.",
+    "error.sleep_timer_off": "Der Einschlaf-Timer ist ausgeschaltet.",
     "error.schedule_invalid": "Die Nutzungszeiten sind ungültig.",
     "error.schedule_order_invalid": (
         "Das Ende muss am selben Tag nach dem Beginn liegen. Für einen langen Abend gibt es "
