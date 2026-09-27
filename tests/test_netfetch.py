@@ -61,6 +61,10 @@ class Breaking(io.RawIOBase):
             return 3
         raise self.exc
 
+    def read1(self, size=-1):
+        buffer = bytearray(3)
+        return bytes(buffer[: self.readinto(buffer)])
+
 
 def make(allow=("example.com",), **kwargs):
     kwargs.setdefault("resolver", Resolver())
@@ -623,3 +627,64 @@ def test_injected_session_is_used_and_closed(http):
     session.close = lambda: closed.append(True)
     fetcher.close()
     assert closed == [True]
+
+
+class Dripping(io.RawIOBase):
+    """A body that arrives one byte per read while the clock advances 1 s each."""
+
+    def __init__(self, clock):
+        self.clock = clock
+
+    def readable(self):
+        return True
+
+    def readinto(self, buffer):
+        self.clock.now += 1.0
+        buffer[:1] = b"x"
+        return 1
+
+    def read1(self, size=-1):
+        buffer = bytearray(1)
+        return bytes(buffer[: self.readinto(buffer)])
+
+
+def test_deadline_stops_a_slowly_dripping_body(http):
+    class Clock:
+        now = 0.0
+
+        def __call__(self):
+            return self.now
+
+    clock = Clock()
+    http.get("https://example.com/", body=Dripping(clock))
+    with pytest.raises(FetchError) as info:
+        make(clock=clock, deadline=5.0).get("https://example.com/", max_bytes=10_000)
+    assert info.value.code == "timeout"
+    assert clock.now <= 7.0  # stopped right after the deadline, not after 64 KiB
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://evil.example\\.example.com/",
+        "https://geo.mu\\sic.example.com/x",
+        "https://exa_mple.com/",
+    ],
+)
+def test_hosts_with_unusual_characters_are_refused(url):
+    with pytest.raises(FetchError) as info:
+        make().get(url, max_bytes=10)
+    assert info.value.code in ("bad_url", "host_not_allowed")
+
+
+def test_host_allowed_only_accepts_plain_names():
+    assert host_allowed("open.example.com", ["example.com"])
+    assert not host_allowed("evil\\.example.com", ["example.com"])
+    assert not host_allowed("ex ample.com", ["example.com"])
+
+
+def test_malformed_redirect_location_is_a_fetch_error(http):
+    http.get("https://example.com/", status_code=302, headers={"Location": "https://["})
+    with pytest.raises(FetchError) as info:
+        make().get("https://example.com/", max_bytes=10)
+    assert info.value.code == "bad_url"
