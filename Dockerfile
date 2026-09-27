@@ -23,7 +23,7 @@ COPY muckebox ./muckebox
 
 # Default user; docker-compose.yml usually overrides it with the NAS user
 # that owns the data folder.
-RUN useradd --system --uid 10001 --no-create-home muckebox \
+RUN useradd --uid 10001 --no-create-home --shell /usr/sbin/nologin muckebox \
  && mkdir -p /data && chown 10001 /data
 USER 10001
 
