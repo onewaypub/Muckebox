@@ -773,3 +773,23 @@ def test_mute_uses_the_rooms_own_player(kids, living):
     assert living.renderingControl.calls == []  # never the group coordinator
     name, args, timeout = kids.renderingControl.calls[-1]
     assert (name, args["DesiredMute"], timeout) == ("SetMute", 1, VOLUME_TIMEOUT)
+
+
+def test_a_failure_after_play_never_fails_a_resumed_start(kids):
+    from muckebox.sonos.model import StartAt
+
+    zones = household(kids)
+    kids.contentDirectory.responses["Browse"] = queue_item(TRACK_3)
+    real = kids.avTransport.__getattr__("Seek")
+
+    def seek(args, timeout=None):
+        if dict(args)["Unit"] == "REL_TIME":
+            raise upnp_error(711)
+        return real(args, timeout)
+
+    kids.avTransport.Seek = seek
+    kids.avTransport.errors["GetTransportInfo"] = [requests.exceptions.ReadTimeout()]
+    route = backend_for(zones, seed="192.0.2.10").play_favorite(
+        ALBUM, Route.QUEUE, StartAt(track=3, seconds=760, track_uri=TRACK_3)
+    )
+    assert route is Route.QUEUE

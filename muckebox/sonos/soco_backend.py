@@ -587,8 +587,13 @@ class SocoBackend:
         # try before Play, and else once more when it plays.
         seek_later = seconds and not self._seek_time(coordinator, seconds)
         self._play(coordinator)
-        if seek_later and self._wait_until_playing(coordinator):
-            self._seek_time(coordinator, seconds)
+        if seek_later:
+            # The album plays already: nothing here may fail the start.
+            try:
+                if self._wait_until_playing(coordinator):
+                    self._seek_time(coordinator, seconds)
+            except SonosError as exc:
+                log.info("Resume: could not seek after starting (%s)", exc.code)
 
     def _resume_point(self, coordinator: Any, first_track: int, start: StartAt) -> tuple[int, int]:
         """Where to resume: the saved track and second, if the queue still has

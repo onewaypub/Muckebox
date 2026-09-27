@@ -47,6 +47,9 @@ class ResumeStore:
         self._saved_version = 0
         self._urgent = False
         self._saved_at = clock.monotonic()
+        #: Tiles set back to the beginning ("Von vorn"): not recorded again
+        #: until they are started anew.
+        self._restarted: set[str] = set()
 
     def get(self, tile_id: str) -> StartAt | None:
         with self._lock:
@@ -64,7 +67,7 @@ class ResumeStore:
             position.track, position.seconds, position.duration, position.track_uri, queue_length
         )
         with self._lock:
-            if self._positions.get(tile_id) == saved:
+            if tile_id in self._restarted or self._positions.get(tile_id) == saved:
                 return
             self._positions[tile_id] = saved
             self._version += 1
@@ -82,6 +85,17 @@ class ResumeStore:
         """Write soon (paused, or another tile starts)."""
         with self._lock:
             self._urgent = True
+
+    def restart(self, tile_id: str) -> None:
+        """ "Von vorn": forget the position and do not record it again until the
+        tile is started anew (it may still be loaded, e.g. paused)."""
+        with self._lock:
+            self._restarted.add(tile_id)
+        self.clear(tile_id)
+
+    def started(self, tile_id: str) -> None:
+        with self._lock:
+            self._restarted.discard(tile_id)
 
     def clear(self, tile_id: str) -> None:
         with self._lock:

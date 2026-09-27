@@ -19,7 +19,6 @@ the old session are dropped, so nothing leaks from one room to the other.
 
 from __future__ import annotations
 
-import contextlib
 import json
 import logging
 import threading
@@ -167,6 +166,10 @@ class Runtime:
         self._pruned_rev: int | None = None
         self.keeper = TimeKeeper(store, self.timers, self.clock, self.zones)
         self.games = Games(store, self.timers, self.keeper, self.clock)
+        self._mute_owner: RoomSession | None = None  # the room a game muted
+        self._muted = False
+        self._dance_owns_music = False
+        self._dance_tile: str | None = None  # a dance tile still starting
         self._pause_sent: float | None = None
         self.transport_lane = lane_factory(
             "transport", self.poll_transport, TRANSPORT_POLL_INTERVAL
@@ -448,9 +451,7 @@ class Runtime:
         finally:
             self._search_lock.release()
         room_uid = info.player_uid or uid
-        old = self._session
-        if old is not None and self.games.end() is not None:
-            self.volume_lane.submit(lambda: self._apply_mute(old, False))
+        self.games.end()  # the watchdog unmutes the room the game muted
         with self._room_lock:
             self.store.set_room(info.name, room_uid, seed_ip)  # raises OSError: nothing changes
             with self._switch_lock:
@@ -557,6 +558,15 @@ class Runtime:
         if state == "paused" and changed:
             self.resume.urgent()
 
+    def restart_tile(self, tile_id: str) -> None:
+        """ "Von vorn": the tile starts from the beginning next time, even if it
+        is the one still loaded (a tap would otherwise just continue it)."""
+        self.resume.restart(tile_id)
+        with self._switch_lock:
+            if self._now_playing is not None and self._now_playing.tile_id == tile_id:
+                self._set_now_playing(None)
+                self.state.update(playback={**self.state.get("playback"), "tile_id": None})
+
     def _prune_positions(self) -> None:
         if self._pruned_rev != self.library.rev:
             self._pruned_rev = self.library.rev
@@ -645,33 +655,72 @@ class Runtime:
         game = self.games.end()
         if game is None or game.id != "freeze_dance":
             return
-        self._request_mute(False)
-        with contextlib.suppress(Unavailable, Busy, Refused):
-            self.transport("pause")  # the dance is over
+        session = self._session
+        if session is None:
+            return
+        # The watchdog unmutes the room the game muted; the pause runs on the
+        # transport lane after a start that may still be under way.
+        self.volume_lane.submit(lambda: self._game_mute_watchdog(session))
+        if self._dance_owns_music:
+            self.transport_lane.submit(lambda: self._pause_after_dance(session))
 
     def game_mute(self, muted: bool) -> None:
         """The freeze dance: stop (mute) or dance on (unmute)."""
         game = self.games.active()
         if game is None or game.id != "freeze_dance":
             raise Refused("game_unavailable")
+        session = self._session
+        if session is None:
+            raise Unavailable("not_configured")
         self.games.mute_until = self.clock.monotonic() + MUTE_LEASE if muted else None
-        self._request_mute(muted)
+        self.volume_lane.submit(lambda: self._apply_mute(session, muted))
 
     def _start_dance_music(self) -> None:
+        """The dance tile, or what plays anyway. Muckebox pauses at the end only
+        music it started itself (never the living room's music in a group)."""
         tile_id = self.store.current().games.dance_tile
-        playing = self.state.get("playback")["state"] in ("playing", "transitioning")
+        shown = self.state.get("playback")
+        grouped = self.state.get("sonos").get("grouped")
+        self._dance_owns_music = False
         if tile_id:
+            self._dance_tile = tile_id  # set first: the start may fail at once
             try:
-                self.play_tile(tile_id)
-                return
+                result = self.play_tile(tile_id)
             except TileNotFound:
-                pass  # removed meanwhile: dance to whatever there is
-        if playing:
+                result = None  # removed meanwhile: dance to whatever there is
+            if result != "accepted":
+                self._dance_tile = None
+            if result is not None:
+                self._dance_owns_music = True
+                if self.games.active() is None:  # the start failed right away
+                    raise Unavailable(self._start_error(tile_id))
+                return
+        if shown["state"] in ("playing", "transitioning"):
+            self._dance_owns_music = not grouped or bool(shown["tile_id"])
             return
-        if self.state.get("playback")["tile_id"]:
+        if shown["tile_id"]:
             self.transport("play")
+            self._dance_owns_music = True
             return
         raise Refused("dance_music_missing")
+
+    def _start_error(self, tile_id: str) -> str:
+        error = self.state.get("last_error")
+        return error["code"] if error and error.get("tile_id") == tile_id else "sonos_error"
+
+    def _dance_start_failed(self, tile_id: str) -> None:
+        """The dance music did not start: end the game (the time comes back);
+        the tablet stops when its next mute is refused."""
+        if tile_id == self._dance_tile and self.games.end() is not None:
+            log.info("Freeze dance ended: its music did not start")
+        self._dance_tile = None
+
+    def _pause_after_dance(self, session: RoomSession) -> None:
+        try:
+            if session.backend.playback().state in ("playing", "transitioning"):
+                session.backend.transport("pause")
+        except SonosError as exc:
+            log.info("Could not pause after the freeze dance: %s", exc)
 
     def _pause_for_game(self) -> None:
         """The quiz and "move like" sound from the tablet: pause the speaker."""
@@ -685,35 +734,52 @@ class Runtime:
         except (Unavailable, Busy, Refused) as exc:
             log.info("Could not pause for the game: %s", exc)
 
-    def _request_mute(self, muted: bool) -> None:
-        session = self._session
-        if session is None:
-            raise Unavailable("not_configured")
-        self.volume_lane.submit(lambda: self._apply_mute(session, muted))
-
-    def _apply_mute(self, session: RoomSession, muted: bool) -> None:
+    def _apply_mute(self, session: RoomSession, muted: bool) -> bool:
+        if muted:
+            with self.timers.read() as state:
+                flagged = state.game_mute
+            if not flagged:
+                # Written before muting: if Muckebox dies now, the next start
+                # still unmutes. It stays set until the game is over.
+                with self.timers.change() as state:
+                    state.game_mute = True
+                self.timers.save()
+            self._mute_owner = session
         try:
             session.backend.set_mute(muted)
         except SonosError as exc:
             log.info("Could not %s the speaker: %s", "mute" if muted else "unmute", exc)
-            return
-        with self.timers.change() as state:
-            state.game_mute = muted
+            return False
+        self._muted = muted
+        return True
 
     def _game_mute_watchdog(self, session: RoomSession) -> None:
         """Unmute when the freeze dance stops renewing its mute (tablet gone,
-        game over, bedtime): the speaker must never stay silent by accident."""
+        game over, bedtime, another room): the speaker must never stay silent
+        by accident. It unmutes the room the game muted, until that works."""
         with self.timers.read() as state:
-            muted = state.game_mute
-        if not muted:
+            flagged = state.game_mute
+        if not flagged:
             return
-        game, lease = self.games.active(), self.games.mute_until
-        dancing = game is not None and game.id == "freeze_dance"
-        leased = lease is not None and self.clock.monotonic() < lease
-        if dancing and leased and self.keeper.phase().allowed:
+        target = self._mute_owner or session
+        game = self.games.active()
+        dancing = (
+            game is not None
+            and game.id == "freeze_dance"
+            and target is session
+            and self.keeper.phase().allowed
+        )
+        if dancing:
+            lease = self.games.mute_until
+            if self._muted and (lease is None or self.clock.monotonic() >= lease):
+                self.games.mute_until = None
+                self._apply_mute(target, False)
             return
-        self.games.mute_until = None
-        self._apply_mute(session, False)
+        if self._apply_mute(target, False):
+            self.games.mute_until = None
+            self._mute_owner = None
+            with self.timers.change() as state:
+                state.game_mute = False
 
     def _ensure_room(self, session: RoomSession, force: bool = False) -> None:
         now = self.clock.monotonic()
@@ -818,6 +884,7 @@ class Runtime:
     def _start_tile(self, session: RoomSession, tile: Tile) -> None:
         try:
             start = self.resume.get(tile.id) if tile.resumes else None
+            self.resume.started(tile.id)
             self.resume.urgent()  # the tile that played before is saved soon
             self._last_play_state = None
             try:
@@ -833,10 +900,12 @@ class Runtime:
                 log.warning("Starting tile %s failed: %s", tile.id, exc)
                 self._on_error(session, exc)
                 self._report_error(session, exc.code, tile.id)
+                self._dance_start_failed(tile.id)
                 return
             except Exception:
                 log.exception("Starting tile %s failed unexpectedly", tile.id)
                 self._report_error(session, "sonos_error", tile.id)
+                self._dance_start_failed(tile.id)
                 return
             # The speaker accepted the start: remember it, whatever happens next.
             with self._switch_lock:

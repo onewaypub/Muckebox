@@ -525,7 +525,7 @@ def restart_tile(tile_id: str):
     """ "Von vorn": forget where the tile stopped."""
     services = _services()
     _library_call(services.library.get, tile_id)
-    services.runtime.resume.clear(tile_id)
+    services.runtime.restart_tile(tile_id)
     return _tiles_response()
 
 

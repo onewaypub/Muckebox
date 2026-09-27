@@ -38,6 +38,8 @@ ROUND_SECONDS = {
 MIN_GRANT = 60
 #: How long a mute from the freeze dance lasts without being renewed.
 MUTE_LEASE = 12.0
+#: A game that ran out can still be ended this long afterwards.
+END_GRACE = 60.0
 
 
 class UnknownGame(Exception):
@@ -66,6 +68,9 @@ class Games:
         self.clock = clock
         self._lock = threading.Lock()
         self._active: ActiveGame | None = None
+        #: A game that ran out; the tablet may still end it for a short while
+        #: (e.g. the freeze dance, whose end also stops its music).
+        self._expired: ActiveGame | None = None
         #: Monotonic time until which the freeze dance may keep the speaker muted.
         self.mute_until: float | None = None
 
@@ -96,36 +101,38 @@ class Games:
         with self._lock:
             game = self._active
             if game is not None and self.clock.time() >= game.ends_at:
-                self._active = game = None  # the tablet never said goodbye
+                self._expired, self._active, game = game, None, None
             return game
 
     def check(self, game_id: str) -> tuple[int, float]:
         """Level and granted seconds if ``game_id`` may start now; raises otherwise."""
         if game_id not in GAMES:
             raise UnknownGame(game_id)
-        settings = self.store.current().games
-        setting = settings.items[game_id]
+        setting = self.store.current().games.items[game_id]
         if not setting.enabled:
             raise Refused("game_unavailable")
         if game_id not in COUNTED:
             return setting.level, 0.0
+        if self.active() is not None:
+            raise Refused("game_running")
+        return setting.level, self._grant(game_id, setting.level)
+
+    def _grant(self, game_id: str, level: int) -> float:
         now = self.clock.time()
         phase = self.keeper.phase(now)
         if not phase.allowed:
             raise Refused("bedtime")
-        if self.active() is not None:
-            raise Refused("game_running")
         remaining = self.remaining()
         if remaining < MIN_GRANT:
             raise Refused("games_limit_reached")
-        grant = min(ROUND_SECONDS[game_id][setting.level - 1], remaining)
+        grant = min(ROUND_SECONDS[game_id][level - 1], remaining)
         # Games end before the music starts to fade for bedtime.
         stop = phase.fade_from if phase.fade_from is not None else phase.ends_at
         if stop is not None:
             grant = min(grant, stop - now)
         if grant < MIN_GRANT:
             raise Refused("game_unavailable")
-        return setting.level, grant
+        return grant
 
     def start(self, game_id: str) -> ActiveGame:
         level, grant = self.check(game_id)
@@ -138,9 +145,14 @@ class Games:
         return game
 
     def end(self) -> ActiveGame | None:
-        """End the running game; the time it did not use is given back."""
+        """End the running game (or one that ran out a moment ago); the time
+        it did not use is given back."""
+        now = self.clock.time()
         with self._lock:
             game, self._active = self._active, None
+            expired, self._expired = self._expired, None
+            if game is None and expired is not None and now <= expired.ends_at + END_GRACE:
+                game = expired
         if game is None:
             return None
         unused = game.ends_at - max(self.clock.time(), game.started_at)
@@ -154,7 +166,6 @@ class Games:
     def document(self) -> dict[str, Any]:
         """For /api/state; changes only when a game starts or ends, or at bedtime."""
         settings = self.store.current().games
-        phase = self.keeper.phase()
         remaining = int(self.remaining())
         active = self.active()
         items = []
@@ -162,10 +173,15 @@ class Games:
             setting = settings.items[game_id]
             if not setting.enabled:
                 continue
+            available = True
             if game_id in COUNTED:
-                available = phase.allowed and remaining >= MIN_GRANT and active is None
-            else:
-                available = True
+                # The same rule as starting (incl. "not into the bedtime fade"),
+                # so the tablet never offers a game that would be refused.
+                try:
+                    self._grant(game_id, setting.level)
+                except Refused:
+                    available = False
+                available = available and active is None
             items.append({"id": game_id, "level": setting.level, "available": available})
         return {
             "remaining": remaining,
