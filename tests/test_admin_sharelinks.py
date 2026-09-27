@@ -29,7 +29,9 @@ def offline_fetcher(monkeypatch):
     monkeypatch.setattr(
         sharelinks, "fetcher_factory", lambda: Fetcher(resolver=lambda host, port: [PUBLIC_V4])
     )
-    monkeypatch.setattr("muckebox.web.admin._limiter", auth.RateLimiter())
+    login = auth.RateLimiter()
+    monkeypatch.setattr(auth, "login_limiter", login)
+    monkeypatch.setattr(auth, "override_limiter", auth.RateLimiter(share_global_with=login))
 
 
 @pytest.fixture

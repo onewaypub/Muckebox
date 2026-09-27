@@ -28,8 +28,17 @@ Muckebox is designed for a trusted home network:
 
 - It serves plain HTTP and must **not** be exposed to the internet or placed
   behind a public reverse proxy.
-- The kids view has no login: anybody on the home network can start music and
-  change the volume within the configured limit.
+- The kids view has no login: anybody on the home network can do what the
+  kids can: start music, change the volume within the configured limit,
+  start the sleep timer (which locks the tiles until the next morning),
+  start enabled games (using up the day's game time) and, during a freeze
+  dance, mute the kids room for a few seconds at a time. Usage times cannot
+  be changed without the PIN.
+- The kids view's PIN pad (for parents allowing more time) checks the
+  parents' PIN without a login. Failed attempts are counted per device
+  separately from the parents' page, so a kid mashing the pad does not lock
+  the parents out, but both share one total of 20 failed attempts per 15
+  minutes. A correct PIN there only allows more time; it gives no session.
 - The parents' page is protected by a PIN, rate limiting and same-origin
   checks. The PIN is stored as a salted scrypt hash. A copy of
   `settings.json` still lets an attacker try PINs offline, which is quick for
@@ -44,7 +53,8 @@ Muckebox is designed for a trusted home network:
   in with it.
 - Muckebox accepts any host name in requests. A malicious web page opened on
   a device in the home network could use DNS rebinding to reach the kids
-  view's functions (start music, change the volume within the limit). The
+  view's functions (see above), including the PIN pad's rate-limited PIN
+  check. The
   parents' page is not affected: its login cookie is bound to Muckebox's own
   address.
 - Muckebox controls the speakers through the local Sonos UPnP interface,

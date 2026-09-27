@@ -41,11 +41,21 @@ class RateLimiter:
     requests cannot get more guesses than the limits allow.
     """
 
-    def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
+    def __init__(
+        self,
+        clock: Callable[[], float] = time.monotonic,
+        share_global_with: RateLimiter | None = None,
+    ) -> None:
         self._clock = clock
-        self._lock = threading.Lock()
         self._per_client: dict[str, deque[float]] = {}
-        self._global: deque[float] = deque()
+        if share_global_with is None:
+            self._lock = threading.Lock()
+            self._global: deque[float] = deque()
+        else:
+            # Own per-client counts, one total for both: two ways to check the
+            # PIN must not double the guesses an attacker gets.
+            self._lock = share_global_with._lock
+            self._global = share_global_with._global
         self._running: dict[str, int] = {}  # checks in progress per client
         self._pin_version: str | None = None
 
@@ -181,3 +191,10 @@ def require_admin(view: Callable[..., Any]) -> Callable[..., Any]:
         return view(*args, **kwargs)
 
     return wrapper
+
+
+#: Failed PINs on the parents' page (login, PIN change) ...
+login_limiter = RateLimiter()
+#: ... and on the kids tablet's PIN pad: counted per client separately (so a
+#: kid mashing the pad does not lock the parents out), but sharing one total.
+override_limiter = RateLimiter(share_global_with=login_limiter)

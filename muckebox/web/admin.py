@@ -37,7 +37,6 @@ bp = Blueprint("admin", __name__, url_prefix="/api/admin")
 
 SOURCE_URL = "https://github.com/onewaypub/Muckebox"
 _UPLOAD_PATH_RE = re.compile(r"^/api/admin/tiles/[^/]+/cover$")
-_limiter = auth.RateLimiter()
 
 
 def is_upload_path(path: str) -> bool:
@@ -97,7 +96,7 @@ def login():
     pin = _body().get("pin")
     if not isinstance(pin, str):
         raise ApiError(400, "bad_request")
-    auth.login(pin, _limiter)
+    auth.login(pin, auth.login_limiter)
     return jsonify(ok=True, logged_in=True)
 
 
@@ -107,7 +106,7 @@ def change_pin():
     """Set a new PIN. Ends all other sessions; this one stays logged in."""
     body = _body()
     try:
-        checked = auth.check_pin(body.get("current"), _limiter)
+        checked = auth.check_pin(body.get("current"), auth.login_limiter)
     except ApiError as exc:
         if exc.code == "pin_wrong":
             # 403, not 401: the parent is still logged in.
