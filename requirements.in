@@ -1,0 +1,8 @@
+# SPDX-FileCopyrightText: 2026 Muckebox contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Runtime dependencies. Regenerate requirements.txt with scripts/lock.
+# Every package here and its dependencies must be listed in the README's
+# dependency table with its license.
+flask~=3.1
+waitress~=3.0
