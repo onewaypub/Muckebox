@@ -340,6 +340,7 @@ it.
 
 ## Development
 
+Contributions are welcome; please read the [Code of Conduct](CODE_OF_CONDUCT.md).
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the development setup (including a
 demo mode with a simulated speaker) and the checks, and
 [docs/architecture.md](docs/architecture.md) for how Muckebox is built. The
