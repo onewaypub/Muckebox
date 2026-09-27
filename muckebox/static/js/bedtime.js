@@ -25,7 +25,7 @@ const view = {
   close: document.getElementById("pad-close"),
 };
 
-const pad = { pin: "", wrong: 0, lockedUntil: 0, idleTimer: null };
+const pad = { pin: "", wrong: 0, lockedUntil: 0, idleTimer: null, busy: false };
 const moon = { mode: "hidden", timer: null, state: null, held: false };
 let changed = () => {};
 
@@ -90,14 +90,22 @@ async function startSleepTimer() {
   try {
     await post("/api/sleep-timer/start");
   } catch {
-    // Refused (e.g. just turned off): the next poll shows the real state.
+    // Not started (e.g. a Wi-Fi hiccup): show the button again, so that the
+    // kid can try once more; the state itself did not change.
+    moon.mode = moonMode(moon.state);
+    view.smallMoon.dataset.mode = moon.mode;
   }
   changed();
 }
 
 function clock(epoch, zone) {
-  const options = { hour: "2-digit", minute: "2-digit", timeZone: zone || undefined };
-  return new Intl.DateTimeFormat("de-DE", options).format(new Date(epoch * 1000));
+  const options = { hour: "2-digit", minute: "2-digit" };
+  try {
+    return new Intl.DateTimeFormat("de-DE", { ...options, timeZone: zone || undefined }).format(new Date(epoch * 1000));
+  } catch {
+    // A zone name this browser does not know: the tablet's own time instead.
+    return new Intl.DateTimeFormat("de-DE", options).format(new Date(epoch * 1000));
+  }
 }
 
 // A long press, so that kids do not open it by chance; parents hold 3 s.
@@ -108,8 +116,11 @@ function holdToOpen(element) {
     timer = null;
     element.classList.remove("holding");
   };
-  element.addEventListener("pointerdown", () => {
-    if (Date.now() < pad.lockedUntil) return;
+  element.addEventListener("pointerdown", (event) => {
+    cancel();
+    moon.held = false; // a new press: an old hold must not swallow this tap
+    // Only one finger: two small hands on the moon must not open the pad.
+    if (!event.isPrimary || Date.now() < pad.lockedUntil) return;
     element.classList.add("holding");
     timer = setTimeout(() => {
       cancel();
@@ -151,7 +162,7 @@ function press(key) {
 function renderPad() {
   view.dots.textContent = "●".repeat(pad.pin.length) || " ";
   for (const button of view.pad.querySelectorAll("[data-choice]")) {
-    button.disabled = !padReady(pad.pin);
+    button.disabled = pad.busy || !padReady(pad.pin);
   }
 }
 
@@ -161,7 +172,9 @@ function showMessage(text) {
 }
 
 async function submit(choice) {
-  if (!padReady(pad.pin)) return;
+  if (pad.busy || !padReady(pad.pin)) return; // a double tap must not give twice the time
+  pad.busy = true;
+  renderPad();
   const body = choice === "morning" ? { pin: pad.pin, until: "morning" } : { pin: pad.pin, minutes: Number(choice) };
   touch();
   try {
@@ -185,5 +198,8 @@ async function submit(choice) {
       return;
     }
     showMessage(t(error instanceof ApiError ? `error.${error.code}` : "kids.error"));
+  } finally {
+    pad.busy = false;
+    renderPad();
   }
 }

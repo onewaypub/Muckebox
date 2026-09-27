@@ -73,6 +73,7 @@ function renderPicker() {
 
 function closeLayer() {
   if (running) {
+    stopAudio(); // stop talking at once
     running.abort(); // the game's own "finally" closes the layer
     return;
   }
@@ -168,6 +169,7 @@ async function breathing(game, signal) {
   }
   view.stage.replaceChildren(picture("moon", "game-picture night"), dim);
   await speak(t("game.good_night"));
+  aborted(signal); // closed while it was said
   // It stays dark and quiet; a tap anywhere goes back.
   await new Promise((resolve, reject) => {
     view.stage.addEventListener("click", resolve, { once: true });

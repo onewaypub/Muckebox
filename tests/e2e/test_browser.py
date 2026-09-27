@@ -344,7 +344,7 @@ def evening_server(tmp_path):
 
 
 def hold(page, selector, seconds=3.2):
-    page.locator(selector).dispatch_event("pointerdown")
+    page.locator(selector).dispatch_event("pointerdown", {"isPrimary": True, "pointerId": 1})
     page.wait_for_timeout(seconds * 1000)
     page.locator(selector).dispatch_event("pointerup")
 
@@ -528,3 +528,28 @@ def test_breathing_at_bedtime(page, evening_server):
     page.locator("#game-stage").tap()
     expect(page.locator("#game-layer")).to_be_hidden()
     assert "Gute Nacht." in page.evaluate("window.__spoken")
+
+
+def test_a_double_tap_on_the_pin_pad_gives_the_time_once(page, evening_server):
+    page.goto(evening_server.url)
+    hold(page, "#moon")
+    type_pin(page, "2468")
+    choice = page.locator("[data-choice='15']")
+    choice.dispatch_event("click")
+    choice.dispatch_event("click")
+    expect(page.locator("#pin-pad")).to_be_hidden()
+    override = evening_server.runtime.timers.state.override
+    assert override[1] - override[0] == 15 * 60
+
+
+def test_a_failed_sleep_timer_start_can_be_tried_again(page, server):
+    server.store.set_sleep_timer({"enabled": True, "minutes": 30, "wake": "07:00"})
+    page.route("**/api/sleep-timer/start", lambda route: route.abort())
+    page.goto(server.url)
+    moon = page.locator("#small-moon")
+    expect(moon).to_have_attribute("data-mode", "start")
+    moon.tap()
+    expect(moon).to_have_attribute("data-mode", "start")  # not stuck in "running"
+    page.unroute("**/api/sleep-timer/start")
+    moon.tap()
+    expect(moon).to_have_attribute("data-mode", "running")

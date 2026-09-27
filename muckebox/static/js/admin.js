@@ -446,17 +446,19 @@ function renderGamesForm(games) {
     row.querySelector(".game-level").value = String(item.level);
   }
   danceTile = games.dance_tile;
-  renderDanceOptions();
+  renderDanceOptions(false);
 }
 
-function renderDanceOptions() {
+function renderDanceOptions(keepChoice = true) {
   const select = $("dance-tile");
+  // Keep an unsaved choice when only the tile list changed.
+  const chosen = keepChoice && select.options.length ? select.value : danceTile;
   const current = Object.assign(document.createElement("option"), { value: "", textContent: t("admin.dance_current") });
   select.replaceChildren(
     current,
     ...knownTiles.map((tile) => Object.assign(document.createElement("option"), { value: tile.id, textContent: tile.title })),
   );
-  select.value = knownTiles.some((tile) => tile.id === danceTile) ? danceTile : "";
+  select.value = knownTiles.some((tile) => tile.id === chosen) ? chosen : "";
 }
 
 async function loadCredits() {
@@ -554,12 +556,14 @@ function scheduleFromForm() {
 
 // Times are shown in the Muckebox's zone: that is the one the usage times use.
 function clockText(epoch) {
-  return new Intl.DateTimeFormat("de-DE", {
-    timeZone: serverZone || undefined,
-    weekday: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(epoch * 1000));
+  const options = { weekday: "short", hour: "2-digit", minute: "2-digit" };
+  try {
+    return new Intl.DateTimeFormat("de-DE", { ...options, timeZone: serverZone || undefined }).format(
+      new Date(epoch * 1000),
+    );
+  } catch {
+    return new Intl.DateTimeFormat("de-DE", options).format(new Date(epoch * 1000)); // unknown zone name
+  }
 }
 
 function renderScheduleStatus(schedule) {
@@ -574,7 +578,8 @@ function renderScheduleStatus(schedule) {
   if (schedule.override_until) text += ` ${t("admin.override_until", { time: clockText(schedule.override_until) })}`;
   $("schedule-status").textContent = text;
   $("override-buttons").hidden = schedule.phase === "off"; // nothing to release
-  $("override-end").hidden = !schedule.override_until;
+  // While an ended override fades out there is nothing left to end.
+  $("override-end").hidden = !schedule.override_until || schedule.phase === "fading";
 }
 
 async function override(value, button) {

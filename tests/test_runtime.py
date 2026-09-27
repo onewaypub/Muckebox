@@ -1152,3 +1152,11 @@ def test_from_the_start_also_for_the_loaded_album(runtime, fake, library, album,
     clock.advance(11)
     runtime.poll_transport()
     assert runtime.resume.saved(album.id) is not None  # recorded again after the start
+
+
+def test_ending_an_override_inside_the_window_just_drops_it(runtime, clock, evening):
+    at(clock, "2026-09-28 17:00")
+    runtime.keeper.override(minutes=30)
+    phase = runtime.keeper.end_override()
+    assert phase.kind == "open"
+    assert runtime.timers.state.override is None

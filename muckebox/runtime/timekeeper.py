@@ -153,12 +153,22 @@ class TimeKeeper:
         return self.phase(now)
 
     def end_override(self) -> Phase:
-        """End the override: the music fades (the usual fade minutes) and pauses."""
+        """End the override. If that ends the allowed time, the music fades
+        (the usual fade minutes) and then pauses; otherwise it simply goes."""
         now = self.clock.time()
-        fade = self.store.current().schedule.fade_minutes * 60
+        settings = self.store.current()
+        fade = settings.schedule.fade_minutes * 60
+        with self.timers.read() as state:
+            sleep = state.sleep
+        lock = None
+        if sleep is not None and sleep.lock_end > now:
+            lock = Lock(sleep.ends_at, sleep.lock_end, sleep.fade)
+        without = evaluate(settings.schedule, now, self.zone().tz, None, lock)
+        still_open = without.allowed and (without.ends_at is None or without.ends_at > now + fade)
         with self.timers.change() as state:
             if state.override and state.override[1] > now:
-                state.override = (state.override[0], min(state.override[1], now + fade))
+                end = now if still_open else min(state.override[1], now + fade)
+                state.override = None if still_open else (state.override[0], end)
         return self.phase(now)
 
     # -- the kids' sleep timer ---------------------------------------------------
