@@ -472,6 +472,7 @@ def test_settings_never_contain_pin_data(admin, services):
         "max_volume": 25,
         "volume_step": 3,
         "pin_generated": False,
+        "time_zone": None,
     }
     assert data["sonos"]["status"] == "ok"
     text = admin.get("/api/admin/settings").get_data(as_text=True)
@@ -663,3 +664,19 @@ def test_unencodable_pins(client, admin):
     )
     assert error_code(response) == (401, "pin_wrong")
     assert error_code(change_pin(admin, new="12\ud80034")) == (422, "pin_invalid")
+
+
+def test_status_shows_the_local_time(admin):
+    time = admin.get("/api/admin/status").get_json()["time"]
+    assert set(time) == {"now", "zone", "source"}
+    assert time["now"][10] == "T"
+
+
+def test_parents_choose_the_time_zone(admin, services):
+    response = admin.put(
+        "/api/admin/settings/time-zone", json={"zone": "Europe/Lisbon"}, headers=POST
+    )
+    assert response.get_json()["settings"]["time_zone"] == "Europe/Lisbon"
+    assert admin.get("/api/admin/status").get_json()["time"]["zone"] == "Europe/Lisbon"
+    bad = admin.put("/api/admin/settings/time-zone", json={"zone": "../x"}, headers=POST)
+    assert error_code(bad) == (422, "time_zone_invalid")

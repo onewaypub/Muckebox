@@ -26,11 +26,13 @@ from collections.abc import Callable
 from concurrent.futures import Future
 from concurrent.futures import TimeoutError as FutureTimeout
 from dataclasses import asdict, dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from muckebox import __version__
 from muckebox.library import Library, Tile
+from muckebox.localtime import Zone, ZoneResolver, local_time
 from muckebox.settings import (
     SettingsError,
     SettingsStore,
@@ -136,6 +138,7 @@ class Runtime:
         clock: Clock | None = None,
         lane_factory: Callable[[str, Callable[[], None] | None, float], Any] = Lane,
         policy: CommandPolicy | None = None,
+        zones: ZoneResolver | None = None,
     ) -> None:
         self.store = store
         self.library = library
@@ -144,6 +147,7 @@ class Runtime:
         self.room_finder = room_finder
         self.clock = clock or SystemClock()
         self.policy = policy or CommandPolicy()
+        self.zones = zones or ZoneResolver()
         self.transport_lane = lane_factory(
             "transport", self.poll_transport, TRANSPORT_POLL_INTERVAL
         )
@@ -212,6 +216,12 @@ class Runtime:
     @property
     def configured(self) -> bool:
         return self._session is not None
+
+    def zone(self) -> Zone:
+        return self.zones.zone(self.store.current().time_zone)
+
+    def local_now(self) -> datetime:
+        return local_time(self.clock.time(), self.zone())
 
     # -- reading state (never blocks) ---------------------------------------
 
@@ -329,8 +339,14 @@ class Runtime:
             problems.append("pin_generated")
         if self.store.load_problem:
             problems.append(self.store.load_problem)
+        zone = self.zone()
         return {
             "sonos": self.state.get("sonos"),
+            "time": {
+                "now": local_time(self.clock.time(), zone).isoformat(timespec="seconds"),
+                "zone": zone.name,
+                "source": zone.source,
+            },
             "config_problems": problems,
             "library_problem": self.library.load_problem,
             "volume_guard": {

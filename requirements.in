@@ -8,4 +8,6 @@ flask~=3.1
 pillow~=12.3
 requests~=2.34
 soco==0.31.4
+# Time zone database, for systems without one (the zone decides the usage times).
+tzdata
 waitress~=3.0
