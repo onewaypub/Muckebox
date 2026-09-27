@@ -75,7 +75,7 @@ function busy(button, promise) {
 // -- views --------------------------------------------------------------------------
 
 function showOnly(id) {
-  for (const section of ["locked", "login", "app"]) $(section).hidden = section !== id;
+  for (const section of ["login", "app"]) $(section).hidden = section !== id;
   $("logout").hidden = id !== "app";
 }
 
@@ -302,8 +302,7 @@ async function start() {
   bind();
   const result = await guarded(() => get("/api/admin/session"));
   if (!result) return;
-  if (result.data.locked) showOnly("locked");
-  else if (result.data.logged_in) showApp();
+  if (result.data.logged_in) showApp();
   else showLogin();
 }
 
