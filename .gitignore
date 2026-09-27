@@ -33,3 +33,6 @@ playwright-report/
 *.swp
 .DS_Store
 .claude/
+
+# Downloaded developer tools (scripts/install-gitleaks)
+/.tools/
