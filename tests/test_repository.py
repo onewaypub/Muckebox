@@ -85,6 +85,24 @@ def test_version_matches_pyproject():
     assert pyproject["project"]["version"] == muckebox.__version__
 
 
-def test_network_is_blocked_in_tests():
+def test_tcp_is_blocked_in_tests():
     with pytest.raises(RuntimeError, match="must not open network connections"):
         socket.create_connection(("192.0.2.10", 1400), timeout=0.1)
+
+
+def test_udp_multicast_is_blocked_in_tests():
+    # SSDP discovery (what SoCo uses to find speakers) must never leave the test.
+    with (
+        socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock,
+        pytest.raises(RuntimeError, match="must not open network connections"),
+    ):
+        sock.sendto(b"M-SEARCH * HTTP/1.1\r\n\r\n", ("239.255.255.250", 1900))
+
+
+def test_dns_is_blocked_in_tests():
+    with pytest.raises(RuntimeError, match="must not resolve host names"):
+        socket.getaddrinfo("sonos.example.com", 1400)
+
+
+def test_loopback_stays_available_in_tests():
+    assert socket.getaddrinfo("localhost", 80)
