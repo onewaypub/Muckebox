@@ -36,9 +36,12 @@ Everything lives in the data folder (`DATA_DIR`):
 | `settings.json.corrupt-…` | Only if `settings.json` could not be read: the unreadable file, moved aside. Delete it once you no longer need it. | As `settings.json`. |
 | `secret_key` | A random key that signs the parents' login cookie. | No |
 | `state.json` | Which tile Muckebox started last, and the speaker ID of its room. | No |
+| `timers.json` | A running override of the usage time and its end, the kids' sleep timer, which end of a usage time was already handled, the volume before the last fade, **today's** game minutes (only the current day, no history), and whether a game muted the speaker. | Minimal: when the tablet was used today, as a single number. |
+| `resume.json` | For album tiles: the track and second where each stopped ("Weiterhören"). *Von vorn* on the parents' page deletes it for a tile; removing a tile deletes it too. | Minimal: what was last listened to per album. |
 
-Muckebox stores **nothing about the children**: no usage history, no
-listening statistics, no names.
+Muckebox stores **nothing about the children** beyond the two small files
+above: no usage history, no listening statistics, no names, no scores. The
+games have no points and keep no results.
 
 To delete everything, stop the container and delete the data folder.
 
@@ -62,7 +65,8 @@ To delete everything, stop the container and delete the data folder.
 
 | Connection | When | What is sent |
 |---|---|---|
-| Tablet/phone → Muckebox | While the pages are open | Taps and page requests, within your home network. The pages load nothing from third parties: no web fonts, no CDNs, no trackers. |
+| Tablet/phone → Muckebox | While the pages are open | Taps and page requests, within your home network. The pages load nothing from third parties: no web fonts, no CDNs, no trackers. The games' sounds and pictures are part of Muckebox and come from it too. |
+| The tablet's own text-to-speech | While a game speaks | The games' short sentences ("Richtig, die Kuh!") are spoken by the tablet's system voice. On iPads this runs on the device. Some Android voices may use an online service of the voice's provider, depending on the tablet's settings. No microphone and no camera are used. |
 | Muckebox → Sonos speakers | Continuously while running | Control commands and status queries within your home network. |
 | Sonos speakers → music services | When music plays | Sonos itself streams from the services you linked in the Sonos app, under their terms. Muckebox only tells the speaker what to play. |
 | Muckebox → album art servers | When parents open or add Sonos favorites | Album art addresses provided by Sonos; some point to the music services' image servers on the internet. Only public internet addresses are contacted for these (besides the speakers themselves). |
