@@ -141,7 +141,8 @@ class _ArtCache:
                 self._items.popitem(last=False)
 
 
-_art_cache = _ArtCache()
+_art_downloads = threading.BoundedSemaphore(2)
+ART_WAIT = 5.0  # seconds a thumbnail request waits for a download slot
 
 
 def _favorite_json(favorite: Favorite, tiles_by_uri: dict[str, str]) -> dict[str, Any]:
@@ -165,11 +166,18 @@ def _tiles_by_uri() -> dict[str, str]:
     }
 
 
-def _find_favorite(item_id: str, refresh: bool = False) -> Favorite:
-    favorites = _runtime_call(_services().runtime.favorites, refresh)
-    for favorite in favorites:
-        if favorite.item_id == item_id:
-            return favorite
+def _find_favorite(item_id: str) -> Favorite:
+    """Look the favorite up in the last list first; ask the speaker only if needed.
+
+    Thumbnails and "add" clicks then do not queue behind a playback start.
+    """
+    runtime = _services().runtime
+    for favorites in (runtime.cached_favorites() or [], None):
+        if favorites is None:
+            favorites = _runtime_call(runtime.favorites)
+        for favorite in favorites:
+            if favorite.item_id == item_id:
+                return favorite
     raise ApiError(404, "favorite_not_found")
 
 
@@ -188,16 +196,35 @@ def favorite_art():
     favorite = _find_favorite(request.args.get("item_id", ""))
     if not favorite.art_uri:
         raise ApiError(404, "not_found")
-    jpeg = _art_cache.get(favorite.art_uri)
+    jpeg = _favorite_art_jpeg(favorite.art_uri)
     if jpeg is None:
-        try:
-            jpeg = normalise(_services().runtime.fetch_art(favorite.art_uri))
-        except (SonosError, CoverError) as exc:
-            raise ApiError(404, "not_found") from exc
-        _art_cache.put(favorite.art_uri, jpeg)
+        raise ApiError(404, "not_found")
     response = current_app.response_class(jpeg, mimetype="image/jpeg")
     response.headers["Cache-Control"] = "private, max-age=3600"
     return response
+
+
+def _favorite_art_jpeg(art_uri: str) -> bytes | None:
+    """Normalised artwork for a favorite, cached; None if it cannot be had.
+
+    At most two downloads run at once, so that opening the parents' page
+    never ties up the web server, and failures are remembered for a while.
+    """
+    cache = current_app.extensions.setdefault("muckebox.art_cache", _ArtCache())
+    jpeg = cache.get(art_uri)
+    if jpeg is not None:
+        return jpeg or None
+    if not _art_downloads.acquire(timeout=ART_WAIT):
+        return None
+    try:
+        jpeg = normalise(_services().runtime.fetch_art(art_uri))
+    except (SonosError, CoverError) as exc:
+        log.info("No artwork for a favorite: %s", exc)
+        jpeg = b""  # remembered as "not available"
+    finally:
+        _art_downloads.release()
+    cache.put(art_uri, jpeg)
+    return jpeg or None
 
 
 # -- tiles ------------------------------------------------------------------------------
@@ -251,13 +278,16 @@ def _create_from_favorite(item_id: str):
     favorite = _find_favorite(item_id)
     if not favorite.playable or favorite.ref is None:
         raise ApiError(422, "not_playable")
+    existing = _tiles_by_uri().get(favorite.ref.uri)
+    if existing is not None:
+        # Already a tile (e.g. a repeated click after a slow answer).
+        return services.library.get(existing), []
     warnings = []
     cover = None
     if favorite.art_uri:
-        try:
-            cover = services.covers.save(services.runtime.fetch_art(favorite.art_uri))
-        except (SonosError, CoverError) as exc:
-            log.info("No cover for favorite %s: %s", item_id, exc)
+        jpeg = _favorite_art_jpeg(favorite.art_uri)
+        if jpeg:
+            cover = services.covers.save(jpeg)
     if cover is None:
         warnings.append("cover_missing")
     source = favorite_source(favorite.item_id, favorite.ref, favorite.route, favorite.description)

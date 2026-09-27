@@ -8,6 +8,7 @@ import { loadMessages, t, translatePage } from "./i18n.js";
 
 const $ = (id) => document.getElementById(id);
 const FLASH_MS = 5000;
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 let rev = null;
 let flashTimer = null;
 
@@ -26,9 +27,25 @@ function flash(text, isError = false) {
 
 function errorText(error) {
   if (error instanceof ApiError) {
-    return t(`error.${error.code}`, { retry_in: error.retryIn ?? "" });
+    const key = `error.${error.code}`;
+    const text = t(key, { retry_in: error.retryIn ?? "" });
+    return text === key ? t("error.internal_error") : text; // never show a raw key
   }
   return t("error.internal_error");
+}
+
+// While a change is on its way, the tile list cannot be touched: a second
+// tap would otherwise send an outdated revision.
+async function mutate(action, options) {
+  const list = $("tiles");
+  list.inert = true;
+  list.setAttribute("aria-busy", "true");
+  try {
+    return await guarded(action, options);
+  } finally {
+    list.inert = false;
+    list.removeAttribute("aria-busy");
+  }
 }
 
 async function guarded(action, { success } = {}) {
@@ -39,7 +56,8 @@ async function guarded(action, { success } = {}) {
   } catch (error) {
     if (error instanceof ApiError && error.status === 401) {
       showLogin();
-    } else if (error instanceof ApiError && error.code === "rev_conflict") {
+    } else if (error instanceof ApiError && (error.code === "rev_conflict" || error.status === 0)) {
+      // After a conflict or a timeout the server may have changed anyway.
       await loadTiles();
     }
     flash(errorText(error), true);
@@ -87,7 +105,9 @@ function renderStatus(status) {
     }),
   );
   const problems = [...status.config_problems.map((code) => t(`error.${code}`))];
-  if (status.library_problem) problems.push(status.library_problem);
+  if (status.library_problem) {
+    problems.push(t(`error.${status.library_problem.code}`, status.library_problem));
+  }
   $("problems").replaceChildren(
     ...problems.map((text) => {
       const item = document.createElement("li");
@@ -117,7 +137,7 @@ function renderTiles(data) {
       source.type === "favorite" ? source.description : `${source.service} · ${source.kind}`;
     row.querySelector(".rename").addEventListener("submit", (event) => {
       event.preventDefault();
-      guarded(() => request("PATCH", `/api/admin/tiles/${tile.id}`, { body: { title: input.value, rev } }), {
+      mutate(() => request("PATCH", `/api/admin/tiles/${tile.id}`, { body: { title: input.value, rev } }), {
         success: t("admin.saved"),
       }).then((result) => result && renderTiles(result.data));
     });
@@ -130,7 +150,7 @@ function renderTiles(data) {
       [down, "down"],
     ]) {
       button.addEventListener("click", () =>
-        guarded(() => post(`/api/admin/tiles/${tile.id}/move`, { direction, rev })).then(
+        mutate(() => post(`/api/admin/tiles/${tile.id}/move`, { direction, rev })).then(
           (result) => result && renderTiles(result.data),
         ),
       );
@@ -138,16 +158,20 @@ function renderTiles(data) {
     row.querySelector("input[type=file]").addEventListener("change", (event) => {
       const file = event.target.files[0];
       if (!file) return;
+      if (file.size > MAX_UPLOAD_BYTES) {
+        flash(t("error.upload_too_large"), true);
+        return;
+      }
       const form = new FormData();
       form.append("cover", file);
       form.append("rev", String(rev));
-      guarded(() => request("PUT", `/api/admin/tiles/${tile.id}/cover`, { body: form, timeout: 60000 }), {
+      mutate(() => request("PUT", `/api/admin/tiles/${tile.id}/cover`, { body: form, timeout: 60000 }), {
         success: t("admin.saved"),
       }).then((result) => result && renderTiles(result.data));
     });
     row.querySelector(".delete").addEventListener("click", () => {
       if (!window.confirm(t("admin.delete_confirm", { title: tile.title }))) return;
-      guarded(() => request("DELETE", `/api/admin/tiles/${tile.id}?rev=${rev}`)).then((result) => {
+      mutate(() => request("DELETE", `/api/admin/tiles/${tile.id}?rev=${rev}`)).then((result) => {
         if (result) {
           renderTiles(result.data);
           loadFavorites();
@@ -181,14 +205,15 @@ function renderFavorites(favorites) {
       button.addEventListener("click", () =>
         busy(
           button,
-          guarded(() => post("/api/admin/tiles", { source: "favorite", item_id: favorite.item_id })).then(
-            (result) => {
-              if (!result) return;
+          mutate(() =>
+            post("/api/admin/tiles", { source: "favorite", item_id: favorite.item_id }, { timeout: 30000 }),
+          ).then((result) => {
+            if (result) {
               showWarnings(result.data.warnings);
               renderTiles(result.data);
-              loadFavorites();
-            },
-          ),
+            }
+            loadFavorites(); // also after a timeout: the tile may exist anyway
+          }),
         ),
       );
     }
@@ -245,7 +270,7 @@ function bind() {
     const url = $("link-url").value.trim();
     busy(
       button,
-      guarded(() => post("/api/admin/tiles", { source: "sharelink", url }, { timeout: 30000 })).then((result) => {
+      mutate(() => post("/api/admin/tiles", { source: "sharelink", url }, { timeout: 30000 })).then((result) => {
         if (!result) return;
         $("link-url").value = "";
         showWarnings(result.data.warnings);

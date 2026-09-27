@@ -35,6 +35,7 @@ def health():
 @bp.get("/api/state")
 def state():
     document = _services().runtime.state_document()
+    document["assets"] = current_app.jinja_env.globals["asset_version"]
     body = json.dumps(document, separators=(",", ":"), ensure_ascii=False)
     etag = hashlib.sha256(body.encode()).hexdigest()[:16]
     if etag in request.if_none_match:

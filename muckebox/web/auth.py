@@ -15,7 +15,7 @@ import hashlib
 import hmac
 import threading
 import time
-from collections import defaultdict, deque
+from collections import deque
 from collections.abc import Callable
 from datetime import timedelta
 from typing import Any
@@ -32,37 +32,46 @@ MAX_FAILURES_GLOBAL = 20
 
 
 class RateLimiter:
+    """Counts failed logins in memory; entries older than the window are dropped."""
+
     def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
         self._clock = clock
         self._lock = threading.Lock()
-        self._per_client: dict[str, deque[float]] = defaultdict(deque)
+        self._per_client: dict[str, deque[float]] = {}
         self._global: deque[float] = deque()
 
     def retry_in(self, client: str) -> int | None:
         """Seconds until ``client`` may try again, or None if it may now."""
         with self._lock:
             now = self._clock()
+            self._prune(now)
             waits = [
-                self._wait(self._per_client[client], MAX_FAILURES_PER_CLIENT, now),
+                self._wait(self._per_client.get(client, deque()), MAX_FAILURES_PER_CLIENT, now),
                 self._wait(self._global, MAX_FAILURES_GLOBAL, now),
             ]
-        wait = max(w for w in waits if w is not None) if any(waits) else None
-        return wait
+        known = [wait for wait in waits if wait is not None]
+        return max(known) if known else None
 
     def failure(self, client: str) -> None:
         with self._lock:
             now = self._clock()
-            self._per_client[client].append(now)
+            self._prune(now)
+            self._per_client.setdefault(client, deque()).append(now)
             self._global.append(now)
 
     def success(self, client: str) -> None:
         with self._lock:
             self._per_client.pop(client, None)
 
+    def _prune(self, now: float) -> None:
+        for queue in (*self._per_client.values(), self._global):
+            while queue and now - queue[0] > FAILURE_WINDOW:
+                queue.popleft()
+        for client in [c for c, queue in self._per_client.items() if not queue]:
+            del self._per_client[client]
+
     @staticmethod
     def _wait(failures: deque[float], limit: int, now: float) -> int | None:
-        while failures and now - failures[0] > FAILURE_WINDOW:
-            failures.popleft()
         if len(failures) < limit:
             return None
         return int(FAILURE_WINDOW - (now - failures[0])) + 1

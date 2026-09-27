@@ -44,7 +44,8 @@ export async function request(method, path, { body, etag, timeout = TIMEOUT_MS }
   }
   if (!response.ok) {
     const error = (data && data.error) || {};
-    throw new ApiError(response.status, error.code || "http_" + response.status, error.retry_in);
+    const fallback = response.status === 413 ? "request_too_large" : "http_" + response.status;
+    throw new ApiError(response.status, error.code || fallback, error.retry_in);
   }
   return { status: response.status, data, etag: response.headers.get("ETag") };
 }

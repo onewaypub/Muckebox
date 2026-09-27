@@ -238,3 +238,7 @@ footer {
   margin-top: 24px;
   font-size: 0.9rem;
 }
+
+#tiles[aria-busy="true"] {
+  opacity: 0.6;
+}

@@ -126,3 +126,9 @@ def test_every_unplayable_reason_and_warning_has_a_text():
     missing = [f"reason.{r}" for r in reasons if f"reason.{r}" not in CATALOGUE]
     missing += [f"warning.{w}" for w in warnings if f"warning.{w}" not in CATALOGUE]
     assert not missing
+
+
+def test_client_side_error_codes_have_texts():
+    # api.js creates these codes itself (network failure, timeout, bare 413).
+    for code in ("offline", "timeout", "request_too_large", "library_corrupt"):
+        assert f"error.{code}" in CATALOGUE

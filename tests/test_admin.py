@@ -355,3 +355,69 @@ def test_upload_without_file(admin):
     tile = add_favorite(admin, 1).get_json()["tile"]
     response = admin.put(f"/api/admin/tiles/{tile['id']}/cover", data={}, headers=POST)
     assert response.status_code == 400
+
+
+# -- review regressions ---------------------------------------------------------------
+
+
+def test_session_cookie_lasts_12_hours_and_is_not_renewed(client, services):
+    from datetime import UTC, datetime
+    from email.utils import parsedate_to_datetime
+
+    response = login(client)
+    cookie = response.headers["Set-Cookie"]
+    expires = parsedate_to_datetime(cookie.split("Expires=")[1].split(";")[0])
+    hours = (expires - datetime.now(UTC)).total_seconds() / 3600
+    assert 11.9 < hours <= 12.01
+    assert "Set-Cookie" not in client.get("/api/admin/tiles").headers
+    assert "Set-Cookie" not in client.get("/api/state").headers
+
+
+def test_adding_the_same_favorite_twice_keeps_one_tile(admin):
+    first = add_favorite(admin, 1).get_json()
+    second = add_favorite(admin, 1).get_json()
+    assert second["tile"]["id"] == first["tile"]["id"]
+    assert len(second["tiles"]) == 1
+
+
+def test_unavailable_art_is_not_fetched_again(admin, fake_sonos):
+    from muckebox.sonos.errors import SonosUnreachable
+
+    fake_sonos.fail_next["fetch_art"] = SonosUnreachable()
+    assert admin.get("/api/admin/favorite-art?item_id=FV:2/1").status_code == 404
+    fake_sonos.calls.clear()
+    assert admin.get("/api/admin/favorite-art?item_id=FV:2/1").status_code == 404
+    assert not [c for c in fake_sonos.calls if c[0] == "fetch_art"]
+
+
+def test_oversized_upload_names_the_limit(admin):
+    tile = add_favorite(admin, 1).get_json()["tile"]
+    response = admin.put(
+        f"/api/admin/tiles/{tile['id']}/cover",
+        data=b"x",
+        headers=POST,
+        content_type="multipart/form-data; boundary=x",
+        environ_overrides={"CONTENT_LENGTH": str(30 * 1024 * 1024)},
+    )
+    assert (response.status_code, response.get_json()["error"]["code"]) == (
+        413,
+        "upload_too_large",
+    )
+
+
+def test_rate_limiter_forgets_old_failures():
+    now = {"t": 0.0}
+    limiter = auth.RateLimiter(clock=lambda: now["t"])
+    limiter.failure("192.0.2.5")
+    now["t"] = auth.FAILURE_WINDOW + 1
+    limiter.retry_in("192.0.2.6")
+    assert limiter._per_client == {}
+    assert not limiter._global
+
+
+def test_status_reports_a_corrupt_library_as_a_code(make_services, tmp_path):
+    (tmp_path / "library.json").write_text("{broken")
+    client = create_app(make_services()).test_client()
+    login(client)
+    problem = client.get("/api/admin/status").get_json()["library_problem"]
+    assert problem["code"] == "library_corrupt"

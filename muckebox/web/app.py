@@ -21,6 +21,7 @@ from muckebox.library import Library
 from muckebox.runtime.service import Runtime
 
 from . import admin, api, pages
+from .auth import SESSION_LIFETIME
 from .errors import ApiError, register_error_handlers
 
 PACKAGE_DIR = Path(__file__).resolve().parent.parent
@@ -72,11 +73,14 @@ def create_app(services: Services) -> Flask:
         SESSION_COOKIE_NAME="muckebox_admin",
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Strict",
+        # The login lasts 12 hours and is not extended by later requests.
+        PERMANENT_SESSION_LIFETIME=SESSION_LIFETIME,
+        SESSION_REFRESH_EACH_REQUEST=False,
         SEND_FILE_MAX_AGE_DEFAULT=0,  # static files: always revalidate (cheap on a LAN)
     )
     app.json.sort_keys = False  # type: ignore[attr-defined]
     app.extensions["muckebox"] = services
-    app.jinja_env.globals["asset_version"] = _asset_version(PACKAGE_DIR / "static")
+    app.jinja_env.globals["asset_version"] = _asset_version(PACKAGE_DIR)
 
     register_error_handlers(app)
     app.before_request(_limit_request_size)
@@ -92,13 +96,18 @@ def services() -> Services:
     return current_app.extensions["muckebox"]
 
 
-def _asset_version(static_dir: Path) -> str:
-    """A hash over all static files, used to bust browser caches on updates."""
+def _asset_version(package_dir: Path) -> str:
+    """A hash over everything the browser loads (pages, scripts, styles, texts).
+
+    Pages carry it, and /api/state reports it: a kiosk tablet reloads
+    itself when Muckebox was updated.
+    """
     digest = hashlib.sha256()
-    for path in sorted(static_dir.rglob("*")):
-        if path.is_file():
-            digest.update(path.relative_to(static_dir).as_posix().encode())
-            digest.update(path.read_bytes())
+    for folder in ("static", "templates", "i18n"):
+        for path in sorted((package_dir / folder).rglob("*")):
+            if path.is_file() and "__pycache__" not in path.parts:
+                digest.update(path.relative_to(package_dir).as_posix().encode())
+                digest.update(path.read_bytes())
     return digest.hexdigest()[:12]
 
 
@@ -106,8 +115,11 @@ def _limit_request_size() -> None:
     # Reject early with the JSON envelope, even if a view never reads the
     # body. Waitress buffers bodies and rejects grossly oversized ones itself
     # (see WAITRESS_BODY_LIMIT_FACTOR in __main__).
-    limit = _MAX_UPLOAD_REQUEST if admin.is_upload_path(request.path) else MAX_REQUEST_BYTES
+    upload = admin.is_upload_path(request.path)
+    limit = _MAX_UPLOAD_REQUEST if upload else MAX_REQUEST_BYTES
     if request.content_length is not None and request.content_length > limit:
+        if upload:
+            raise ApiError(413, "upload_too_large")
         raise RequestEntityTooLarge()
 
 

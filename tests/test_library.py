@@ -115,7 +115,8 @@ def test_corrupt_file_is_moved_aside(tmp_path):
     path.write_text("{not json")
     library = Library(path)
     assert library.tiles() == []
-    assert "could not be read" in library.load_problem
+    assert library.load_problem["code"] == "library_corrupt"
+    assert library.load_problem["file"].startswith("library.json.corrupt-")
     assert list(tmp_path.glob("library.json.corrupt-*"))
     add(library)  # a new, valid file can be written
     assert Library(path).rev == 1
