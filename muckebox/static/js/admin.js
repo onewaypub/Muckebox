@@ -91,6 +91,10 @@ function renderStatus(status) {
   serverZone = status.time.zone;
   renderScheduleStatus(status.schedule);
   renderSleepStatus(status.sleep_timer);
+  $("games-status").textContent = t("admin.games_status", {
+    used: Math.round(status.games.used_today / 60),
+    limit: Math.round(status.games.daily_seconds / 60),
+  });
   const list = $("status");
   const sonos = status.sonos || {};
   const own = ["ok", "starting", "not_configured"].includes(sonos.status);
@@ -152,6 +156,8 @@ function renderZoneHint(server) {
 
 function renderTiles(data) {
   rev = data.rev;
+  knownTiles = data.tiles;
+  if (settings) renderDanceOptions();
   const list = $("tiles");
   const template = $("tile-row");
   list.replaceChildren();
@@ -410,6 +416,58 @@ async function loadSettings() {
   // Forms only here and after their own save: never over unsaved edits.
   renderScheduleForm(result.data.settings.schedule);
   renderSleepForm(result.data.settings.sleep_timer);
+  renderGamesForm(result.data.settings.games);
+}
+
+// -- games --------------------------------------------------------------------------
+
+const GAMES = ["freeze_dance", "sound_quiz", "move_like", "breathing"];
+let knownTiles = [];
+let danceTile = null;
+
+function buildGameRows() {
+  const box = $("game-rows");
+  const template = $("game-row");
+  for (const game of GAMES) {
+    const row = template.content.firstElementChild.cloneNode(true);
+    translatePage(row);
+    row.dataset.game = game;
+    row.querySelector(".game-name").textContent = t(`game.${game}`);
+    row.querySelector(".game-about").textContent = t(`admin.game_about_${game}`);
+    box.append(row);
+  }
+}
+
+function renderGamesForm(games) {
+  $("games-minutes").value = String(games.daily_minutes);
+  for (const row of $("game-rows").children) {
+    const item = games.items[row.dataset.game];
+    row.querySelector(".game-enabled").checked = item.enabled;
+    row.querySelector(".game-level").value = String(item.level);
+  }
+  danceTile = games.dance_tile;
+  renderDanceOptions();
+}
+
+function renderDanceOptions() {
+  const select = $("dance-tile");
+  const current = Object.assign(document.createElement("option"), { value: "", textContent: t("admin.dance_current") });
+  select.replaceChildren(
+    current,
+    ...knownTiles.map((tile) => Object.assign(document.createElement("option"), { value: tile.id, textContent: tile.title })),
+  );
+  select.value = knownTiles.some((tile) => tile.id === danceTile) ? danceTile : "";
+}
+
+function gamesFromForm() {
+  const items = {};
+  for (const row of $("game-rows").children) {
+    items[row.dataset.game] = {
+      enabled: row.querySelector(".game-enabled").checked,
+      level: Number(row.querySelector(".game-level").value),
+    };
+  }
+  return { daily_minutes: $("games-minutes").valueAsNumber, dance_tile: $("dance-tile").value || null, items };
 }
 
 function renderSleepForm(timer) {
@@ -578,6 +636,19 @@ function bind() {
     );
     if (!result) return;
     renderScheduleForm(result.data.settings.schedule);
+    loadStatus();
+  });
+  buildGameRows();
+  $("games").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const result = await busy(
+      event.target.querySelector("button[type=submit]"),
+      guarded(() => request("PUT", "/api/admin/settings/games", { body: gamesFromForm() }), {
+        success: t("admin.saved"),
+      }),
+    );
+    if (!result) return;
+    renderGamesForm(result.data.settings.games);
     loadStatus();
   });
   $("sleep-timer").addEventListener("submit", async (event) => {

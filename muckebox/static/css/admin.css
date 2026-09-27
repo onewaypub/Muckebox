@@ -409,3 +409,38 @@ label.check input {
 .resume-position {
   color: var(--muted);
 }
+
+.games-form {
+  max-width: none;
+}
+
+.game-rows {
+  display: grid;
+  gap: 12px;
+}
+
+.game-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 12px;
+  align-items: center;
+}
+
+.game-row .game-about {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+select {
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid #cfd6e0;
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--text);
+  font: inherit;
+}
+
+.games-form #games-minutes {
+  max-width: 8em;
+}

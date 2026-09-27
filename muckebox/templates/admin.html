@@ -138,6 +138,20 @@ SPDX-License-Identifier: AGPL-3.0-or-later
       </form>
     </section>
 
+    <section id="games-section" class="card">
+      <h2 data-i18n="admin.games"></h2>
+      <p id="games-status" class="schedule-status"></p>
+      <form id="games" class="fields games-form">
+        <div id="game-rows" class="game-rows"></div>
+        <label for="games-minutes" data-i18n="admin.games_minutes"></label>
+        <input id="games-minutes" type="number" min="5" max="60" step="5" inputmode="numeric" required>
+        <label for="dance-tile" data-i18n="admin.dance_tile"></label>
+        <select id="dance-tile"></select>
+        <p class="hint" data-i18n="admin.games_hint"></p>
+        <button type="submit" data-i18n="admin.save"></button>
+      </form>
+    </section>
+
     <section id="pin-section" class="card">
       <h2 data-i18n="admin.pin_change"></h2>
       <form id="pin-form" class="fields">
@@ -189,6 +203,18 @@ SPDX-License-Identifier: AGPL-3.0-or-later
       <span aria-hidden="true">–</span>
       <input class="to" type="time" step="300" data-i18n-label="admin.to">
       <label class="check"><input class="free" type="checkbox"> <span data-i18n="admin.day_free"></span></label>
+    </div>
+  </template>
+
+  <template id="game-row">
+    <div class="game-row">
+      <label class="check"><input class="game-enabled" type="checkbox"> <span class="game-name"></span></label>
+      <select class="game-level" data-i18n-label="admin.game_level">
+        <option value="1" data-i18n="admin.level_1"></option>
+        <option value="2" data-i18n="admin.level_2"></option>
+        <option value="3" data-i18n="admin.level_3"></option>
+      </select>
+      <p class="hint game-about"></p>
     </div>
   </template>
 

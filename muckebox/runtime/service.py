@@ -19,6 +19,7 @@ the old session are dropped, so nothing leaks from one room to the other.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import threading
@@ -47,10 +48,11 @@ from muckebox.storage import atomic_write
 
 from .breaker import CircuitBreaker
 from .clock import Clock, SystemClock
+from .games import MUTE_LEASE, ActiveGame, Games
 from .lanes import Lane
 from .resume import ResumeStore
 from .state import StateCache
-from .timekeeper import TimeKeeper
+from .timekeeper import Refused, TimeKeeper
 from .timers import TimersFile
 from .volume_guard import VolumeGuard
 
@@ -164,6 +166,7 @@ class Runtime:
         self._last_play_state: str | None = None
         self._pruned_rev: int | None = None
         self.keeper = TimeKeeper(store, self.timers, self.clock, self.zones)
+        self.games = Games(store, self.timers, self.keeper, self.clock)
         self._pause_sent: float | None = None
         self.transport_lane = lane_factory(
             "transport", self.poll_transport, TRANSPORT_POLL_INTERVAL
@@ -287,6 +290,7 @@ class Runtime:
             "pending": data["pending"],
             "last_error": last_error,
             **times,
+            "games": self.games.document(),
         }
 
     # -- commands from the kids view ----------------------------------------
@@ -376,6 +380,10 @@ class Runtime:
                 "source": zone.source,
             },
             **self.keeper.document(),
+            "games": {
+                "used_today": int(self.games.used_today()),
+                "daily_seconds": current.games.daily_minutes * 60,
+            },
             "config_problems": problems,
             "library_problem": self.library.load_problem,
             "volume_guard": {
@@ -440,6 +448,9 @@ class Runtime:
         finally:
             self._search_lock.release()
         room_uid = info.player_uid or uid
+        old = self._session
+        if old is not None and self.games.end() is not None:
+            self.volume_lane.submit(lambda: self._apply_mute(old, False))
         with self._room_lock:
             self.store.set_room(info.name, room_uid, seed_ip)  # raises OSError: nothing changes
             with self._switch_lock:
@@ -608,6 +619,96 @@ class Runtime:
             return
         session.volume_breaker.success()
         self._publish(session, volume=volume)
+        self._game_mute_watchdog(session)
+
+    # -- games --------------------------------------------------------------
+
+    def start_game(self, game_id: str) -> ActiveGame:
+        """Start a game: music for the freeze dance, silence for the others."""
+        game = self.games.start(game_id)
+        try:
+            if game.id == "freeze_dance":
+                self._start_dance_music()
+            elif game.id in ("sound_quiz", "move_like"):
+                self._pause_for_game()
+        except BaseException:
+            self.games.end()
+            raise
+        return game
+
+    def end_game(self) -> None:
+        game = self.games.end()
+        if game is None or game.id != "freeze_dance":
+            return
+        self._request_mute(False)
+        with contextlib.suppress(Unavailable, Busy, Refused):
+            self.transport("pause")  # the dance is over
+
+    def game_mute(self, muted: bool) -> None:
+        """The freeze dance: stop (mute) or dance on (unmute)."""
+        game = self.games.active()
+        if game is None or game.id != "freeze_dance":
+            raise Refused("game_unavailable")
+        self.games.mute_until = self.clock.monotonic() + MUTE_LEASE if muted else None
+        self._request_mute(muted)
+
+    def _start_dance_music(self) -> None:
+        tile_id = self.store.current().games.dance_tile
+        playing = self.state.get("playback")["state"] in ("playing", "transitioning")
+        if tile_id:
+            try:
+                self.play_tile(tile_id)
+                return
+            except TileNotFound:
+                pass  # removed meanwhile: dance to whatever there is
+        if playing:
+            return
+        if self.state.get("playback")["tile_id"]:
+            self.transport("play")
+            return
+        raise Refused("dance_music_missing")
+
+    def _pause_for_game(self) -> None:
+        """The quiz and "move like" sound from the tablet: pause the speaker."""
+        sonos, shown = self.state.get("sonos"), self.state.get("playback")
+        if shown["state"] not in ("playing", "transitioning"):
+            return
+        if sonos.get("grouped") and not shown["tile_id"]:
+            return  # would stop the whole group
+        try:
+            self.transport("pause")
+        except (Unavailable, Busy, Refused) as exc:
+            log.info("Could not pause for the game: %s", exc)
+
+    def _request_mute(self, muted: bool) -> None:
+        session = self._session
+        if session is None:
+            raise Unavailable("not_configured")
+        self.volume_lane.submit(lambda: self._apply_mute(session, muted))
+
+    def _apply_mute(self, session: RoomSession, muted: bool) -> None:
+        try:
+            session.backend.set_mute(muted)
+        except SonosError as exc:
+            log.info("Could not %s the speaker: %s", "mute" if muted else "unmute", exc)
+            return
+        with self.timers.change() as state:
+            state.game_mute = muted
+
+    def _game_mute_watchdog(self, session: RoomSession) -> None:
+        """Unmute when the freeze dance stops renewing its mute (tablet gone,
+        game over, bedtime): the speaker must never stay silent by accident."""
+        with self.timers.read() as state:
+            muted = state.game_mute
+        if not muted:
+            return
+        game, lease = self.games.active(), self.games.mute_until
+        dancing = game is not None and game.id == "freeze_dance"
+        leased = lease is not None and self.clock.monotonic() < lease
+        if dancing and leased and self.keeper.phase().allowed:
+            return
+        self.games.mute_until = None
+        self._apply_mute(session, False)
 
     def _ensure_room(self, session: RoomSession, force: bool = False) -> None:
         now = self.clock.monotonic()
