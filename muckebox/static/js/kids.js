@@ -5,6 +5,7 @@
 
 import { ApiError, get, post } from "./api.js";
 import { initBedtime, padIsOpen, renderBedtime } from "./bedtime.js";
+import { gameIsOpen, initGames, renderGames } from "./games.js";
 import { loadMessages, t, translatePage } from "./i18n.js";
 import {
   initial,
@@ -126,6 +127,7 @@ function renderState() {
   view.prev.disabled = !playback || !playback.can_prev;
   view.next.disabled = !playback || !playback.can_next;
   const bedtime = renderBedtime(state);
+  renderGames(state);
   view.tiles.hidden = bedtime;
   view.empty.hidden = bedtime || model.tileCount > 0;
   renderVolume(state ? state.volume : null, bedtime);
@@ -217,7 +219,7 @@ async function poll() {
 const PAGE_ASSETS = document.body.dataset.assetVersion;
 
 function applyState(state) {
-  if (state.assets && PAGE_ASSETS && state.assets !== PAGE_ASSETS && !padIsOpen()) {
+  if (state.assets && PAGE_ASSETS && state.assets !== PAGE_ASSETS && !padIsOpen() && !gameIsOpen()) {
     // Muckebox was updated: load the new page (only after a successful answer,
     // and not while a parent types the PIN).
     window.location.reload();
@@ -307,6 +309,7 @@ async function start() {
   translatePage();
   bindControls();
   initBedtime({ onChange: pollSoon });
+  initGames({ onChange: pollSoon, onError: () => showToast(t("kids.error")) });
   renderState();
   try {
     await loadTiles();
