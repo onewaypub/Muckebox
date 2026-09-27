@@ -25,9 +25,7 @@ under the same licence.
 | `elephant.mp3` | der Elefant | [Elephant voice - trumpeting.ogg](https://commons.wikimedia.org/wiki/File:Elephant_voice_-_trumpeting.ogg) | தகவலுழவன் | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) |
 | `lion.mp3` | der Löwe | [Lion raring-sound1TamilNadu178.ogg](https://commons.wikimedia.org/wiki/File:Lion_raring-sound1TamilNadu178.ogg) | த*உழவன் | [Public domain](https://en.wikipedia.org/wiki/Public_domain) |
 | `donkey.mp3` | der Esel | [157763 felix-blume a-donkey-is-braying-in-his-enclosure-in-south-of-france.wav](https://commons.wikimedia.org/wiki/File:157763_felix-blume_a-donkey-is-braying-in-his-enclosure-in-south-of-france.wav) | felix-blume | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) |
-| `cow.mp3` | die Kuh | [Single Cow Moo.ogg](https://commons.wikimedia.org/wiki/File:Single_Cow_Moo.ogg) | MichaeltheFox8621 | [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) |
 | `dog.mp3` | der Hund | [Barking of a dog 2.ogg](https://commons.wikimedia.org/wiki/File:Barking_of_a_dog_2.ogg) | Amada44 | [CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/) |
-| `frog.mp3` | der Frosch | [Single Frog Croak.oga](https://commons.wikimedia.org/wiki/File:Single_Frog_Croak.oga) | MichaeltheFox8621 | [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) |
 | `doorbell.mp3` | die Türklingel | [Sound Effect - Door Bell.ogg](https://commons.wikimedia.org/wiki/File:Sound_Effect_-_Door_Bell.ogg) | Amada44 | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) |
 | `car_horn.mp3` | die Autohupe | [Car Horn.wav](https://commons.wikimedia.org/wiki/File:Car_Horn.wav) | 15HPanska_Ruttner_Jan | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) |
 | `train.mp3` | der Zug | [Parovoz sound.ogg](https://commons.wikimedia.org/wiki/File:Parovoz_sound.ogg) | Alex Alex Lep | [Public domain](https://en.wikipedia.org/wiki/Public_domain) |

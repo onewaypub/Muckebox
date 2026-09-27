@@ -60,20 +60,10 @@ SOUNDS = {
         license="CC0-1.0",
         source="https://commons.wikimedia.org/wiki/File:157763_felix-blume_a-donkey-is-braying-in-his-enclosure-in-south-of-france.wav",
     ),
-    "cow": Sound(
-        author="MichaeltheFox8621",
-        license="CC-BY-SA-4.0",
-        source="https://commons.wikimedia.org/wiki/File:Single_Cow_Moo.ogg",
-    ),
     "dog": Sound(
         author="Amada44",
         license="CC-BY-SA-3.0",
         source="https://commons.wikimedia.org/wiki/File:Barking_of_a_dog_2.ogg",
-    ),
-    "frog": Sound(
-        author="MichaeltheFox8621",
-        license="CC-BY-SA-4.0",
-        source="https://commons.wikimedia.org/wiki/File:Single_Frog_Croak.oga",
     ),
     "doorbell": Sound(
         author="Amada44",
@@ -128,7 +118,6 @@ PICTURES = (
     "cat",
     "church_bells",
     "clock",
-    "cow",
     "dog",
     "donkey",
     "doorbell",
@@ -158,7 +147,6 @@ LICENCES = {
     "LicenseRef-Public-Domain": ("gemeinfrei", "https://en.wikipedia.org/wiki/Public_domain"),
     "CC-BY-4.0": ("CC BY 4.0", "https://creativecommons.org/licenses/by/4.0/"),
     "CC-BY-SA-3.0": ("CC BY-SA 3.0", "https://creativecommons.org/licenses/by-sa/3.0/"),
-    "CC-BY-SA-4.0": ("CC BY-SA 4.0", "https://creativecommons.org/licenses/by-sa/4.0/"),
 }
 
 

@@ -64,7 +64,9 @@ shows the PIN for the first login. Open <http://localhost:8484/admin>
 ## Sounds and pictures
 
 New sounds or pictures for the games must be public domain or CC0, or else
-CC BY / CC BY-SA with credit. Add the file to `muckebox/static/sounds` or
+CC BY / CC BY-SA with credit. On Wikimedia Commons, check the file's
+*source* and date, not only its licence tag: some uploads are crops of
+commercial sound-effect libraries marked as "own work". Add the file to `muckebox/static/sounds` or
 `muckebox/static/pictures`, its author, licence and source to
 `muckebox/assets.py`, a matching entry to `REUSE.toml` and a row to
 `docs/credits.md`; `tests/test_assets.py` checks that they agree. Convert

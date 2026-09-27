@@ -393,7 +393,7 @@ stylelint-no-unsupported-browser-features (MIT).
 ### Sounds and pictures
 
 The games' sounds are short excerpts of recordings from Wikimedia Commons
-(public domain, CC0, and CC BY-SA for the cow, dog and frog); the pictures
+(public domain, CC0, and CC BY-SA for the dog); the pictures
 are Twemoji graphics (CC BY 4.0). Authors and sources of every file are
 listed in [docs/credits.md](docs/credits.md) and on the parents' page.
 
