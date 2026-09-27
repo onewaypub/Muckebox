@@ -459,6 +459,25 @@ function renderDanceOptions() {
   select.value = knownTiles.some((tile) => tile.id === danceTile) ? danceTile : "";
 }
 
+async function loadCredits() {
+  const result = await guarded(() => get("/api/credits"));
+  if (!result) return;
+  $("credits-list").replaceChildren(
+    ...result.data.credits.map((item) => {
+      const entry = document.createElement("li");
+      const name = item.name === "pictures" ? t("admin.credit_pictures") : t(`sound.${item.name}`);
+      const source = Object.assign(document.createElement("a"), { href: item.source, textContent: name, rel: "noopener" });
+      const licence = Object.assign(document.createElement("a"), {
+        href: item.license_url,
+        textContent: item.license,
+        rel: "noopener",
+      });
+      entry.append(source, ` – ${item.author}, `, licence);
+      return entry;
+    }),
+  );
+}
+
 function gamesFromForm() {
   const items = {};
   for (const row of $("game-rows").children) {
@@ -639,6 +658,7 @@ function bind() {
     loadStatus();
   });
   buildGameRows();
+  $("credits").addEventListener("toggle", loadCredits, { once: true });
   $("games").addEventListener("submit", async (event) => {
     event.preventDefault();
     const result = await busy(

@@ -444,3 +444,13 @@ select {
 .games-form #games-minutes {
   max-width: 8em;
 }
+
+.credits {
+  margin-top: 16px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.credits ul {
+  padding-left: 20px;
+}

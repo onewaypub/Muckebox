@@ -9,7 +9,7 @@ import json
 
 from flask import Blueprint, abort, current_app, jsonify, request, send_file
 
-from muckebox import __version__
+from muckebox import __version__, assets
 from muckebox.library import TileNotFound
 from muckebox.runtime.games import UnknownGame
 from muckebox.runtime.service import Busy, Unavailable
@@ -36,6 +36,12 @@ def cover_url(name: str | None) -> str | None:
 def health():
     """Liveness of the web server; independent of the Sonos connection."""
     return jsonify(ok=True, version=__version__)
+
+
+@bp.get("/api/credits")
+def credits():
+    """Sources and licences of the games' sounds and pictures."""
+    return jsonify(ok=True, credits=assets.credits())
 
 
 @bp.get("/api/state")
