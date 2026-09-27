@@ -142,17 +142,21 @@ def test_unreadable_volume_changes_nothing(fake, clock):
     assert not [c for c in fake.calls if c[0] == "set_volume"]
 
 
-def test_fight_is_detected_and_enforcement_continues(fake, clock):
+def test_fight_is_detected_at_the_real_poll_rate(fake, clock):
+    from muckebox.runtime.volume_guard import FIGHT_CORRECTIONS
+
     guard = VolumeGuard(fake, lambda: 25, clock)
-    for _ in range(11):
+    for _ in range(FIGHT_CORRECTIONS - 1):
         fake.volume = 90
         guard.step()
-        clock.advance(0.5)
-    assert guard.fighting
-    assert fake.volume == 25
-    clock.advance(20)
+        clock.advance(1.05)  # the guard polls a little slower than once per second
+    assert not guard.fighting
     fake.volume = 90
     guard.step()
+    assert guard.fighting
+    assert fake.volume == 25  # enforcement continues
+    clock.advance(20)
+    guard.step()  # volume is fine again: the fight is over
     assert not guard.fighting
 
 
@@ -436,3 +440,93 @@ def test_guard_works_while_a_start_is_stuck(tmp_path, library):
     finally:
         release.set()
         rt.stop()
+
+
+# -- review regressions ---------------------------------------------------------------
+
+
+def test_start_counts_even_if_reading_the_state_fails(runtime, fake, library):
+    from muckebox.sonos.errors import SonosTimeout
+
+    tile = add_favorite(library, fake, 0)
+    fake.fail_next["playback"] = SonosTimeout()
+    assert runtime.play_tile(tile.id) == "accepted"
+    assert runtime.state_document()["last_error"] is None
+    runtime.poll_transport()
+    assert runtime.state_document()["playback"]["tile_id"] == tile.id
+    fake.calls.clear()
+    assert runtime.play_tile(tile.id) == "noop"  # no restart of the album
+    assert fake.calls == []
+
+
+def test_unexpected_errors_are_logged_and_shown(runtime, fake, library, caplog):
+    tile = add_favorite(library, fake, 0)
+    fake.fail_next["play_favorite"] = KeyError("bug")  # not a SonosError
+    runtime.play_tile(tile.id)
+    doc = runtime.state_document()
+    assert doc["last_error"]["code"] == "sonos_error"
+    assert doc["pending"] is None
+    assert "failed unexpectedly" in caplog.text
+
+
+def test_double_tap_on_pause_does_not_resume(runtime, fake, library):
+    tile = add_favorite(library, fake, 0)
+    runtime.play_tile(tile.id)
+    runtime.transport("pause")
+    fake.calls.clear()
+    assert runtime.transport("pause")["state"] == "paused"
+    assert fake.calls == []  # nothing sent: already paused
+    runtime.transport("play")
+    assert runtime.transport("play")["state"] == "playing"
+
+
+def test_limit_shown_to_the_kids_follows_max_volume(runtime, monkeypatch):
+    monkeypatch.setattr(runtime, "max_volume", lambda: 12)
+    assert runtime.state_document()["volume"]["max"] == 12
+    assert runtime.status()["volume_guard"]["max"] == 12
+
+
+def test_unreachable_speaker_makes_the_volume_unknown(runtime, fake):
+    fake.volume = 10
+    runtime.poll_volume()
+    assert runtime.state_document()["volume"]["value"] == 10
+    fake.fail_next["get_volume"] = SonosUnreachable()
+    runtime.poll_volume()
+    assert runtime.state_document()["volume"]["value"] is None
+
+
+def test_volume_taps_do_not_pile_up(tmp_path, library):
+    release = threading.Event()
+    fake = FakeSonos(volume=4)
+    fake.on_call = lambda name: name == "get_volume" and release.wait(5)
+    rt = threaded_runtime(tmp_path, fake, library)
+    rt.volume_lane.start()
+    try:
+        results = []
+
+        def tap():
+            try:
+                rt.change_volume("up")
+                results.append("ok")
+            except Busy:
+                results.append("busy")
+            except Unavailable:
+                results.append("slow")
+
+        first = threading.Thread(target=tap)
+        first.start()
+        deadline = time.monotonic() + 2
+        while not rt.volume_lane.busy and time.monotonic() < deadline:
+            time.sleep(0.01)
+        for _ in range(3):
+            tap()
+        release.set()
+        first.join(5)
+        assert results.count("busy") == 3
+        deadline = time.monotonic() + 2
+        while rt.volume_lane.busy and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert fake.volume == 7  # exactly one step, not four
+    finally:
+        release.set()
+        rt.volume_lane.stop()

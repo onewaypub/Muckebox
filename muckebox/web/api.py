@@ -90,6 +90,8 @@ def volume(direction: str):
         result = _services().runtime.change_volume(direction)
     except ValueError as exc:
         raise ApiError(404, "not_found") from exc
+    except Busy as exc:
+        raise ApiError(409, "busy") from exc
     except Unavailable as exc:
         raise ApiError(503, exc.code, exc.retry_in) from exc
     return jsonify(ok=True, volume=result)

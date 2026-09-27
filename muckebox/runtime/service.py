@@ -120,6 +120,7 @@ class Runtime:
             last_error=None,
         )
         self._command_lock = threading.Lock()
+        self._volume_lock = threading.Lock()
         self._room_resolved_at: float | None = None
         self._now_playing: NowPlaying | None = self._load_now_playing()
         self._favorites: tuple[float, list[Favorite]] | None = None
@@ -178,7 +179,7 @@ class Runtime:
             },
             "volume": {
                 "value": volume,
-                "max": self.settings.max_volume,
+                "max": self.max_volume(),
                 "step": self.settings.volume_step,
             },
             "pending": data["pending"],
@@ -195,7 +196,7 @@ class Runtime:
         if playback["tile_id"] == tile.id:
             if playback["state"] in ("playing", "transitioning"):
                 return "noop"
-            self._submit_exclusive(lambda: self._transport_job("play"), pending=None)
+            self._submit_exclusive(lambda: self._resume_job(tile.id), pending=None)
             return "resumed"
         pending = {"action": "start", "tile_id": tile.id, "since": int(self.clock.time())}
         self._submit_exclusive(lambda: self._start_tile(tile), pending=pending)
@@ -205,9 +206,12 @@ class Runtime:
         if action not in (*TRANSPORT_ACTIONS, "toggle"):
             raise ValueError(action)
         self._check_available(action)
+        playing = self.state.get("playback")["state"] in ("playing", "transitioning")
         if action == "toggle":
-            playing = self.state.get("playback")["state"] in ("playing", "transitioning")
             action = "pause" if playing else "play"
+        elif (action == "pause" and not playing) or (action == "play" and playing):
+            # Already done: a double tap must not undo the first tap.
+            return self.state_document()["playback"]
         future = self._submit_exclusive(lambda: self._transport_job(action), pending=None)
         self._wait(future, COMMAND_WAIT)
         return self.state_document()["playback"]
@@ -216,7 +220,11 @@ class Runtime:
         if direction not in ("up", "down"):
             raise ValueError(direction)
         self._check_available("volume")
-        future = self.volume_lane.submit(lambda: self._volume_job(direction))
+        with self._volume_lock:
+            # One tap at a time: taps must not pile up while the speaker is slow.
+            if self.volume_lane.busy:
+                raise Busy()
+            future = self.volume_lane.submit(lambda: self._volume_job(direction))
         try:
             self._wait(future, VOLUME_WAIT)
         except Unavailable as exc:
@@ -245,7 +253,7 @@ class Runtime:
             "config_problems": [p.code for p in self.settings.problems],
             "library_problem": self.library.load_problem,
             "volume_guard": {
-                "max": self.settings.max_volume,
+                "max": self.max_volume(),
                 "corrections": self.guard.corrections,
                 "fighting": self.guard.fighting,
                 "fixed_volume": self.fixed_volume,
@@ -278,6 +286,7 @@ class Runtime:
         except SonosError as exc:
             if exc.connection_problem:
                 self.volume_breaker.failure()
+                self.state.update(volume=None)  # the bar shows "unknown", buttons disable
             else:
                 log.info("Volume check failed: %s", exc)
             return
@@ -319,6 +328,15 @@ class Runtime:
             return None
         if now_playing.route == Route.DIRECT:
             matches = _strip_query(playback.media_uri) == _strip_query(now_playing.uri)
+        elif now_playing.first_queue_uri is None and playback.media_uri.startswith(
+            "x-rincon-queue:"
+        ):
+            # Started by us, but the queue could not be read yet: learn it now.
+            now_playing = NowPlaying(
+                now_playing.tile_id, now_playing.route, now_playing.uri, playback.first_queue_uri
+            )
+            self._set_now_playing(now_playing)
+            matches = playback.first_queue_uri is not None
         else:
             matches = (
                 playback.media_uri.startswith("x-rincon-queue:")
@@ -333,32 +351,50 @@ class Runtime:
 
     def _start_tile(self, tile: Tile) -> None:
         try:
-            self._ensure_room()
-            if tile.kind == "favorite":
-                route = self.backend.play_favorite(tile.favorite_ref(), tile.favorite_route())
-            else:
-                self.backend.play_share_link(tile.share_link(), tile.title)
-                route = Route.QUEUE
-            playback = self.backend.playback()
+            try:
+                self._ensure_room()
+                if tile.kind == "favorite":
+                    route = self.backend.play_favorite(tile.favorite_ref(), tile.favorite_route())
+                else:
+                    self.backend.play_share_link(tile.share_link(), tile.title)
+                    route = Route.QUEUE
+            except SonosError as exc:
+                log.warning("Starting tile %s failed: %s", tile.id, exc)
+                self._on_error(exc)
+                self._report_error(exc.code, tile.id)
+                return
+            except Exception:
+                log.exception("Starting tile %s failed unexpectedly", tile.id)
+                self._report_error("sonos_error", tile.id)
+                return
+            # The speaker accepted the start: remember it, whatever happens next.
             self._set_now_playing(
-                NowPlaying(
-                    tile_id=tile.id,
-                    route=route.value,
-                    uri=tile.source.get("uri", ""),
-                    first_queue_uri=playback.first_queue_uri,
-                )
+                NowPlaying(tile_id=tile.id, route=route.value, uri=tile.source.get("uri", ""))
             )
             self.state.update(last_error=None)
-            self._refresh_playback()
             self.transport_breaker.success()
-        except SonosError as exc:
-            log.warning("Starting tile %s failed: %s", tile.id, exc)
-            self._on_error(exc)
-            self.state.update(
-                last_error={"code": exc.code, "tile_id": tile.id, "at": int(self.clock.time())}
-            )
+            try:
+                self._refresh_playback()  # also learns the first queue item
+            except SonosError as exc:
+                log.info("Reading the state after starting %s failed: %s", tile.id, exc)
+                if exc.connection_problem:
+                    self._on_error(exc)
         finally:
             self.state.update(pending=None)
+
+    def _resume_job(self, tile_id: str) -> None:
+        try:
+            self._transport_job("play")
+        except SonosError as exc:
+            self._report_error(exc.code, tile_id)
+        except Exception:
+            log.exception("Resuming tile %s failed unexpectedly", tile_id)
+            self._report_error("sonos_error", tile_id)
+
+    def _report_error(self, code: str, tile_id: str) -> None:
+        self.state.update(
+            last_error={"code": code, "tile_id": tile_id, "at": int(self.clock.time())}
+        )
 
     def _transport_job(self, action: str) -> None:
         try:
@@ -416,9 +452,13 @@ class Runtime:
         try:
             return future.result(timeout)
         except FutureTimeout as exc:
+            future.cancel()  # a command reported as failed must not run later
             raise Unavailable("sonos_timeout") from exc
         except SonosError as exc:
             raise Unavailable(exc.code, self.transport_breaker.retry_in()) from exc
+        except Exception as exc:
+            log.exception("A command failed unexpectedly")
+            raise Unavailable("sonos_error") from exc
 
     def _on_error(self, exc: SonosError) -> None:
         if exc.connection_problem:
