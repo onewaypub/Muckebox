@@ -4,7 +4,7 @@
 
 Invalid Sonos or volume settings are not fatal: Muckebox still starts, shows
 the problem on the tablet and refuses to control the speaker. Only settings
-without which the web server cannot run at all (``PORT``) raise
+without which the web server cannot run at all (``PORT``, ``LISTEN``) raise
 :class:`FatalConfigError`.
 """
 
@@ -21,6 +21,10 @@ DEFAULT_MAX_VOLUME = 25
 DEFAULT_VOLUME_STEP = 3
 DEFAULT_DATA_DIR = "/data"
 DEFAULT_PORT = 8484
+# LISTEN values: which network interfaces the web server listens on.
+# The default, LISTEN_ALL, lets tablets reach Muckebox over the home network.
+LISTEN_ALL = "0.0.0.0"  # noqa: S104  # nosec B104
+LISTEN_LOCALHOST = "127.0.0.1"
 MIN_PIN_LENGTH = 4
 # Example values from docker-compose.yml that must never work as a real PIN.
 PLACEHOLDER_PINS = frozenset({"change-me", "changeme", "1234", "0000"})
@@ -69,6 +73,7 @@ class Settings:
     admin_pin: str | None = field(repr=False)  # never print the PIN
     data_dir: Path
     port: int
+    listen: str = LISTEN_ALL
     problems: tuple[ConfigProblem, ...] = ()
 
     @property
@@ -164,6 +169,8 @@ def load_settings(environ: Mapping[str, str]) -> Settings:
             "a Synology DSM port (5000, 5001, 5357) or a port that browsers block."
         )
 
+    listen = _parse_listen(get("LISTEN"))
+
     return Settings(
         sonos_room=sonos_room,
         sonos_ip=sonos_ip,
@@ -172,8 +179,25 @@ def load_settings(environ: Mapping[str, str]) -> Settings:
         admin_pin=admin_pin,
         data_dir=data_dir,
         port=port,
+        listen=listen,
         problems=tuple(problems),
     )
+
+
+def _parse_listen(raw: str | None) -> str:
+    """``all`` (default), ``localhost`` or one IPv4 address of this host."""
+    value = (raw or "all").lower()
+    if value in ("all", "*", LISTEN_ALL):
+        return LISTEN_ALL
+    if value == "localhost":
+        return LISTEN_LOCALHOST
+    try:
+        return str(ipaddress.IPv4Address(value))
+    except ValueError:
+        raise FatalConfigError(
+            "LISTEN must be 'all' (whole network), 'localhost' (this computer only) "
+            "or an IPv4 address of this host."
+        ) from None
 
 
 def _parse_int(raw: str | None, default: int, low: int, high: int) -> int | None:

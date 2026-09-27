@@ -42,9 +42,21 @@ class Lane:
         self._thread.start()
 
     def stop(self, timeout: float = 5.0) -> None:
+        self.request_stop()
+        self.join(timeout)
+
+    def request_stop(self) -> None:
+        """Ask the thread to end once the jobs queued so far have run (does not wait).
+
+        A job submitted after this call never runs.
+        """
         self._queue.put(_STOP)
+
+    def join(self, timeout: float) -> None:
+        # The thread is a daemon: if a job still hangs on the network after
+        # the timeout, the process can exit anyway.
         if self._thread is not None:
-            self._thread.join(timeout)
+            self._thread.join(max(0.0, timeout))
 
     def submit(self, job: Callable[[], Any]) -> Future:
         future: Future = Future()
@@ -93,6 +105,12 @@ class InlineLane:
         pass
 
     def stop(self, timeout: float = 5.0) -> None:
+        pass
+
+    def request_stop(self) -> None:
+        pass
+
+    def join(self, timeout: float) -> None:
         pass
 
     def submit(self, job: Callable[[], Any]) -> Future:

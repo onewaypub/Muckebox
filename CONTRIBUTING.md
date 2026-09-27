@@ -55,7 +55,8 @@ Run Muckebox without a speaker (a simulated one with demo favorites):
 MUCKEBOX_FAKE_SONOS=1 SONOS_IP=192.0.2.10 DATA_DIR=./data ADMIN_PIN=... python -m muckebox
 ```
 
-Replace `...` with a PIN of your choice (at least 4 characters). Then open
+Replace `...` with a PIN of your choice (at least 4 characters). Add
+`LISTEN=localhost` to keep it reachable from this computer only. Then open
 <http://localhost:8484/> (kids view) and <http://localhost:8484/admin>
 (parents' page).
 

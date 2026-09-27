@@ -31,6 +31,6 @@ EXPOSE 8484
 VOLUME ["/data"]
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD ["python", "-c", "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:%s/api/health' % os.environ.get('PORT', '8484'), timeout=4)"]
+  CMD ["python", "-m", "muckebox.healthcheck"]
 
 CMD ["python", "-m", "muckebox"]

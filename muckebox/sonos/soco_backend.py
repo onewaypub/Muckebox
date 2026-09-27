@@ -255,7 +255,8 @@ class SocoBackend:
             key=lambda m: m.ip,
         )
         if not rooms:
-            raise RoomNotFound(f"room {wanted!r} not found")
+            names = sorted({m.name for m in members if m.visible})
+            raise RoomNotFound(f"room {wanted!r} not found; rooms: {', '.join(names) or 'none'}")
         room = rooms[0]
         coordinator = next((m for m in members if m.uid == room.coordinator_uid), None)
         if coordinator is None:

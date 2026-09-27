@@ -165,3 +165,26 @@ def test_example_pins_lock_the_admin(pin):
     s = load_settings({**BASE, "ADMIN_PIN": pin})
     assert s.admin_locked
     assert "admin_pin_placeholder" in codes(s)
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (None, "0.0.0.0"),
+        ("all", "0.0.0.0"),
+        ("ALL", "0.0.0.0"),
+        ("localhost", "127.0.0.1"),
+        ("192.0.2.5", "192.0.2.5"),
+    ],
+)
+def test_listen(value, expected):
+    env = {**BASE, "LISTEN": value} if value is not None else BASE
+    assert load_settings(env).listen == expected
+
+
+@pytest.mark.parametrize(
+    "value", ["everywhere", "nas.example", "192.0.2.300", "::", "::1", "fe80::1%eth0"]
+)
+def test_invalid_listen_is_fatal(value):
+    with pytest.raises(FatalConfigError, match="LISTEN"):
+        load_settings({**BASE, "LISTEN": value})

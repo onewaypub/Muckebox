@@ -19,7 +19,13 @@ from flask import Flask
 from waitress import create_server
 
 from muckebox import __version__
-from muckebox.config import FatalConfigError, Settings, load_settings
+from muckebox.config import (
+    LISTEN_ALL,
+    LISTEN_LOCALHOST,
+    FatalConfigError,
+    Settings,
+    load_settings,
+)
 from muckebox.covers import CoverStore
 from muckebox.library import Library
 from muckebox.runtime.service import Runtime
@@ -44,7 +50,7 @@ class DataDirError(Exception):
 
 def main(
     environ: Mapping[str, str] = os.environ,
-    serve: Callable[[Flask, int], None] | None = None,
+    serve: Callable[[Flask, int, str], None] | None = None,
 ) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     serve = serve or _serve
@@ -68,16 +74,35 @@ def main(
     services = build_services(settings, fake_sonos=environ.get("MUCKEBOX_FAKE_SONOS") == "1")
     app = create_app(services)
     services.runtime.start()
-    log.info("Muckebox %s listening on port %d", __version__, settings.port)
+    reach = {LISTEN_ALL: "the whole network", LISTEN_LOCALHOST: "this computer only"}
+    log.info(
+        "Muckebox %s listening on %s port %d (%s)",
+        __version__,
+        settings.listen,
+        settings.port,
+        reach.get(settings.listen, "this address only"),
+    )
     try:
-        serve(app, settings.port)
+        serve(app, settings.port, settings.listen)
     except OSError as exc:
         if exc.errno == errno.EADDRINUSE:
             log.error("Port %d is already in use on this host; choose another PORT.", settings.port)
             return EXIT_PORT_IN_USE
-        raise
+        # Any other failure to open the port: most likely a LISTEN address
+        # that does not belong to this host.
+        log.error(
+            "Cannot listen on %s port %d (%s). Use LISTEN=all, localhost or an IPv4 "
+            "address of this host.",
+            settings.listen,
+            settings.port,
+            exc.strerror or exc,
+        )
+        return EXIT_CONFIG
     finally:
-        services.runtime.stop()
+        try:
+            services.runtime.stop()
+        except KeyboardInterrupt:
+            log.info("Stopped without waiting for the speaker")
     return EXIT_OK
 
 
@@ -152,12 +177,12 @@ def _raise_shutdown(signum: int, frame: FrameType | None) -> None:
     raise _Shutdown(0)
 
 
-def _serve(app: Flask, port: int) -> None:
+def _serve(app: Flask, port: int, host: str = LISTEN_ALL) -> None:
     server = create_server(
         app,
-        # IPv4 on all interfaces: tablets on the home network connect to the
-        # host's LAN address. Muckebox must not be exposed to the internet.
-        host="0.0.0.0",  # noqa: S104  # nosec B104
+        # By default all interfaces: tablets on the home network connect to
+        # the host's LAN address. Muckebox must not be exposed to the internet.
+        host=host,
         port=port,
         threads=WEB_THREADS,
         ident="Muckebox",
@@ -172,6 +197,9 @@ def _serve(app: Flask, port: int) -> None:
     except (KeyboardInterrupt, _Shutdown):
         pass  # only reached if the signal arrives outside waitress's loop
     finally:
+        # A second Ctrl+C or SIGTERM ends the process at once, quietly.
+        signal.signal(signal.SIGINT, signal.SIG_DFL)
+        signal.signal(signal.SIGTERM, signal.SIG_DFL)
         log.info("Shutting down")
         server.close()
 
