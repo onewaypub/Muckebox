@@ -984,7 +984,9 @@ def test_sleep_timer_rules(runtime, clock):
         runtime.keeper.start_sleep_timer()
     assert info.value.code == "sleep_timer_off"
     runtime.store.set_sleep_timer({"enabled": True, "minutes": 30})
-    runtime.keeper.start_sleep_timer()
+    first = runtime.keeper.start_sleep_timer()
+    clock.advance(60)
+    assert runtime.keeper.start_sleep_timer() == first  # not restarted
     runtime.keeper.cancel_sleep_timer()
     assert runtime.state_document()["sleep_timer"]["ends_at"] is None
 

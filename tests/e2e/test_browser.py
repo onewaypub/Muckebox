@@ -370,3 +370,18 @@ def test_bedtime_moon_and_the_parents_pin_pad(page, evening_server):
     expect(pad).to_be_hidden()
     expect(bedtime).to_be_hidden(timeout=5000)
     expect(page.locator(".tile")).to_have_count(1)
+
+
+def test_kids_start_the_sleep_timer_with_the_moon(page, server):
+    server.store.set_sleep_timer({"enabled": True, "minutes": 30, "wake": "07:00"})
+    server.add_tiles(0)
+    page.goto(server.url)
+    moon = page.locator("#small-moon")
+    expect(moon).to_have_attribute("data-mode", "start")
+    moon.tap()
+    expect(moon).to_have_attribute("data-mode", "running")
+    expect(page.locator(".small-moon .ring")).to_be_visible()
+    timer = server.runtime.keeper.timers.state.sleep
+    assert timer is not None and timer.ends_at > time.time() + 29 * 60
+    moon.tap()  # a second tap changes nothing
+    assert server.runtime.keeper.timers.state.sleep.ends_at == timer.ends_at

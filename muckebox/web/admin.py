@@ -196,6 +196,22 @@ def set_schedule():
     return _settings_response()
 
 
+@bp.put("/settings/sleep-timer")
+@auth.require_admin
+def set_sleep_timer():
+    _settings_call(_services().store.set_sleep_timer, _body())
+    return _settings_response()
+
+
+@bp.delete("/sleep-timer")
+@auth.require_admin
+def cancel_sleep_timer():
+    """End a running sleep timer before it runs out."""
+    keeper = _services().runtime.keeper
+    keeper.cancel_sleep_timer()
+    return jsonify(ok=True, **keeper.document())
+
+
 @bp.post("/override")
 @auth.require_admin
 def override():

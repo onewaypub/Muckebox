@@ -776,3 +776,37 @@ def test_invalid_override_requests(client, body):
 def test_override_without_usage_times(client):
     response = client.post("/api/override", json={"pin": "2468", "minutes": 15}, headers=POST)
     assert error_code(response) == (409, "schedule_off")
+
+
+# -- sleep timer --------------------------------------------------------------------------
+
+
+def test_parents_set_up_the_sleep_timer(admin, client, services):
+    body = {"enabled": True, "minutes": 20, "wake": "06:45"}
+    response = admin.put("/api/admin/settings/sleep-timer", json=body, headers=POST)
+    assert response.get_json()["settings"]["sleep_timer"] == body
+    bad = admin.put("/api/admin/settings/sleep-timer", json={"minutes": 200}, headers=POST)
+    assert error_code(bad) == (422, "sleep_timer_invalid")
+
+
+def test_kids_start_the_sleep_timer_and_parents_end_it(admin, client, services):
+    started = client.post("/api/sleep-timer/start", headers=POST)
+    assert error_code(started) == (409, "sleep_timer_off")
+    admin.put(
+        "/api/admin/settings/sleep-timer", json={"enabled": True, "minutes": 20}, headers=POST
+    )
+    timer = client.post("/api/sleep-timer/start", headers=POST).get_json()["sleep_timer"]
+    assert timer["ends_at"] == int(services.runtime.clock.time()) + 1200
+    assert client.get("/api/state").get_json()["sleep_timer"]["ends_at"] == timer["ends_at"]
+    assert admin.get("/api/admin/status").get_json()["sleep_timer"]["ends_at"] == timer["ends_at"]
+    ended = admin.delete("/api/admin/sleep-timer", headers=POST).get_json()
+    assert ended["sleep_timer"]["ends_at"] is None
+
+
+def test_the_sleep_timer_cannot_start_at_bedtime(admin, client, services):
+    admin.put("/api/admin/settings/schedule", json=DAILY, headers=POST)
+    admin.put(
+        "/api/admin/settings/sleep-timer", json={"enabled": True, "minutes": 20}, headers=POST
+    )
+    set_evening(services)
+    assert error_code(client.post("/api/sleep-timer/start", headers=POST)) == (409, "bedtime")

@@ -19,7 +19,8 @@ import {
   padPress,
   padReady,
   placeholderColour,
-  showsSmallMoon,
+  moonMode,
+  sleepLeft,
   tileState,
   volumeSegments,
 } from "../../muckebox/static/js/logic.js";
@@ -92,10 +93,24 @@ test("bedtime: the moon replaces the tiles and hides the sleeping speaker", () =
   assert.equal(overlayKind(0, state("closed", "sonos_unreachable")), null);
   assert.equal(overlayKind(0, state("open", "sonos_unreachable")), "sleeping");
   assert.equal(overlayKind(2, state("closed")), "offline");
-  assert.equal(showsSmallMoon(state("fading")), true);
-  assert.equal(showsSmallMoon(state("open", "ok", 1790000000)), true);
-  assert.equal(showsSmallMoon(state("open")), false);
-  assert.equal(showsSmallMoon(state("closed", "ok", 1790000000)), false);
+});
+
+test("moon button: start, running, fading or hidden", () => {
+  const state = (phase, timer) => ({ schedule: { phase }, sleep_timer: timer });
+  assert.equal(moonMode(state("open", { enabled: true, ends_at: null })), "start");
+  assert.equal(moonMode(state("open", { enabled: false, ends_at: null })), "hidden");
+  assert.equal(moonMode(state("open", { enabled: true, ends_at: 1790000000 })), "running");
+  assert.equal(moonMode(state("fading", { enabled: false, ends_at: null })), "fading");
+  assert.equal(moonMode(state("closed", { enabled: true, ends_at: null })), "hidden");
+  assert.equal(moonMode(null), "hidden");
+});
+
+test("sleep timer ring shows the time left", () => {
+  const ends = 1_790_001_800; // 30 minutes after the start below
+  assert.equal(sleepLeft(ends, 30, 1_790_000_000_000), 1);
+  assert.equal(sleepLeft(ends, 30, 1_790_000_900_000), 0.5);
+  assert.equal(sleepLeft(ends, 30, 1_790_002_000_000), 0);
+  assert.equal(sleepLeft(null, 30, 0), 0);
 });
 
 test("volume bar: segments above the limit are dimmed", () => {

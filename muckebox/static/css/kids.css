@@ -473,7 +473,7 @@ svg {
 }
 
 .moon svg,
-.small-moon svg {
+.small-moon .moon-shape {
   width: 100%;
   height: 100%;
   fill: currentcolor;
@@ -481,7 +481,7 @@ svg {
 }
 
 .moon.holding svg,
-.small-moon.holding svg {
+.small-moon.holding .moon-shape {
   animation: hold 3s linear forwards;
 }
 
@@ -504,11 +504,44 @@ svg {
 }
 
 .small-moon {
+  position: relative;
   padding: 14px;
   background: none;
   color: var(--accent);
   touch-action: none;
   -webkit-touch-callout: none;
+}
+
+.small-moon[data-mode="start"] {
+  background: var(--panel);
+}
+
+.small-moon .ring {
+  position: absolute;
+  inset: 0;
+  display: none;
+  transform: rotate(-90deg);
+  filter: none;
+}
+
+.small-moon[data-mode="running"] .ring {
+  display: block;
+}
+
+.small-moon .ring circle {
+  fill: none;
+  stroke-width: 3;
+}
+
+.small-moon .ring-track {
+  stroke: rgb(255 255 255 / 15%);
+}
+
+.small-moon .ring-fill {
+  stroke: var(--accent);
+  stroke-dasharray: 100;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 1s linear;
 }
 
 .volume i.over {

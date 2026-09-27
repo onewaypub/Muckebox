@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
 // Bedtime on the kids view: the moon instead of the tiles, the small moon
-// while the music fades, and the parents' PIN pad behind a 3-second press.
+// (sleep timer, fading), and the parents' PIN pad behind a 3-second press.
 
-import { ApiError, post } from "./api.js";
+import { ApiError, post, serverNow } from "./api.js";
 import { t } from "./i18n.js";
-import { PAD_TRIES, isBedtime, padPress, padReady, showsSmallMoon } from "./logic.js";
+import { PAD_TRIES, isBedtime, moonMode, padPress, padReady, sleepLeft } from "./logic.js";
 
 const HOLD_MS = 3000;
 const IDLE_MS = 30000;
@@ -17,6 +17,7 @@ const view = {
   moon: document.getElementById("moon"),
   until: document.getElementById("bedtime-until"),
   smallMoon: document.getElementById("small-moon"),
+  ring: document.getElementById("ring-fill"),
   pad: document.getElementById("pin-pad"),
   dots: document.getElementById("pad-dots"),
   keys: document.getElementById("pad-keys"),
@@ -25,6 +26,7 @@ const view = {
 };
 
 const pad = { pin: "", wrong: 0, lockedUntil: 0, idleTimer: null };
+const moon = { mode: "hidden", timer: null, state: null, held: false };
 let changed = () => {};
 
 export function padIsOpen() {
@@ -36,6 +38,7 @@ export function initBedtime({ onChange }) {
   changed = onChange;
   holdToOpen(view.moon);
   holdToOpen(view.smallMoon);
+  view.smallMoon.addEventListener("click", startSleepTimer);
   const keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "back", "0"];
   view.keys.replaceChildren(
     ...keys.map((key) => {
@@ -58,10 +61,38 @@ export function initBedtime({ onChange }) {
 export function renderBedtime(state) {
   const bedtime = isBedtime(state);
   view.panel.hidden = !bedtime;
-  view.smallMoon.hidden = !showsSmallMoon(state);
+  moon.state = state;
+  moon.mode = moonMode(state);
+  view.smallMoon.hidden = moon.mode === "hidden";
+  view.smallMoon.dataset.mode = moon.mode;
+  renderRing();
+  clearInterval(moon.timer);
+  if (moon.mode === "running") moon.timer = setInterval(renderRing, 10000);
   const opens = bedtime && state.schedule.opens_at;
   view.until.textContent = opens ? t("kids.bedtime_until", { time: clock(opens, state.schedule.zone) }) : "";
   return bedtime;
+}
+
+function renderRing() {
+  const timer = moon.state && moon.state.sleep_timer;
+  const left = moon.mode === "running" ? sleepLeft(timer.ends_at, timer.minutes, serverNow()) : 0;
+  view.ring.style.strokeDashoffset = String(100 - left * 100);
+}
+
+async function startSleepTimer() {
+  if (moon.held) {
+    moon.held = false; // the end of a long press is not a tap
+    return;
+  }
+  if (moon.mode !== "start") return;
+  moon.mode = "running"; // feedback right away; the next poll brings the ring
+  view.smallMoon.dataset.mode = "running";
+  try {
+    await post("/api/sleep-timer/start");
+  } catch {
+    // Refused (e.g. just turned off): the next poll shows the real state.
+  }
+  changed();
 }
 
 function clock(epoch, zone) {
@@ -82,6 +113,7 @@ function holdToOpen(element) {
     element.classList.add("holding");
     timer = setTimeout(() => {
       cancel();
+      moon.held = true;
       openPad();
     }, HOLD_MS);
   });
