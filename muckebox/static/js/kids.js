@@ -169,7 +169,7 @@ async function poll() {
     if (model.state && model.state.library_rev !== model.libraryRev) {
       await loadTiles();
     }
-  } catch (error) {
+  } catch {
     model.failures += 1;
     renderOverlay();
   }

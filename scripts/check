@@ -30,6 +30,12 @@ step "pytest (with coverage; browser tests run if Playwright browsers are instal
 MUCKEBOX_REQUIRE_GITLEAKS=1 pytest --cov --cov-report=term
 
 if command -v node >/dev/null; then
+  if [ -d node_modules ]; then
+    step "eslint + stylelint (browser baseline iOS 16.4 / Chrome 111)"
+    npm run --silent lint
+  else
+    printf '\n== run "npm ci" once to enable the browser linters\n'
+  fi
   step "node --test (browser logic)"
   node --test tests/js/*.test.mjs
 else

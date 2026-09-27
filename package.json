@@ -1,0 +1,25 @@
+{
+  "name": "muckebox-dev-tools",
+  "private": true,
+  "description": "Development-only tools for Muckebox (linting the browser code). Nothing here is shipped.",
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "browserslist": [
+    "iOS >= 16.4",
+    "Safari >= 16.4",
+    "Chrome >= 111",
+    "ChromeAndroid >= 111"
+  ],
+  "scripts": {
+    "lint": "eslint muckebox/static/js tests/js && stylelint \"muckebox/static/css/*.css\"",
+    "test": "node --test tests/js/*.test.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "eslint": "10.11.0",
+    "eslint-plugin-compat": "7.0.2",
+    "globals": "17.12.0",
+    "stylelint": "17.15.0",
+    "stylelint-no-unsupported-browser-features": "8.1.2"
+  }
+}
