@@ -15,8 +15,9 @@ POST = {"X-Muckebox": "1"}
 
 @pytest.fixture(autouse=True)
 def fresh_rate_limiter(monkeypatch):
-    monkeypatch.setattr("muckebox.web.admin._limiter", auth.RateLimiter())
-    monkeypatch.setattr("muckebox.web.api._override_limiter", auth.RateLimiter())
+    login = auth.RateLimiter()
+    monkeypatch.setattr(auth, "login_limiter", login)
+    monkeypatch.setattr(auth, "override_limiter", auth.RateLimiter(share_global_with=login))
 
 
 def login(client, pin="2468", **kwargs):
@@ -882,3 +883,16 @@ def test_game_errors(admin, client):
     unknown_tile = {"dance_tile": "t0000000000000000"[:16]}
     response = admin.put("/api/admin/settings/games", json=unknown_tile, headers=POST)
     assert error_code(response) == (422, "games_invalid")
+
+
+def test_the_pin_pad_and_the_login_share_one_total(admin, client, services):
+    admin.put("/api/admin/settings/schedule", json=DAILY, headers=POST)
+    set_evening(services)
+    for number in range(auth.MAX_FAILURES_GLOBAL // 2):
+        address = {"REMOTE_ADDR": f"192.0.2.{number + 1}"}
+        client.post(
+            "/api/override", json={"pin": "1111", "minutes": 15}, headers=POST, environ_base=address
+        )
+        login(client, "1111", environ_base=address)
+    response = login(client, environ_base={"REMOTE_ADDR": "198.51.100.7"})
+    assert error_code(response) == (429, "pin_rate_limited")  # 20 wrong PINs in total

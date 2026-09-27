@@ -18,9 +18,6 @@ from . import auth
 from .errors import ApiError
 
 bp = Blueprint("api", __name__)
-# Its own limiter: a kid mashing the PIN pad must not lock the parents out of
-# the parents' page.
-_override_limiter = auth.RateLimiter()
 OVERRIDE_MINUTES = (15, 30, 60)
 
 
@@ -128,7 +125,7 @@ def override():
     minutes, until = body.get("minutes"), body.get("until")
     if not (minutes in OVERRIDE_MINUTES and type(minutes) is int) and until != "morning":
         raise ApiError(400, "bad_request")
-    auth.check_pin(body.get("pin"), _override_limiter)
+    auth.check_pin(body.get("pin"), auth.override_limiter)
     runtime = _services().runtime
     runtime.keeper.override(
         minutes=None if until == "morning" else minutes, morning=until == "morning"
