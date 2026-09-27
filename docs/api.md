@@ -14,8 +14,11 @@ changes increase the `api` number reported by `/api/state`.
 
 ## Conventions
 
-- Request and response bodies are JSON (`application/json; charset=utf-8`),
-  except cover uploads (`multipart/form-data`) and cover images.
+- Request and response bodies are JSON (`application/json`, UTF-8), except
+  cover uploads (`multipart/form-data`) and cover images.
+- Request bodies are limited to 1 MiB (cover uploads: 10 MB). Larger bodies
+  get `413 request_too_large`; grossly oversized ones are rejected by the
+  HTTP server itself with a plain-text `413`.
 - Every `POST`, `PUT`, `PATCH` and `DELETE` request must send the header
   `X-Muckebox: 1`. Requests without it are rejected with `403 csrf_header_missing`.
 - API responses carry `Cache-Control: no-store`.

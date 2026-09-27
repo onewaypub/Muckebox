@@ -209,8 +209,8 @@ Everything lives in `DATA_DIR` (a bind mount in Docker):
 | `secret_key` | Random key for signing the admin session (mode 0600). |
 | `state.json` | The last started tile, so the "now playing" highlight survives a restart. |
 
-No personal data is stored. See PRIVACY.md (added with the admin milestone)
-for the full privacy statement.
+No personal data is stored. PRIVACY.md (added in milestone M9, completed in
+M10) will contain the full privacy statement.
 
 ## Security model
 
@@ -259,3 +259,22 @@ for the full privacy statement.
 | Another Sonos backend | The Sonos backend is an interface; only `muckebox.sonos` knows SoCo. |
 | Push events | `VolumeGuard.on_volume_observed()` and `StateCache.apply()` accept observations from any source. |
 | Reading titles aloud | Would need the speakers to fetch audio from the NAS (an extra firewall rule); not prepared beyond stable tile ids and titles. |
+
+## Milestones
+
+Muckebox v1 is built in small milestones. Each one ends with green checks and
+a manual test on real hardware.
+
+| Milestone | Scope |
+|---|---|
+| M0 | Foundation: configuration, app factory, health endpoint, i18n catalogue, CI, security and privacy checks, project documentation. |
+| M1 | Docker image and docker-compose, Synology guide, page skeleton for the kids view, frontend lint and browser tests. |
+| M2 | Sonos connection (read only): finding the room, timeouts, circuit breaker, favorites classification, diagnostics CLI, network/VLAN guide. |
+| M3 | Playback: favorites (direct and queue routes), share links, transport control. |
+| M4 | Volume safety: volume guard, louder/quieter. |
+| M5 | Kids API, tile library, cover cache, first tile page. |
+| M6 | Complete kids view, tablet kiosk guides (iPad Guided Access, Fully Kiosk Browser). |
+| M7 | Parents' page I: PIN login, status, adding favorites, removing tiles. |
+| M8 | Parents' page II: rename, reorder, custom covers. |
+| M9 | Share links: parsing, metadata without API keys, safe fetching. |
+| M10 | Documentation, privacy statement, end-to-end tests, v1.0 release. |

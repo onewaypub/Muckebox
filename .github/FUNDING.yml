@@ -4,7 +4,8 @@
 # Funding links shown by GitHub's "Sponsor" button.
 # Uncomment a line and replace the placeholder with the real account name.
 # Keep lines commented out until the account exists; otherwise GitHub shows
-# a broken link.
+# a broken link. Also enable Settings > General > Features > Sponsorships,
+# and update the "Support this project" section in README.md.
 
 # github: [YOUR_GITHUB_SPONSORS_USERNAME]
 # ko_fi: YOUR_KOFI_USERNAME
