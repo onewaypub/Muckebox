@@ -114,9 +114,22 @@ def test_serve_closes_server_on_shutdown(monkeypatch, exc):
         signal.signal(signal.SIGTERM, previous)
     assert server.closed
     assert options["port"] == 9123
-    assert options["max_request_body_size"] == app.config["MAX_CONTENT_LENGTH"]
+    assert options["max_request_body_size"] > app.config["MAX_CONTENT_LENGTH"]
 
 
-def test_sigterm_handler_raises_shutdown():
-    with pytest.raises(entry._Shutdown):
-        entry._raise_shutdown(signal.SIGTERM, None)
+def test_sigterm_handler_raises_shutdown_once():
+    previous = signal.getsignal(signal.SIGTERM)
+    try:
+        with pytest.raises(entry._Shutdown) as info:
+            entry._raise_shutdown(signal.SIGTERM, None)
+        assert info.value.code == 0
+        # A second SIGTERM must terminate immediately instead of raising again.
+        assert signal.getsignal(signal.SIGTERM) == signal.SIG_DFL
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+
+
+def test_shutdown_is_a_system_exit():
+    # waitress only drains its worker threads (and re-raises from channel
+    # handlers) for SystemExit and KeyboardInterrupt.
+    assert issubclass(entry._Shutdown, SystemExit)

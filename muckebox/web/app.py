@@ -51,8 +51,9 @@ def create_app(settings: Settings) -> Flask:
 
 
 def _limit_request_size() -> None:
-    # Reject early, even if a view never reads the body. Bodies without a
-    # Content-Length are capped by waitress (max_request_body_size).
+    # Reject early with the JSON envelope, even if a view never reads the
+    # body. Waitress buffers bodies and rejects grossly oversized ones itself
+    # (see WAITRESS_BODY_LIMIT_FACTOR in __main__).
     limit = current_app.config["MAX_CONTENT_LENGTH"]
     if request.content_length is not None and request.content_length > limit:
         raise RequestEntityTooLarge()
