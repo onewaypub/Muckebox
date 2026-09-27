@@ -15,8 +15,13 @@ from muckebox.library import (
 )
 from muckebox.sonos.model import FavoriteRef, Route, ShareLinkRef
 
-REF = FavoriteRef("x-sonosapi-stream:s1?sid=254", "x-sonosapi-stream:*:*:*", "<DIDL/>",
-                  "object.item.audioItem.audioBroadcast", "Kinderradio")  # fmt: skip
+REF = FavoriteRef(
+    "x-sonosapi-stream:s1?sid=254",
+    "x-sonosapi-stream:*:*:*",
+    "<DIDL/>",
+    "object.item.audioItem.audioBroadcast",
+    "Kinderradio",
+)
 
 
 @pytest.fixture

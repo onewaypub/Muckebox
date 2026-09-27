@@ -38,10 +38,24 @@ def findings(lines, tmp_path):
         pytest.fail("gitleaks not found; run scripts/install-gitleaks", pytrace=False)
     report = tmp_path / "report.json"
     subprocess.run(
-        [GITLEAKS, "stdin", "--config", str(CONFIG), "--no-banner", "--log-level", "error",
-         "--report-format", "json", "--report-path", str(report)],
-        input="\n".join(lines) + "\n", text=True, check=False, cwd=tmp_path,
-    )  # fmt: skip
+        [
+            GITLEAKS,
+            "stdin",
+            "--config",
+            str(CONFIG),
+            "--no-banner",
+            "--log-level",
+            "error",
+            "--report-format",
+            "json",
+            "--report-path",
+            str(report),
+        ],
+        input="\n".join(lines) + "\n",
+        text=True,
+        check=False,
+        cwd=tmp_path,
+    )
     found = {}
     for finding in json.loads(report.read_text() or "[]"):
         found.setdefault(finding["StartLine"], set()).add(finding["RuleID"])
