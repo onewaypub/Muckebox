@@ -28,6 +28,8 @@ Everything lives in the data folder (`DATA_DIR`):
 | File | Content | Personal data? |
 |---|---|---|
 | `library.json` | The tiles: titles, the Sonos favorite or share link each one plays, file names of their covers. | Only what parents type in as titles. |
+| `library.json.bak` | The previous version of `library.json`, kept as a safety copy. It is replaced on every change, so a renamed or removed title remains there until the next change. | Only what parents type in as titles. |
+| `library.json.corrupt-…` | Only if `library.json` could not be read: the unreadable file, moved aside for inspection. Delete it once you no longer need it. | Only what parents type in as titles. |
 | `covers/` | Cover pictures: album art and pictures uploaded by parents. Uploaded photos are re-encoded; their metadata (EXIF, e.g. location) is removed. | Only if parents upload photos of people. |
 | `secret_key` | A random key that signs the parents' login cookie. | No |
 | `state.json` | Which tile Muckebox started last. | No |
@@ -43,7 +45,8 @@ To delete everything, stop the container and delete the data folder.
   after a successful PIN login (`muckebox_admin`). It is technically necessary
   for the login, expires after 12 hours and is deleted on logout.
 - **Rate limiting:** failed PIN attempts are counted per client IP address in
-  memory for at most 15 minutes. They are never written to disk.
+  memory only. Entries older than 15 minutes are discarded at the next login
+  attempt, and all of them on restart. They are never written to disk.
 - **Logs:** the container log contains technical messages (for example the
   Sonos room name, speaker addresses, errors). It contains no PINs and no
   request logs with client addresses.
@@ -55,7 +58,7 @@ To delete everything, stop the container and delete the data folder.
 | Tablet/phone → Muckebox | While the pages are open | Taps and page requests, within your home network. The pages load nothing from third parties: no web fonts, no CDNs, no trackers. |
 | Muckebox → Sonos speakers | Continuously while running | Control commands and status queries within your home network. |
 | Sonos speakers → music services | When music plays | Sonos itself streams from the services you linked in the Sonos app, under their terms. Muckebox only tells the speaker what to play. |
-| Muckebox → album art servers | When parents open or add Sonos favorites | Album art addresses provided by Sonos; some point to the music services' image servers on the internet. |
+| Muckebox → album art servers | When parents open or add Sonos favorites | Album art addresses provided by Sonos; some point to the music services' image servers on the internet. Only public internet addresses are contacted for these (besides the speakers themselves). |
 | Muckebox → Apple Music, Spotify, TIDAL, Deezer | Only when parents add a share link | The link itself, to look up its title and cover (oEmbed or the public web page). These services see the public IP address of your internet connection. |
 
 Muckebox makes no other connections to the internet.

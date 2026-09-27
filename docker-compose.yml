@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
 # Muckebox on a NAS or any Docker host. See README.md ("Installation").
-# Replace the example values below before the first start.
+# Replace the example values below before the first start, and keep a copy
+# of this file when you update Muckebox: updates replace it.
 
 services:
   muckebox:
@@ -25,10 +26,11 @@ services:
     user: "1026:100"
 
     environment:
-      # Room name as shown in the Sonos app, and/or the IP address of any
-      # Sonos speaker (required if the speakers are in another VLAN).
+      # Room name as shown in the Sonos app.
       SONOS_ROOM: "Kids room"
-      SONOS_IP: "192.0.2.10"
+      # Only if the speakers are in another VLAN: the IP address of a Sonos
+      # speaker (best the kids room's own). Remove the "#" to use it.
+      # SONOS_IP: "192.0.2.10"
       # Highest volume the kids can reach (1-100) and the step per tap.
       MAX_VOLUME: "25"
       VOLUME_STEP: "3"

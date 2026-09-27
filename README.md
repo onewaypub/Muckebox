@@ -46,20 +46,23 @@ that parents can rely on.
 
 These steps use DSM 7.2 or newer with the **Container Manager** package.
 
-1. **Create the folders.** In File Station, create `docker/muckebox` on your
-   volume and inside it a folder `data`. The path is then usually
-   `/volume1/docker/muckebox`.
-2. **Copy Muckebox into it.** Download this repository as a ZIP file
-   (*Code → Download ZIP*) and extract it into `docker/muckebox`, or clone it
-   there over SSH:
-   `git clone https://github.com/onewaypub/Muckebox.git /volume1/docker/muckebox`
+1. **Get Muckebox.** Either
+   - download this repository as a ZIP file (*Code → Download ZIP*), upload
+     it to the shared folder `docker` with File Station and extract it there.
+     This creates a folder `Muckebox-main`; rename it to `muckebox`. Or
+   - clone it over SSH (the target folder must not exist yet):
+     `git clone https://github.com/onewaypub/Muckebox.git /volume1/docker/muckebox`
+2. **Create the data folder.** In File Station, create a folder `data` inside
+   `docker/muckebox`, next to `docker-compose.yml`. The project path is then
+   usually `/volume1/docker/muckebox`.
 3. **Find your user and group IDs.** Muckebox runs as the DSM user that owns
    the `data` folder. Over SSH, `id <your DSM user>` prints them, for example
    `uid=1026(...) gid=100(users)`. Make sure this user has read/write access
    to `docker/muckebox/data`.
 4. **Edit `docker-compose.yml`** (e.g. with the Text Editor package):
    - `user:` your IDs, e.g. `"1026:100"`;
-   - `SONOS_ROOM` and/or `SONOS_IP` (see [Network](#network));
+   - `SONOS_ROOM`, and `SONOS_IP` only if the speakers are in another VLAN
+     (see [Network](#network));
    - `MAX_VOLUME`, `VOLUME_STEP`;
    - `ADMIN_PIN`: your own PIN. Example values such as `change-me` or
      `1234` are refused and keep the parents' page locked.
@@ -77,8 +80,12 @@ expose it to the internet.
 
 **Changing settings:** Container Manager → *Project* → `muckebox` → stop →
 *YAML configurations* (or edit the file) → *Build* → start.
-**Updating:** replace the files (or `git pull`), then build and start the
-project again. Your tiles and covers stay in `data`.
+**Updating:** your settings live in `docker-compose.yml`, so keep that file.
+With a ZIP: copy `docker-compose.yml` somewhere safe, extract the new version
+over `docker/muckebox`, then put your copy back (or carry your values over if
+the new file has new settings). With git: `git stash && git pull && git stash
+pop`. Then build and start the project again. Your tiles and covers stay in
+`data`.
 **Logs:** Container Manager → *Container* → `muckebox` → *Log*.
 
 ### Other Docker hosts
@@ -99,11 +106,11 @@ Muckebox needs these connections:
 | Tablets, parents' phone | Muckebox host | TCP 8484 (`PORT`) | The web UI |
 | Muckebox host | Sonos speakers | TCP 1400 | Controlling the speakers |
 | Muckebox host | Sonos speakers | UDP 1900 multicast | Only for finding a room by name without `SONOS_IP` |
-| Muckebox host | Internet (HTTPS) | TCP 443 | Only when parents add share links or favorites with online cover art |
+| Muckebox host | Internet | TCP 443, some cover art TCP 80, and DNS | When the parents' page shows favorites (thumbnails) and when parents add favorites or share links. Share-link lookups use HTTPS only. |
 
 **Speakers in another VLAN** (for example an IoT network in UniFi):
 discovery by room name uses multicast, which does not cross VLANs. Set
-`SONOS_IP` to the address of any Sonos speaker (give it a fixed address with
+`SONOS_IP` to the address of a Sonos speaker, best the kids room's own (give it a fixed address with
 a DHCP reservation) and keep `SONOS_ROOM` to pick the room; Muckebox reads the
 list of all rooms from that speaker. Allow the host to reach the **whole
 speaker network** on TCP 1400, because the room you control and its group
@@ -125,8 +132,11 @@ Muckebox is configured with environment variables.
 | `PORT` | `8484` | HTTP port (1024–65535). Ports 1400–1499 (Sonos), the Synology DSM ports 5000, 5001 and 5357, and ports that browsers block are rejected. |
 
 If the Sonos or volume settings are invalid, Muckebox still starts and shows
-the problem instead of playing music. An invalid `PORT` or an unusable
-`DATA_DIR` stops the container with a clear log message.
+the problem instead of playing music. If `PORT` is invalid or already in use,
+or `DATA_DIR` is not writable, Muckebox cannot start: it writes the reason to
+the log and exits. Docker then restarts it again and again, so Container
+Manager shows the container as restarting and the log repeats the message
+until you fix the setting (stop the project, correct it, start it again).
 
 **Tip:** as a second safety net, also set a volume limit for the kids room in
 the Sonos app (room settings → Volume Limit). Sonos scales the volume range
@@ -186,7 +196,7 @@ The kids view shows a picture instead of the tiles when something is wrong:
 
 | Picture | Meaning | What to check |
 |---|---|---|
-| Cloud with a cross | The tablet cannot reach Muckebox. | Is the container running? Tablet in the right network? DSM firewall? |
+| Cloud with a cross | The tablet cannot reach Muckebox. | Is the container running (or restarting: see its log)? Tablet in the right network? DSM firewall? |
 | Speaker | Muckebox cannot reach the Sonos speaker. | Speaker switched on? `SONOS_IP` / `SONOS_ROOM` right? Firewall between the VLANs? UPnP enabled in the Sonos app? |
 | Tools | Muckebox is not set up correctly. | The log and the parents' page show which setting is wrong. |
 
