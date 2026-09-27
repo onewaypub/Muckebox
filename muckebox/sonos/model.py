@@ -86,6 +86,8 @@ class Playback:
     media_uri: str = ""
     first_queue_uri: str | None = None
     actions: frozenset[str] = field(default_factory=frozenset)
+    #: Number of items in the queue, if the queue is the source.
+    queue_length: int | None = None
 
     @property
     def can_next(self) -> bool:
@@ -98,3 +100,22 @@ class Playback:
     @property
     def can_pause(self) -> bool:
         return "Pause" in self.actions
+
+
+@dataclass(frozen=True)
+class Position:
+    """Where the group is within the current source."""
+
+    track: int  # 1-based position in the queue
+    seconds: int  # within that track
+    duration: int | None
+    track_uri: str
+
+
+@dataclass(frozen=True)
+class StartAt:
+    """Resume a queue at this track and second (if it is still the same track)."""
+
+    track: int
+    seconds: int
+    track_uri: str

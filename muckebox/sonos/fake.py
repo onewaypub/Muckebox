@@ -14,7 +14,17 @@ from dataclasses import dataclass, field
 
 from . import routing
 from .errors import ActionNotAvailable, RoomNotFound, SonosError, SonosUnreachable
-from .model import Favorite, FavoriteRef, Playback, RoomChoice, RoomInfo, Route, ShareLinkRef
+from .model import (
+    Favorite,
+    FavoriteRef,
+    Playback,
+    Position,
+    RoomChoice,
+    RoomInfo,
+    Route,
+    ShareLinkRef,
+    StartAt,
+)
 
 _DIDL = (
     '<DIDL-Lite xmlns:dc="http://purl.org/dc/elements/1.1/" '
@@ -92,6 +102,14 @@ class FakeSonos:
     state: str = "stopped"
     media_uri: str = ""
     queue: list[str] = field(default_factory=list)
+    #: Favorites that are albums: favorite URI -> the URIs of their tracks.
+    albums: dict[str, list[str]] = field(default_factory=dict)
+    #: Where playback is within the queue (1-based) and the track.
+    track: int = 1
+    seconds: int = 0
+    track_seconds: int = 1200
+    #: The resume points the kids' tiles asked for.
+    starts: list[StartAt | None] = field(default_factory=list)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def _enter(self, name: str, *args: object) -> None:
@@ -122,22 +140,40 @@ class FakeSonos:
         self._enter("list_favorites")
         return list(self.favorites)
 
-    def play_favorite(self, ref: FavoriteRef, route: Route) -> Route:
+    def play_favorite(self, ref: FavoriteRef, route: Route, start: StartAt | None = None) -> Route:
         self._enter("play_favorite", ref.uri, route)
         self._wait()
         if route is Route.DIRECT:
             self.media_uri, self.queue = ref.uri, []
         else:
-            self.media_uri, self.queue = "x-rincon-queue:RINCON_000000000000001400#0", [ref.uri]
-        self.state = "playing"
+            queue = self.albums.get(ref.uri, [ref.uri])
+            self.media_uri, self.queue = "x-rincon-queue:RINCON_000000000000001400#0", list(queue)
+        self._begin(start if route is Route.QUEUE else None)
         return route
 
-    def play_share_link(self, link: ShareLinkRef, title: str) -> None:
+    def play_share_link(self, link: ShareLinkRef, title: str, start: StartAt | None = None) -> None:
         self._enter("play_share_link", link, title)
         self._wait()
         self.media_uri = "x-rincon-queue:RINCON_000000000000001400#0"
         self.queue = [f"{link.service}:{link.kind}:{link.item_id}"]
+        self._begin(start)
+
+    def _begin(self, start: StartAt | None) -> None:
+        """Like the real speaker: resume only where the same track still is."""
+        self.starts.append(start)
+        self.track, self.seconds = 1, 0
+        if start and start.track <= len(self.queue):
+            same = self.queue[start.track - 1].split("?")[0] == start.track_uri.split("?")[0]
+            if same:
+                self.track = start.track
+                self.seconds = max(0, start.seconds - 5) if start.seconds >= 10 else 0
         self.state = "playing"
+
+    def position(self) -> Position | None:
+        self._enter("position")
+        if not self.queue or not self.media_uri.startswith("x-rincon-queue:"):
+            return None
+        return Position(self.track, self.seconds, self.track_seconds, self.queue[self.track - 1])
 
     def transport(self, action: str) -> None:
         self._enter("transport", action)
@@ -158,6 +194,7 @@ class FakeSonos:
             media_uri=self.media_uri,
             first_queue_uri=self.queue[0] if self.queue else None,
             actions=frozenset(actions),
+            queue_length=len(self.queue) if self.queue else None,
         )
 
     def get_volume(self) -> int:
