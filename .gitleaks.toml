@@ -77,6 +77,13 @@ tags = ["privacy", "secret"]
   description = "Test suites use obviously fake PINs"
   paths = ['''^tests/''']
 
+[[rules]]
+id = "claude-session-link"
+description = "Link to a private Claude Code session. Do not publish session links."
+regex = '''\b(claude\.ai/code/session_[A-Za-z0-9]+)'''
+keywords = ["claude.ai/code/session_"]
+tags = ["privacy"]
+
 [[allowlists]]
 description = "Rule definitions and rule tests contain examples on purpose"
 paths = [

@@ -60,6 +60,7 @@ PRIVATE = [
     ("household Sonos_AbCdEfGhIjKlMnOpQrStUvWx.AbCdEf", "sonos-household-id"),
     ("ADMIN_PIN=4711", "admin-pin"),
     ('      ADMIN_PIN: "4711"', "admin-pin"),
+    ("Session: https://claude.ai/code/session_01AbCdEfGhIjKlMn", "claude-session-link"),
 ]
 
 ALLOWED = [
