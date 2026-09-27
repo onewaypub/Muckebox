@@ -765,3 +765,11 @@ def test_find_rooms_with_an_unreachable_seed(kids):
     switch_off(kids)
     with pytest.raises(SonosUnreachable):
         find_rooms("192.0.2.10", soco_factory=lambda ip: zones[ip], resolve_host=lambda h: h)
+
+
+def test_mute_uses_the_rooms_own_player(kids, living):
+    zones = household(kids, living, groups=[(living, living, kids)])
+    backend_for(zones).set_mute(True)
+    assert living.renderingControl.calls == []  # never the group coordinator
+    name, args, timeout = kids.renderingControl.calls[-1]
+    assert (name, args["DesiredMute"], timeout) == ("SetMute", 1, VOLUME_TIMEOUT)

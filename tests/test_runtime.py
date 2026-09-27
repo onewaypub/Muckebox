@@ -1093,3 +1093,15 @@ def test_resume_file_survives_a_restart(runtime, make_runtime, fake, library, al
     listen_until(runtime, fake, 2, 300, state="paused")
     runtime.stop()
     assert make_runtime().resume.get(album.id) == StartAt(2, 300, TRACKS[1])
+
+
+def test_a_game_mute_left_behind_is_undone_on_start(make_runtime, fake):
+    first = make_runtime()
+    with first.timers.change() as state:
+        state.game_mute = True
+    first.timers.save()
+    fake.muted = True
+    restarted = make_runtime()
+    restarted.poll_transport()
+    assert fake.muted is False
+    assert restarted.timers.state.game_mute is False

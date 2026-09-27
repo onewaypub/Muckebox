@@ -625,6 +625,24 @@ class Runtime:
         if first:
             log.info("Controlling room %s", room.name)
             self._detect_fixed_volume(session)
+            self._unmute_after_crash(session)
+
+    def _unmute_after_crash(self, session: RoomSession) -> None:
+        """A game muted the speaker and Muckebox stopped before it ended: unmute."""
+        with self.timers.read() as state:
+            muted = state.game_mute
+        if not muted:
+            return
+        try:
+            session.backend.set_mute(False)
+        except SonosError as exc:
+            if exc.connection_problem:
+                raise
+            log.warning("Could not unmute the speaker: %s", exc)
+            return
+        log.info("Unmuted the speaker (a game had muted it)")
+        with self.timers.change() as state:
+            state.game_mute = False
 
     def _remember_rename(self, session: RoomSession, room: RoomInfo) -> None:
         """Keep the stored room name up to date after a rename in the Sonos app."""

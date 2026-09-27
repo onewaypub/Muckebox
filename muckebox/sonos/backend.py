@@ -64,6 +64,10 @@ class SonosBackend(Protocol):
 
     def set_volume(self, volume: int) -> None: ...
 
+    def set_mute(self, muted: bool) -> None:
+        """Mute or unmute the configured room's own player (not its group)."""
+        ...
+
     def fixed_volume(self) -> bool:
         """True if the player's volume is fixed (line-out products)."""
         ...
