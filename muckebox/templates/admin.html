@@ -30,13 +30,35 @@ SPDX-License-Identifier: AGPL-3.0-or-later
     <label for="pin" data-i18n="admin.pin"></label>
     <input id="pin" name="pin" type="password" inputmode="numeric" autocomplete="current-password" required>
     <button type="submit" data-i18n="admin.login"></button>
+    <p class="hint"><span data-i18n="admin.login_hint"></span>
+      <code class="command">python -m muckebox.admin reset-pin</code></p>
   </form>
 
   <main id="app" hidden>
+    <p id="pin-banner" class="card banner" hidden>
+      <span data-i18n="admin.pin_banner"></span>
+      <a href="#pin-section" data-i18n="admin.pin_banner_link"></a>
+    </p>
+
     <section class="card">
       <h2 data-i18n="admin.status"></h2>
       <dl id="status" class="status"></dl>
       <ul id="problems" class="problems"></ul>
+    </section>
+
+    <section id="setup" class="card">
+      <h2 data-i18n="admin.setup"></h2>
+      <p id="room-current"></p>
+      <form id="room-search" class="room-search">
+        <label for="seed-ip" data-i18n="admin.seed_ip"></label>
+        <p class="hint" data-i18n="admin.seed_ip_hint"></p>
+        <div class="inline">
+          <input id="seed-ip" name="seed_ip" inputmode="decimal" autocomplete="off" spellcheck="false" data-i18n-placeholder="admin.seed_ip_placeholder">
+          <button type="submit" class="secondary" data-i18n="admin.search_rooms"></button>
+        </div>
+      </form>
+      <ul id="rooms" class="rooms" aria-live="polite"></ul>
+      <p class="hint" data-i18n="admin.room_hint"></p>
     </section>
 
     <section class="card">
@@ -45,12 +67,13 @@ SPDX-License-Identifier: AGPL-3.0-or-later
       <ol id="tiles" class="tiles"></ol>
     </section>
 
-    <section class="card">
+    <section id="favorites-section" class="card">
       <div class="section-head">
         <h2 data-i18n="admin.favorites"></h2>
         <button id="refresh" type="button" class="secondary" data-i18n="admin.refresh"></button>
       </div>
       <p class="hint" data-i18n="admin.favorites_hint"></p>
+      <p id="favorites-no-room" class="hint" data-i18n="admin.favorites_no_room" hidden></p>
       <ul id="favorites" class="favorites"></ul>
     </section>
 
@@ -60,6 +83,32 @@ SPDX-License-Identifier: AGPL-3.0-or-later
       <form id="link" class="link-form">
         <input id="link-url" name="url" type="url" required data-i18n-placeholder="admin.link_placeholder">
         <button type="submit" data-i18n="admin.add"></button>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2 data-i18n="admin.volume"></h2>
+      <form id="volume" class="fields">
+        <label for="max-volume" data-i18n="admin.max_volume"></label>
+        <input id="max-volume" name="max_volume" type="number" min="1" max="100" step="1" inputmode="numeric" required>
+        <label for="volume-step" data-i18n="admin.volume_step"></label>
+        <input id="volume-step" name="volume_step" type="number" min="1" max="100" step="1" inputmode="numeric" required>
+        <p class="hint" data-i18n="admin.volume_hint"></p>
+        <button type="submit" data-i18n="admin.save"></button>
+      </form>
+    </section>
+
+    <section id="pin-section" class="card">
+      <h2 data-i18n="admin.pin_change"></h2>
+      <form id="pin-form" class="fields">
+        <label for="pin-current" data-i18n="admin.pin_current"></label>
+        <input id="pin-current" type="password" autocomplete="current-password" required>
+        <label for="pin-new" data-i18n="admin.pin_new"></label>
+        <input id="pin-new" type="password" autocomplete="new-password" minlength="4" maxlength="64" required>
+        <label for="pin-repeat" data-i18n="admin.pin_repeat"></label>
+        <input id="pin-repeat" type="password" autocomplete="new-password" minlength="4" maxlength="64" required>
+        <p class="hint" data-i18n="admin.pin_hint"></p>
+        <button type="submit" data-i18n="admin.save"></button>
       </form>
     </section>
   </main>
@@ -85,6 +134,13 @@ SPDX-License-Identifier: AGPL-3.0-or-later
         </label>
         <button type="button" class="danger delete" data-i18n="admin.delete"></button>
       </div>
+    </li>
+  </template>
+
+  <template id="room-row">
+    <li class="room-row">
+      <span class="name"><strong></strong><small></small></span>
+      <button type="button" class="choose"></button>
     </li>
   </template>
 

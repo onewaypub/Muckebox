@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Muckebox contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
-// Parents' page: log in with the PIN, manage tiles, add favorites and links.
+// Parents' page: log in with the PIN, choose the room, set the volume limit
+// and the PIN, manage tiles, add favorites and links.
 
 import { ApiError, get, post, request } from "./api.js";
 import { loadMessages, t, translatePage } from "./i18n.js";
@@ -9,8 +10,11 @@ import { loadMessages, t, translatePage } from "./i18n.js";
 const $ = (id) => document.getElementById(id);
 const FLASH_MS = 5000;
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+const SETUP_TIMEOUT_MS = 30000; // the server gives a room search or test 20 s
 let rev = null;
 let flashTimer = null;
+let settings = null;
+let searchSeed = null; // the speaker address the shown room list came from
 
 // -- helpers ----------------------------------------------------------------------
 
@@ -87,8 +91,8 @@ function showLogin() {
 function renderStatus(status) {
   const list = $("status");
   const sonos = status.sonos || {};
-  const connection =
-    sonos.status === "ok" ? t("status.ok") : t(sonos.status === "starting" ? "status.starting" : `error.${sonos.status}`);
+  const own = ["ok", "starting", "not_configured"].includes(sonos.status);
+  const connection = t(own ? `status.${sonos.status}` : `error.${sonos.status}`);
   const rows = [
     ["admin.room", sonos.room || "–"],
     ["admin.connection", connection],
@@ -104,7 +108,11 @@ function renderStatus(status) {
       return [term, detail];
     }),
   );
-  const problems = [...status.config_problems.map((code) => t(`error.${code}`))];
+  // The banner and the setup section already point out these two.
+  const shownElsewhere = ["not_configured", "pin_generated"];
+  const problems = status.config_problems
+    .filter((code) => !shownElsewhere.includes(code))
+    .map((code) => t(`error.${code}`));
   if (status.library_problem) {
     problems.push(t(`error.${status.library_problem.code}`, status.library_problem));
   }
@@ -181,6 +189,73 @@ function renderTiles(data) {
   });
 }
 
+function renderSettings(data) {
+  settings = data.settings;
+  $("pin-banner").hidden = !settings.pin_generated;
+  $("room-current").textContent = settings.room
+    ? t("admin.room_current", { room: settings.room })
+    : t("admin.room_none");
+  if (document.activeElement !== $("seed-ip")) $("seed-ip").value = settings.seed_ip || "";
+  for (const [id, value] of [
+    ["max-volume", settings.max_volume],
+    ["volume-step", settings.volume_step],
+  ]) {
+    if (document.activeElement !== $(id)) $(id).value = String(value);
+  }
+  $("favorites-no-room").hidden = Boolean(settings.room);
+  $("refresh").disabled = !settings.room;
+}
+
+function renderRooms(rooms) {
+  const list = $("rooms");
+  const template = $("room-row");
+  list.replaceChildren();
+  if (!rooms.length) {
+    list.append(Object.assign(document.createElement("li"), { className: "hint", textContent: t("admin.rooms_none") }));
+    return;
+  }
+  for (const room of rooms) {
+    const row = template.content.firstElementChild.cloneNode(true);
+    row.querySelector("strong").textContent = room.name;
+    row.querySelector("small").textContent = room.grouped ? `${room.ip} · ${t("admin.room_grouped")}` : room.ip;
+    const button = row.querySelector(".choose");
+    const chosen = room.name === (settings && settings.room);
+    button.textContent = t(chosen ? "admin.chosen" : "admin.choose");
+    button.disabled = chosen;
+    button.addEventListener("click", () => chooseRoom(room.name, rooms, button));
+    list.append(row);
+  }
+}
+
+async function chooseRoom(name, rooms, button) {
+  const result = await busy(
+    button,
+    guarded(
+      () =>
+        request("PUT", "/api/admin/settings/room", {
+          body: { room: name, seed_ip: searchSeed },
+          timeout: SETUP_TIMEOUT_MS,
+        }),
+      { success: t("admin.room_saved", { room: name }) },
+    ),
+  );
+  if (!result) return;
+  renderSettings(result.data);
+  renderRooms(rooms);
+  loadStatus();
+  loadFavorites();
+}
+
+async function searchRooms(refresh) {
+  searchSeed = $("seed-ip").value.trim() || null;
+  $("rooms").replaceChildren(Object.assign(document.createElement("li"), { textContent: t("admin.searching") }));
+  const result = await guarded(() =>
+    post("/api/admin/rooms/search", { seed_ip: searchSeed, refresh }, { timeout: SETUP_TIMEOUT_MS }),
+  );
+  if (result) renderRooms(result.data.rooms);
+  else $("rooms").replaceChildren();
+}
+
 function renderFavorites(favorites) {
   const list = $("favorites");
   const template = $("favorite-row");
@@ -254,7 +329,16 @@ async function loadTiles() {
   if (result) renderTiles(result.data);
 }
 
+async function loadSettings() {
+  const result = await guarded(() => get("/api/admin/settings"));
+  if (result) renderSettings(result.data);
+}
+
 async function loadFavorites(refresh = false) {
+  if (!settings || !settings.room) {
+    $("favorites").replaceChildren(); // without a room there are no favorites to show
+    return;
+  }
   $("favorites").replaceChildren(Object.assign(document.createElement("li"), { textContent: t("admin.loading") }));
   const result = await guarded(() => get(`/api/admin/favorites${refresh ? "?refresh=1" : ""}`, { timeout: 20000 }));
   if (result) renderFavorites(result.data.favorites);
@@ -263,7 +347,10 @@ async function loadFavorites(refresh = false) {
 
 async function showApp() {
   showOnly("app");
-  await Promise.all([loadStatus(), loadTiles(), loadFavorites()]);
+  $("rooms").replaceChildren();
+  await loadSettings();
+  const first = settings && !settings.room;
+  await Promise.all([loadStatus(), loadTiles(), loadFavorites(), first ? searchRooms(false) : null]);
 }
 
 // -- wiring -------------------------------------------------------------------------
@@ -280,6 +367,38 @@ function bind() {
     showLogin();
   });
   $("refresh").addEventListener("click", (event) => busy(event.target, loadFavorites(true)));
+  $("room-search").addEventListener("submit", (event) => {
+    event.preventDefault();
+    busy(event.target.querySelector("button"), searchRooms(true));
+  });
+  $("volume").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const body = { max_volume: $("max-volume").valueAsNumber, volume_step: $("volume-step").valueAsNumber };
+    const result = await busy(
+      event.target.querySelector("button"),
+      guarded(() => request("PUT", "/api/admin/settings/volume", { body }), { success: t("admin.saved") }),
+    );
+    if (result) {
+      renderSettings(result.data);
+      loadStatus();
+    }
+  });
+  $("pin-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if ($("pin-new").value !== $("pin-repeat").value) {
+      flash(t("admin.pin_mismatch"), true);
+      return;
+    }
+    const body = { current: $("pin-current").value, new: $("pin-new").value };
+    const result = await busy(
+      event.target.querySelector("button"),
+      guarded(() => post("/api/admin/pin", body), { success: t("admin.pin_changed") }),
+    );
+    if (!result) return;
+    event.target.reset();
+    renderSettings(result.data);
+    loadStatus();
+  });
   $("link").addEventListener("submit", (event) => {
     event.preventDefault();
     const button = event.target.querySelector("button");
