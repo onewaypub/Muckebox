@@ -219,11 +219,15 @@ async function poll() {
 const PAGE_ASSETS = document.body.dataset.assetVersion;
 
 function applyState(state) {
-  if (state.assets && PAGE_ASSETS && state.assets !== PAGE_ASSETS && !padIsOpen() && !gameIsOpen()) {
-    // Muckebox was updated: load the new page (only after a successful answer,
-    // and not while a parent types the PIN).
-    window.location.reload();
-    return;
+  if (state.assets && PAGE_ASSETS && state.assets !== PAGE_ASSETS) {
+    // Muckebox was updated: load the new page (only after a successful answer).
+    if (!padIsOpen() && !gameIsOpen()) {
+      window.location.reload();
+      return;
+    }
+    // Not while a parent types the PIN or a game runs: forget the ETag, so the
+    // next poll gets the full state again and reloads once they are closed.
+    model.etag = null;
   }
   model.state = state;
   if (!state.pending) model.localPending = null;

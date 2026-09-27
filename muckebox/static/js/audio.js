@@ -24,15 +24,23 @@ export function unlockAudio() {
   }
 }
 
-/** Play a sound; resolves when it has ended (or failed). */
+// Settles the sound that is playing when another one replaces it.
+let finishCurrent = null;
+
+/** Play a sound; resolves when it has ended, failed or was replaced. */
 export function playSound(id) {
+  if (finishCurrent) finishCurrent();
   return new Promise((resolve) => {
     const done = () => {
       clearTimeout(timer);
-      player.onended = player.onerror = null;
+      if (finishCurrent === done) {
+        player.onended = player.onerror = null;
+        finishCurrent = null;
+      }
       resolve();
     };
     const timer = setTimeout(done, LONGEST_SOUND_MS);
+    finishCurrent = done;
     player.onended = player.onerror = done;
     player.src = soundUrl(id);
     player.play().catch(done);
@@ -70,6 +78,7 @@ export function speak(text) {
 }
 
 export function stopAudio() {
+  if (finishCurrent) finishCurrent();
   player.pause();
   if (window.speechSynthesis) window.speechSynthesis.cancel();
 }
