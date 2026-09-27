@@ -109,26 +109,32 @@ Android) are not used.
 
 SSDP multicast discovery does not cross VLAN boundaries. Therefore:
 
-- `SONOS_IP` is a **seed**: the IP of any Sonos speaker in the household.
-  From it Muckebox reads the zone group topology, which lists every room.
+- `SONOS_IP` is a **seed**: the IP of any Sonos speaker in the household
+  (best the kids room's own). From it Muckebox reads the zone group
+  topology, which lists every room, with one request and a fixed timeout.
+  Other rooms are never contacted.
 - `SONOS_ROOM` is a **selector**: the room name, matched trimmed and
   case-insensitively against the topology.
 - Both can be combined. With only `SONOS_ROOM`, Muckebox uses SSDP discovery
   (works only in the same network segment). With only `SONOS_IP`, the room
   that owns that IP is used.
 - A stereo pair or home-theater satellite is mapped to its visible room.
+- Once found, the kids room's own speaker is asked first on later lookups,
+  and the seed only as a fallback. A failed lookup keeps the last known room,
+  so the volume guard keeps working while the seed speaker is switched off.
 
 ### Groups
 
 When the kids room is grouped with other rooms, transport and queue commands
-go to the group **coordinator**, re-resolved before each command; the whole
-group plays. The volume limit applies to the **kids room's own player**:
+go to the group **coordinator**, looked up again when older than 5 seconds;
+the whole group plays. The volume limit applies to the **kids room's own player**:
 Sonos group volume is an average of its members, so clamping it would not cap
 the kids room.
 
 ### Playing a favorite
 
-Every favorite is classified when it is added and again when it is played:
+Every favorite is classified when the parents' page lists it; the tile stores
+that route with its snapshot and uses it when played:
 
 | Favorite | Route |
 |---|---|
@@ -138,14 +144,17 @@ Every favorite is classified when it is added and again when it is played:
 | Album, playlist, Sonos playlist, NAS library folder or track, streaming-service container | **queue**: `clear_queue` → `add_to_queue` → `play_from_queue` |
 | TV input (`x-sonos-htastream`), "shortcut" favorites without a resource | **not playable** (shown greyed out with a reason on the admin page) |
 
-Resilience rules: UPnP error 714 or 402 switches to the other route once;
-800 or 701 retries the failing step once. Shuffle and repeat are set to
-normal when a tile starts (best effort), so that audio plays keep their order.
+Resilience rules: UPnP error 714 or 402 switches to the other route once.
+An 800 while filling the queue (e.g. a music service refreshing its token)
+clears the queue and tries once more; a 701 from Play right after a new
+source was set is retried once. Shuffle and repeat are set to normal once
+the queue is the active source (best effort), so that audio plays keep their
+order.
 
-A favorite tile is stored as a **snapshot** (URI, DIDL metadata, class), so it
-can be played without browsing the favorites first. The admin page matches
-tiles against the current favorites (by URI, then by item ID) and marks tiles
-whose favorite no longer exists.
+A favorite tile is stored as a **snapshot** (URI, DIDL metadata, class,
+route), so it keeps playing without browsing the favorites first, even if the
+favorite is renamed or removed in the Sonos app. The parents' page marks
+favorites that already have a tile (matched by URI).
 
 ### Share links
 
@@ -164,12 +173,18 @@ with recorded fixtures only and are labelled experimental.
 A queue-based start can take 6–30 seconds for a large playlist, and some SoCo
 calls have no timeout of their own. The design keeps the UI responsive anyway:
 
-- HTTP `GET` handlers read only from the in-memory `StateCache`.
+- The kids' `GET` endpoints (`/api/state`, `/api/tiles`, covers) read only
+  from the in-memory `StateCache` and the library. The parents' favorites
+  list runs a job on the transport lane (cached for 60 s); favorite artwork is
+  downloaded in the request thread, at most two at a time.
 - Mutating requests are handed to a worker lane. Starting a tile returns
   `202 Accepted` with a `pending` state immediately; the tablet shows progress
   and polls the state.
-- SoCo's global request timeout is 3 s; only the playback-start job raises it
-  temporarily (scoped, restored on exceptions).
+- Every UPnP call passes its own timeout: 3 s normally, 1.5 s for the volume
+  guard, 30 s for filling the queue. SoCo's global timeout is set to 3 s as a
+  safety net.
+- A command that times out is cancelled, so it cannot run later; louder and
+  quieter taps are refused (`409 busy`) while one is still running.
 - A **circuit breaker** fails calls fast after connection errors, with a
   growing cooldown. It trips only on connection errors, never on a slow
   enqueue, and it never pauses the volume guard for more than about 5 s.
@@ -204,7 +219,7 @@ Everything lives in `DATA_DIR` (a bind mount in Docker):
 
 | File | Content |
 |---|---|
-| `library.json` | Tiles: schema version, revision counter, tile list. Written atomically (temp file, fsync, rename) with a `.bak` copy. A corrupt file is moved aside and reported, never silently discarded. |
+| `library.json` | Tiles: schema version, revision counter, tile list. Written atomically (temp file, fsync, rename) with a `.bak` copy; a failed write leaves the library unchanged. A corrupt file is moved aside and reported, never silently discarded. |
 | `covers/<hash>.jpg` | Normalised cover images, content-addressed. |
 | `secret_key` | Random key for signing the admin session (mode 0600). |
 | `state.json` | The last started tile, so the "now playing" highlight survives a restart. |
@@ -222,15 +237,20 @@ No personal data about the children is stored. See
   limited per client and globally. The session cookie is `HttpOnly`,
   `SameSite=Strict`, expires after 12 hours and is bound to the current PIN,
   so changing the PIN ends all sessions. Admin mutations also check `Origin`.
-- Outbound requests (cover downloads, share-link metadata) go through one
-  fetcher with per-purpose host allowlists, redirect checks on every hop,
-  size limits and deadlines.
+- Outbound internet requests (share-link lookups, metadata and covers,
+  favorite artwork that is not served by a speaker) go through one fetcher:
+  public addresses only, redirects checked on every hop, size limits and
+  deadlines; share-link requests are further limited to the services' hosts.
+  Artwork served by a speaker of the household is fetched from it directly,
+  without following redirects.
 - Uploads are limited in size and sniffed with Pillow; the client file name
   is ignored.
 - A Content Security Policy forbids inline scripts. The UI loads no
   third-party resources.
 - Muckebox uses plain HTTP inside the home network. It is not meant to be
-  exposed to the internet.
+  exposed to the internet. It does not check the requested host name, so a
+  DNS-rebinding page could reach the kids view's functions (see SECURITY.md);
+  the parents' page is protected by its host-bound login cookie.
 
 ## Testing strategy
 
@@ -252,12 +272,12 @@ No personal data about the children is stored. See
 
 | Later feature | Seam in v1 |
 |---|---|
-| Sleep timer, bedtime lock | `CommandPolicy.check(command, context)` sits between the API and the lanes and allows everything in v1. |
-| Night mode with a lower limit | The volume guard and the API read the limit from a `max_volume()` callable. |
-| Several rooms or profiles | Runtime objects are keyed by a room id; `library.json` carries a schema version for migrations. |
+| Sleep timer, bedtime lock | `CommandPolicy.check(command)` sits between the API and the lanes and allows everything in v1. |
+| Night mode with a lower limit | The volume guard, the kids' volume bar and the parents' status all read the limit from `Runtime.max_volume()`. |
+| Several rooms or profiles | One `Runtime` per room, created in `__main__`; `library.json` carries a schema version for migrations. |
 | ESP32 battery client | `/api/state` carries `state_rev` and an `ETag`, so a client can poll cheaply with `If-None-Match`. Covers are baseline JPEGs. |
 | Another Sonos backend | The Sonos backend is an interface; only `muckebox.sonos` knows SoCo. |
-| Push events | `VolumeGuard.on_volume_observed()` and `StateCache.apply()` accept observations from any source. |
+| Push events | `VolumeGuard.on_volume_observed()` and `StateCache.update()` accept observations from any source. |
 | Reading titles aloud | Would need the speakers to fetch audio from the NAS (an extra firewall rule); not prepared beyond stable tile ids and titles. |
 
 ## Status and roadmap

@@ -32,6 +32,11 @@ Muckebox is designed for a trusted home network:
   change the volume within the configured limit.
 - The parents' page is protected by a PIN, rate limiting and same-origin
   checks.
+- Muckebox accepts any host name in requests. A malicious web page opened on
+  a device in the home network could use DNS rebinding to reach the kids
+  view's functions (start music, change the volume within the limit). The
+  parents' page is not affected: its login cookie is bound to Muckebox's own
+  address.
 - Muckebox controls the speakers through the local Sonos UPnP interface,
   which itself has no authentication. Muckebox cannot make that interface
   more secure than it is.

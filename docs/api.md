@@ -16,9 +16,10 @@ changes increase the `api` number reported by `/api/state`.
 
 - Request and response bodies are JSON (`application/json`, UTF-8), except
   cover uploads (`multipart/form-data`) and cover images.
-- Request bodies are limited to 1 MiB (cover uploads: 10 MB). Larger bodies
-  get `413 request_too_large`; grossly oversized ones are rejected by the
-  HTTP server itself with a plain-text `413`.
+- Request bodies are limited to 1 MiB (cover uploads: 10 MiB). Larger bodies
+  get `413 request_too_large` (uploads: `413 upload_too_large`); grossly
+  oversized ones are rejected by the HTTP server itself with a plain-text
+  `413`.
 - Every `POST`, `PUT`, `PATCH` and `DELETE` request must send the header
   `X-Muckebox: 1`. Requests without it are rejected with `403 csrf_header_missing`.
 - API responses carry `Cache-Control: no-store`.
@@ -38,10 +39,15 @@ changes increase the `api` number reported by `/api/state`.
 | `GET /api/health` | Liveness of the web server (also used by the Docker health check). Independent of Sonos. | `200 {"ok": true, "version": "…"}` |
 | `GET /api/state` | Current state from the server's cache; never waits for Sonos. Supports `ETag` / `If-None-Match`. | `200` (below), `304` |
 | `GET /api/tiles` | Tiles in display order. | `200 {"ok": true, "rev": 7, "tiles": [{"id": "…", "title": "…", "cover": "/covers/….jpg" or null}]}` |
-| `POST /api/tiles/<id>/play` | Start a tile. Tapping the tile that is already playing is a no-op; tapping it while paused resumes. | `202 {"ok": true, "pending": {…}}`, `200 {"ok": true, "noop": true}`, `404 tile_not_found`, `409 busy`, `503 sonos_unreachable` |
-| `POST /api/transport/toggle`, `…/play`, `…/pause`, `…/next`, `…/previous` | Transport control on the group coordinator. | `200 {"ok": true, "playback": {…}}`, `409 busy`, `503 …` |
-| `POST /api/volume/up`, `POST /api/volume/down` | Change the volume by `VOLUME_STEP`, clamped to `0…MAX_VOLUME`. | `200 {"ok": true, "volume": {…}}`, `503 volume_unknown` |
+| `POST /api/tiles/<id>/play` | Start a tile. Tapping the tile that is already playing is a no-op; tapping it while paused resumes. | `202 {"ok": true, "result": "accepted", "pending": {…}}`, `200 {"ok": true, "result": "noop" \| "resumed", "pending": null}`, `404 tile_not_found`, `409 busy`, `503 <code>` |
+| `POST /api/transport/play`, `…/pause`, `…/toggle`, `…/next`, `…/previous` | Transport control on the group coordinator. `play` and `pause` do nothing if the speaker is already in that state. | `200 {"ok": true, "playback": {…}}`, `409 busy`, `503 <code>` |
+| `POST /api/volume/up`, `POST /api/volume/down` | Change the volume of the kids room by `VOLUME_STEP`, clamped to `0…MAX_VOLUME`. One change at a time. | `200 {"ok": true, "volume": {…}}`, `409 busy`, `503 volume_unknown` (the volume could not be read or set) or `503 <code>` |
 | `GET /covers/<hash>.jpg` | Cover image (600×600 JPEG, immutable). | `200`, `404` |
+
+`503 <code>` is the reason the speaker cannot be controlled right now:
+`sonos_unreachable`, `upnp_disabled` or `room_not_found` (with `retry_in`),
+`config_error`, `sonos_timeout`, or another error code such as
+`service_unavailable`.
 
 ### State document
 
@@ -50,9 +56,10 @@ changes increase the `api` number reported by `/api/state`.
   "ok": true,
   "api": 1,
   "version": "1.0.0",
+  "assets": "3f9c2a7e1b04",
   "state_rev": 42,
   "library_rev": 7,
-  "sonos": {"status": "ok", "room": "Kids room", "retry_in": null},
+  "sonos": {"status": "ok", "room": "Kids room", "grouped": false},
   "playback": {
     "state": "playing",
     "tile_id": "t3f9c2a7e1b04d88",
@@ -66,14 +73,22 @@ changes increase the `api` number reported by `/api/state`.
 }
 ```
 
-- `sonos.status`: `starting`, `ok`, `unreachable`, `upnp_disabled`,
-  `room_not_found`, `group_problem`, `config_error`.
+- `sonos.status`: `starting`, `ok`, `config_error` (then `sonos.problem`
+  names the configuration problem), or, when the speaker cannot be reached,
+  `sonos_unreachable`, `upnp_disabled` or `room_not_found` (then
+  `sonos.retry_in` gives the seconds until the next attempt). `grouped` is
+  present once the room was found.
 - `playback.state`: `playing`, `paused`, `stopped`, `transitioning`, `unknown`.
+  `tile_id` is the tile Muckebox started, as long as it is still playing.
+- `volume.value` is `null` while the volume is unknown.
 - `pending`: `null` or `{"action": "start", "tile_id": "…", "since": <unix time>}`.
 - `last_error`: `null` or `{"code": "…", "tile_id": "…", "at": <unix time>}`;
   cleared after a successful start or after 60 seconds.
-- `state_rev` increases whenever anything in the document changes.
-  `library_rev` increases whenever the tile list changes.
+- `assets` identifies the build of the pages; the kids view reloads itself
+  when it changes (after an update).
+- `state_rev` increases when the server's cached speaker state changes;
+  `library_rev` when the tile list changes. To detect any change, poll with
+  `If-None-Match` and the `ETag` of the last answer.
 
 ## Admin (session cookie)
 
@@ -88,14 +103,14 @@ require a same-origin `Origin` header when the browser sends one
 | `GET /api/admin/session` | `{"ok": true, "locked": false, "logged_in": true}` |
 | `POST /api/admin/login` `{"pin": "…"}` | Start a session. `401 pin_wrong`, `429 pin_rate_limited` (with `retry_in`). |
 | `POST /api/admin/logout` | End the session. |
-| `GET /api/admin/status` | Diagnostics for parents: room, coordinator, connection state, volume guard statistics, recent errors with hints, versions, source code link. |
+| `GET /api/admin/status` | Diagnostics for parents: `version`, `source_url`, `tiles` (count), `sonos` (as in the state document), `config_problems` (codes), `library_problem` (`null` or `{"code": "library_corrupt", "file": …}`), `volume_guard` (`max`, `corrections`, `fighting`, `fixed_volume`), `breaker` (`transport_retry_in`, `volume_retry_in`). |
 | `GET /api/admin/favorites[?refresh=1]` | Sonos favorites: `item_id`, `title`, `description`, `playable`, `reason` (`no_resource`, `tv_input`, `broken_metadata`), `route` (`direct`, `queue`, `unsupported`), `has_art`, and `tile_id` if a tile already plays it. Cached for 60 s. |
 | `GET /api/admin/favorite-art?item_id=FV:2/5` | The favorite's artwork as JPEG (fetched through Muckebox, because the speaker or image server may not be reachable from the parent's phone). |
 | `GET /api/admin/tiles` | Tiles including source details. |
-| `POST /api/admin/tiles` | Create a tile: `{"source": "favorite", "item_id": "FV:2/5"}` or `{"source": "sharelink", "url": "…"}`. `201` with `tile` and `warnings` (`cover_missing`, `title_missing`, `sharelink_experimental`), or `404 favorite_not_found`, `422 not_playable` / `sharelink_unsupported` / `sharelink_unresolvable`. |
+| `POST /api/admin/tiles` | Create a tile: `{"source": "favorite", "item_id": "FV:2/5"}` or `{"source": "sharelink", "url": "…"}`. `201` with `tile` and `warnings` (`cover_missing`, `title_missing`, `sharelink_experimental`); a favorite that already has a tile returns that tile. Errors: `404 favorite_not_found`, `422 not_playable` / `sharelink_unsupported` / `sharelink_unresolvable`. |
 | `PATCH /api/admin/tiles/<id>` `{"title": "…", "rev": 8}` | Rename a tile. |
 | `POST /api/admin/tiles/<id>/move` `{"direction": "up" \| "down", "rev": 8}` | Reorder. |
 | `DELETE /api/admin/tiles/<id>?rev=8` | Remove a tile and its unused cover. |
-| `PUT /api/admin/tiles/<id>/cover` (multipart field `cover`) | Upload a custom cover (JPEG or PNG, at most 10 MB). `413 upload_too_large`, `422 upload_not_image`. |
+| `PUT /api/admin/tiles/<id>/cover` (multipart field `cover`) | Upload a custom cover (JPEG, PNG and other common formats, at most 10 MiB). `413 upload_too_large`, `422 upload_not_image`. |
 
 A stale `rev` on any mutation returns `409 rev_conflict`.
