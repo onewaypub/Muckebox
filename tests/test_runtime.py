@@ -1137,3 +1137,18 @@ def test_ending_an_override_fades_first(runtime, fake, clock, evening):
     at(clock, "2026-09-28 19:30:05")
     runtime.poll_transport()
     assert fake.state == "paused"
+
+
+def test_from_the_start_also_for_the_loaded_album(runtime, fake, library, album, clock):
+    runtime.play_tile(album.id)
+    listen_until(runtime, fake, 2, 300, state="paused")
+    runtime.restart_tile(album.id)  # "Von vorn" while it is still loaded
+    clock.advance(11)
+    runtime.poll_transport()
+    assert runtime.resume.saved(album.id) is None  # not recorded again
+    assert runtime.play_tile(album.id) == "accepted"  # a fresh start, not "resumed"
+    assert fake.starts[-1] is None
+    listen_until(runtime, fake, 3, 30)
+    clock.advance(11)
+    runtime.poll_transport()
+    assert runtime.resume.saved(album.id) is not None  # recorded again after the start
