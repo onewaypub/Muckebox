@@ -5,7 +5,6 @@ import pytest
 from flask import Flask
 
 from muckebox import __version__
-from muckebox.config import load_settings
 from muckebox.i18n import CATALOGUES, DEFAULT_LANG
 from muckebox.web import create_app
 from muckebox.web.app import CSRF_HEADER, MAX_REQUEST_BYTES
@@ -13,8 +12,8 @@ from muckebox.web.errors import ApiError
 
 
 @pytest.fixture
-def app() -> Flask:
-    app = create_app(load_settings({"SONOS_IP": "192.0.2.10"}))
+def app(services) -> Flask:
+    app = create_app(services)
 
     # Test-only routes to exercise the error handling.
     @app.post("/api/_test/echo")
@@ -30,11 +29,6 @@ def app() -> Flask:
         raise RuntimeError("boom")
 
     return app
-
-
-@pytest.fixture
-def client(app):
-    return app.test_client()
 
 
 def test_health(client):
@@ -122,16 +116,22 @@ def test_unexpected_exception_is_hidden_and_logged(client, caplog):
 
 @pytest.mark.parametrize(
     "code",
-    ["bad_request", "csrf_header_missing", "not_found", "method_not_allowed",
-     "request_too_large", "internal_error"],
-)  # fmt: skip
+    [
+        "bad_request",
+        "csrf_header_missing",
+        "not_found",
+        "method_not_allowed",
+        "request_too_large",
+        "internal_error",
+    ],
+)
 def test_generic_error_codes_have_texts(code):
     assert f"error.{code}" in CATALOGUES[DEFAULT_LANG]
 
 
-def test_create_app_starts_no_threads():
+def test_create_app_starts_no_threads(services):
     import threading
 
     before = threading.active_count()
-    create_app(load_settings({"SONOS_IP": "192.0.2.10"}))
+    create_app(services)
     assert threading.active_count() == before

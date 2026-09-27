@@ -74,3 +74,64 @@ def _no_network(monkeypatch):
     monkeypatch.setattr(socket.socket, "sendto", _sendto)
     monkeypatch.setattr(socket.socket, "sendmsg", _sendmsg)
     monkeypatch.setattr(socket, "getaddrinfo", _getaddrinfo)
+
+
+# -- application fixtures ----------------------------------------------------------
+
+
+@pytest.fixture
+def fake_sonos():
+    from muckebox.sonos.fake import FakeSonos
+
+    return FakeSonos()
+
+
+@pytest.fixture
+def make_services(tmp_path, fake_sonos):
+    """Build the app's services on FakeSonos, with lanes that run inline."""
+    from muckebox.config import load_settings
+    from muckebox.covers import CoverStore
+    from muckebox.library import Library
+    from muckebox.runtime.clock import FakeClock
+    from muckebox.runtime.lanes import InlineLane
+    from muckebox.runtime.service import Runtime
+    from muckebox.web.app import Services
+
+    def make(**env):
+        settings = load_settings(
+            {"SONOS_IP": "192.0.2.10", "DATA_DIR": str(tmp_path), "ADMIN_PIN": "2468", **env}
+        )
+        library = Library(tmp_path / "library.json")
+        runtime = Runtime(
+            settings,
+            fake_sonos,
+            library,
+            clock=FakeClock(),
+            lane_factory=lambda name, idle, interval: InlineLane(name),
+        )
+        return Services(
+            settings=settings,
+            runtime=runtime,
+            library=library,
+            covers=CoverStore(tmp_path / "covers"),
+            secret_key=b"k" * 32,
+        )
+
+    return make
+
+
+@pytest.fixture
+def services(make_services):
+    return make_services()
+
+
+@pytest.fixture
+def app(services):
+    from muckebox.web import create_app
+
+    return create_app(services)
+
+
+@pytest.fixture
+def client(app):
+    return app.test_client()
