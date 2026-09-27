@@ -2,7 +2,9 @@
 # SPDX-FileCopyrightText: 2026 Muckebox contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
-# Download a pinned gitleaks release into .tools/bin and verify its checksum.
+# Download a pinned gitleaks release into .tools/bin. The archive checksums
+# are pinned here (taken from the release's checksums file), so a tampered
+# release asset is rejected.
 set -eu
 
 VERSION="8.30.1"
@@ -10,28 +12,27 @@ cd "$(dirname "$0")/.."
 DEST=".tools/bin"
 BIN="$DEST/gitleaks"
 
-if [ -x "$BIN" ] && "$BIN" version 2>/dev/null | grep -q "$VERSION"; then
+if [ -x "$BIN" ] && "$BIN" version 2>/dev/null | grep -qx "$VERSION"; then
   exit 0
 fi
 
 case "$(uname -s)-$(uname -m)" in
-  Linux-x86_64) PLATFORM="linux_x64" ;;
-  Linux-aarch64) PLATFORM="linux_arm64" ;;
-  Darwin-x86_64) PLATFORM="darwin_x64" ;;
-  Darwin-arm64) PLATFORM="darwin_arm64" ;;
+  Linux-x86_64)  PLATFORM="linux_x64";    SHA="551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb" ;;
+  Linux-aarch64) PLATFORM="linux_arm64";  SHA="e4a487ee7ccd7d3a7f7ec08657610aa3606637dab924210b3aee62570fb4b080" ;;
+  Darwin-x86_64) PLATFORM="darwin_x64";   SHA="dfe101a4db2255fc85120ac7f3d25e4342c3c20cf749f2c20a18081af1952709" ;;
+  Darwin-arm64)  PLATFORM="darwin_arm64"; SHA="b40ab0ae55c505963e365f271a8d3846efbc170aa17f2607f13df610a9aeb6a5" ;;
   *) echo "Unsupported platform for gitleaks download" >&2; exit 1 ;;
 esac
 
-BASE="https://github.com/gitleaks/gitleaks/releases/download/v$VERSION"
 ARCHIVE="gitleaks_${VERSION}_${PLATFORM}.tar.gz"
+URL="https://github.com/gitleaks/gitleaks/releases/download/v$VERSION/$ARCHIVE"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-curl -fsSL -o "$TMP/$ARCHIVE" "$BASE/$ARCHIVE"
-curl -fsSL -o "$TMP/checksums.txt" "$BASE/gitleaks_${VERSION}_checksums.txt"
+curl --proto '=https' --tlsv1.2 -fsSL -o "$TMP/$ARCHIVE" "$URL"
 SHA256="sha256sum"
 command -v sha256sum >/dev/null || SHA256="shasum -a 256"
-(cd "$TMP" && grep " $ARCHIVE\$" checksums.txt | $SHA256 -c - >/dev/null)
+echo "$SHA  $TMP/$ARCHIVE" | $SHA256 -c - >/dev/null
 tar -xzf "$TMP/$ARCHIVE" -C "$TMP" gitleaks
 mkdir -p "$DEST"
 mv "$TMP/gitleaks" "$BIN"

@@ -59,10 +59,14 @@ pip-audit.
 The privacy scan (`scripts/privacy_scan.py`, rules in `.gitleaks.toml`)
 checks the git history, the working tree, commit messages and commit email
 addresses for secrets and private data. `scripts/check` downloads the pinned
-gitleaks binary to `.tools/` on first use. Configure git in this repository
-to use your GitHub noreply address:
+gitleaks binary to `.tools/` on first use.
+
+Commits must use your GitHub login as name and your GitHub noreply address
+as email. Otherwise git records the full name of your operating system
+account and your private email address, and the history would publish them:
 
 ```sh
+git config user.name "<username>"
 git config user.email "<id>+<username>@users.noreply.github.com"
 ```
 

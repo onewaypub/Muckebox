@@ -8,7 +8,9 @@ Checks, all with the rules in .gitleaks.toml:
 1. the full git history of all local branches,
 2. the working tree (tracked and untracked files that git does not ignore),
 3. commit messages,
-4. author and committer email addresses (must be noreply addresses).
+4. author and committer identities: noreply email addresses only, and the
+   name must be the GitHub login (git otherwise records the full name of
+   the operating system account).
 
 Exit code 0 means nothing was found.
 """
@@ -26,9 +28,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG = ROOT / ".gitleaks.toml"
-ALLOWED_COMMIT_EMAIL = re.compile(
-    r"(@users\.noreply\.github\.com|^noreply@(anthropic|github)\.com)$", re.IGNORECASE
-)
+GITHUB_NOREPLY = re.compile(r"^(?:\d+\+)?(?P<login>[^@]+)@users\.noreply\.github\.com$", re.I)
+# Service identities that may appear as author or committer, with their names.
+SERVICE_IDENTITIES = {
+    "noreply@github.com": {"GitHub"},
+    "noreply@anthropic.com": {"Claude"},
+}
 
 
 def find_gitleaks() -> str:
@@ -79,14 +84,30 @@ def scan_commit_messages(binary: str) -> bool:
     return gitleaks(binary, "stdin", stdin=git("log", "--all", "--format=%B"))
 
 
-def check_commit_emails() -> bool:
-    print("• commit author and committer emails")
-    emails = set(git("log", "--all", "--format=%ae%n%ce").split())
-    bad = sorted(e for e in emails if not ALLOWED_COMMIT_EMAIL.search(e))
-    for email in bad:
-        # Show only the domain; the local part may itself be private.
-        print(f"  commit metadata contains a non-noreply address at @{email.split('@')[-1]}")
-    return not bad
+def identity_problem(name: str, email: str) -> str | None:
+    """Return why a commit identity must not be published, or None if it is fine."""
+    match = GITHUB_NOREPLY.match(email)
+    if match:
+        if name.casefold() != match.group("login").casefold():
+            return "name differs from the GitHub login of its noreply address"
+        return None
+    allowed_names = SERVICE_IDENTITIES.get(email.lower())
+    if allowed_names is None:
+        return f"non-noreply email address at @{email.rsplit('@', 1)[-1]}"
+    if name not in allowed_names:
+        return f"unexpected name for {email}"
+    return None
+
+
+def check_commit_identities() -> bool:
+    print("• commit author and committer names and emails")
+    log = git("log", "--all", "--format=%an%x00%ae%n%cn%x00%ce")
+    pairs = {tuple(line.split("\0", 1)) for line in log.splitlines() if "\0" in line}
+    # Never print the identity itself; it may be the private data.
+    problems = sorted({p for name, email in pairs if (p := identity_problem(name, email))})
+    for problem in problems:
+        print(f"  commit metadata: {problem}")
+    return not problems
 
 
 def main() -> int:
@@ -96,7 +117,7 @@ def main() -> int:
         scan_history(binary),
         scan_working_tree(binary),
         scan_commit_messages(binary),
-        check_commit_emails(),
+        check_commit_identities(),
     ]
     if all(results):
         print("Privacy scan: no findings.")
