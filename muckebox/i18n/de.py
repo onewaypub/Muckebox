@@ -204,6 +204,15 @@ MESSAGES: dict[str, str] = {
     "error.pin_invalid": (
         "Die PIN darf höchstens 64 Zeichen lang sein und keine Steuerzeichen enthalten."
     ),
+    "error.schedule_invalid": "Die Nutzungszeiten sind ungültig.",
+    "error.schedule_order_invalid": (
+        "Das Ende muss am selben Tag nach dem Beginn liegen. Für einen langen Abend gibt es "
+        "die Freigabe."
+    ),
+    "error.sleep_timer_invalid": (
+        "Der Einschlaf-Timer braucht eine Dauer von 5 bis 90 Minuten und eine Aufwachzeit."
+    ),
+    "error.games_invalid": "Die Einstellungen der Spiele sind ungültig.",
     "error.time_zone_invalid": "Diese Zeitzone kennt die Muckebox nicht.",
     "error.pin_changed": "Die PIN wurde gerade woanders geändert. Bitte neu anmelden.",
     "error.settings_save_failed": (

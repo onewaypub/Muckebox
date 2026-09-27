@@ -28,10 +28,20 @@ import threading
 import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field, replace
+from datetime import time as clock_time
 from pathlib import Path
 from typing import Any
 
 from muckebox.localtime import load_zone
+from muckebox.schedule import (
+    DEFAULT_WAKE,
+    Schedule,
+    WindowOrderError,
+    format_time,
+    parse_schedule,
+    parse_time,
+    schedule_to_json,
+)
 from muckebox.storage import atomic_write
 
 log = logging.getLogger(__name__)
@@ -49,6 +59,12 @@ GENERATED_PIN_DIGITS = 6
 #: scrypt cost parameters (about 16 MiB and 50 ms per check).
 SCRYPT = {"n": 2**14, "r": 8, "p": 1}
 RELOAD_INTERVAL = 1.0  # seconds between checks for changes by other processes
+GAMES = ("freeze_dance", "sound_quiz", "move_like", "breathing")
+DEFAULT_SLEEP_MINUTES = 30
+SLEEP_MINUTES = (5, 90)
+DEFAULT_GAME_MINUTES = 15
+GAME_MINUTES = (5, 60)
+_TILE_ID_RE = re.compile(r"^t[0-9a-f]{15}$")
 
 # RFC 1123 host name: dot-separated labels of letters, digits and hyphens.
 _HOSTNAME_RE = re.compile(
@@ -89,6 +105,34 @@ class PinRecord:
 
 
 @dataclass(frozen=True)
+class SleepTimerSettings:
+    enabled: bool = False
+    minutes: int = DEFAULT_SLEEP_MINUTES
+    #: Until when the tiles stay locked afterwards on days without a window.
+    wake: clock_time = DEFAULT_WAKE
+
+
+@dataclass(frozen=True)
+class GameSetting:
+    enabled: bool = False
+    level: int = 2  # 1 small (2-3 years), 2 middle (4-5), 3 big (6+)
+
+
+@dataclass(frozen=True)
+class GameSettings:
+    daily_minutes: int = DEFAULT_GAME_MINUTES
+    #: The tile that plays the music for the freeze dance.
+    dance_tile: str | None = None
+    items: dict[str, GameSetting] = field(
+        default_factory=lambda: {game: GameSetting() for game in GAMES}
+    )
+
+    def enabled(self, game: str) -> bool:
+        setting = self.items.get(game)
+        return bool(setting and setting.enabled)
+
+
+@dataclass(frozen=True)
 class StoredSettings:
     room: str | None
     room_uid: str | None
@@ -98,6 +142,9 @@ class StoredSettings:
     pin: PinRecord
     #: IANA name chosen on the parents' page, or None (then TZ or the system).
     time_zone: str | None = None
+    schedule: Schedule = field(default_factory=Schedule)
+    sleep_timer: SleepTimerSettings = field(default_factory=lambda: SleepTimerSettings())
+    games: GameSettings = field(default_factory=lambda: GameSettings())
 
     @property
     def configured(self) -> bool:
@@ -156,6 +203,75 @@ def validate_time_zone(name: object) -> str | None:
     if load_zone(name) is None:
         raise SettingsError("time_zone_invalid")
     return str(name)
+
+
+def validate_schedule(data: object) -> Schedule:
+    try:
+        return parse_schedule(data)
+    except WindowOrderError:
+        raise SettingsError("schedule_order_invalid") from None
+    except ValueError:
+        raise SettingsError("schedule_invalid") from None
+
+
+def validate_sleep_timer(data: object) -> SleepTimerSettings:
+    if not isinstance(data, dict):
+        raise SettingsError("sleep_timer_invalid")
+    enabled, minutes = data.get("enabled", False), data.get("minutes", DEFAULT_SLEEP_MINUTES)
+    low, high = SLEEP_MINUTES
+    if type(enabled) is not bool or type(minutes) is not int or not low <= minutes <= high:
+        raise SettingsError("sleep_timer_invalid")
+    try:
+        wake = parse_time(data.get("wake", format_time(DEFAULT_WAKE)))
+    except ValueError:
+        raise SettingsError("sleep_timer_invalid") from None
+    return SleepTimerSettings(enabled, minutes, wake or DEFAULT_WAKE)
+
+
+def validate_games(data: object) -> GameSettings:
+    if not isinstance(data, dict):
+        raise SettingsError("games_invalid")
+    minutes = data.get("daily_minutes", DEFAULT_GAME_MINUTES)
+    tile = data.get("dance_tile")
+    items = data.get("items", {})
+    low, high = GAME_MINUTES
+    if (
+        type(minutes) is not int
+        or not low <= minutes <= high
+        or not (tile is None or (isinstance(tile, str) and _TILE_ID_RE.match(tile)))
+        or not isinstance(items, dict)
+        or set(items) - set(GAMES)
+    ):
+        raise SettingsError("games_invalid")
+    settings = {}
+    for game in GAMES:
+        item = items.get(game, {})
+        if not isinstance(item, dict):
+            raise SettingsError("games_invalid")
+        enabled, level = item.get("enabled", False), item.get("level", 2)
+        if type(enabled) is not bool or type(level) is not int or not 1 <= level <= 3:
+            raise SettingsError("games_invalid")
+        settings[game] = GameSetting(enabled, level)
+    return GameSettings(minutes, tile, settings)
+
+
+def sleep_timer_to_json(settings: SleepTimerSettings) -> dict[str, Any]:
+    return {
+        "enabled": settings.enabled,
+        "minutes": settings.minutes,
+        "wake": format_time(settings.wake),
+    }
+
+
+def games_to_json(settings: GameSettings) -> dict[str, Any]:
+    return {
+        "daily_minutes": settings.daily_minutes,
+        "dance_tile": settings.dance_tile,
+        "items": {
+            game: {"enabled": item.enabled, "level": item.level}
+            for game, item in settings.items.items()
+        },
+    }
 
 
 def validate_volume(max_volume: object, step: object) -> tuple[int, int]:
@@ -218,7 +334,9 @@ def generate_pin() -> str:
 
 # -- reading the file ---------------------------------------------------------------
 
-_KNOWN_SECTIONS = frozenset({"schema", "sonos", "volume", "admin", "time"})
+_KNOWN_SECTIONS = frozenset(
+    {"schema", "sonos", "volume", "admin", "time", "schedule", "sleep_timer", "games"}
+)
 
 
 def _parse(data: dict[str, Any]) -> StoredSettings:
@@ -253,8 +371,23 @@ def _parse(data: dict[str, Any]) -> StoredSettings:
     except (KeyError, SettingsError) as exc:
         raise ValueError(f"invalid settings ({exc})") from None
     _check_record(record)
+    try:
+        schedule = validate_schedule(data.get("schedule"))
+        sleep_timer = validate_sleep_timer(data.get("sleep_timer", {}))
+        games = validate_games(data.get("games", {}))
+    except SettingsError as exc:
+        raise ValueError(f"invalid settings ({exc})") from None
     return StoredSettings(
-        room, room_uid, seed_ip, max_volume, step, record, time_zone=_parse_time_zone(data)
+        room,
+        room_uid,
+        seed_ip,
+        max_volume,
+        step,
+        record,
+        time_zone=_parse_time_zone(data),
+        schedule=schedule,
+        sleep_timer=sleep_timer,
+        games=games,
     )
 
 
@@ -353,6 +486,18 @@ class SettingsStore:
     def set_time_zone(self, name: object) -> StoredSettings:
         zone = validate_time_zone(name)
         return self._update(lambda s: replace(s, time_zone=zone))
+
+    def set_schedule(self, data: object) -> StoredSettings:
+        schedule = validate_schedule(data)
+        return self._update(lambda s: replace(s, schedule=schedule))
+
+    def set_sleep_timer(self, data: object) -> StoredSettings:
+        sleep_timer = validate_sleep_timer(data)
+        return self._update(lambda s: replace(s, sleep_timer=sleep_timer))
+
+    def set_games(self, data: object) -> StoredSettings:
+        games = validate_games(data)
+        return self._update(lambda s: replace(s, games=games))
 
     def set_volume(self, max_volume: object, step: object) -> StoredSettings:
         max_volume, step = validate_volume(max_volume, step)
@@ -465,6 +610,9 @@ class SettingsStore:
                 "generated_pin": pin.generated,
             },
             "time": {"zone": settings.time_zone},
+            "schedule": schedule_to_json(settings.schedule),
+            "sleep_timer": sleep_timer_to_json(settings.sleep_timer),
+            "games": games_to_json(settings.games),
         }
         owner = self._owner()
         payload = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
