@@ -100,7 +100,7 @@ def test_every_literal_error_code_in_the_code_has_a_text():
         for path in PACKAGE.rglob("*.py")
         for code in pattern.findall(path.read_text(encoding="utf-8"))
     }
-    assert "busy" in codes and "config_error" in codes  # the scan works
+    assert "busy" in codes and "not_configured" in codes  # the scan works
     missing = sorted(code for code in codes if f"error.{code}" not in CATALOGUE)
     assert not missing
 

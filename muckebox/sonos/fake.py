@@ -118,13 +118,6 @@ class FakeSonos:
             player_uid=_fake_uid(index),
         )
 
-    def find_rooms(self, seed_ip: str | None = None) -> list[RoomChoice]:
-        self._enter("find_rooms", seed_ip)
-        return [
-            RoomChoice(name=name, uid=_fake_uid(index), ip=f"192.0.2.{10 + index}")
-            for index, name in enumerate(self.rooms)
-        ]
-
     def list_favorites(self) -> list[Favorite]:
         self._enter("list_favorites")
         return list(self.favorites)
@@ -197,3 +190,40 @@ class FakeSonos:
     def _wait(self) -> None:
         if self.start_delay:
             threading.Event().wait(self.start_delay)
+
+
+@dataclass
+class FakeHousehold:
+    """A simulated Sonos household: one :class:`FakeSonos` per room."""
+
+    rooms: list[str] = field(default_factory=lambda: ["Kinderzimmer", "Wohnzimmer"])
+    reachable: bool = True
+    #: Called with the seed IP before every room search (tests can block here).
+    on_search: Callable[[str | None], None] | None = None
+    searches: list[str | None] = field(default_factory=list)
+    speakers: dict[str, FakeSonos] = field(default_factory=dict)
+
+    def speaker(self, room: str) -> FakeSonos:
+        """The speaker of ``room`` (the same object on every call)."""
+        if room not in self.speakers:
+            self.speakers[room] = FakeSonos(room_name=room, rooms=self.rooms)
+        return self.speakers[room]
+
+    def uid(self, room: str) -> str:
+        return _fake_uid(self.rooms.index(room))
+
+    def backend(
+        self, room: str, room_uid: str | None = None, seed_ip: str | None = None
+    ) -> FakeSonos:
+        return self.speaker(room)
+
+    def find_rooms(self, seed_ip: str | None = None) -> list[RoomChoice]:
+        if self.on_search:
+            self.on_search(seed_ip)
+        self.searches.append(seed_ip)
+        if not self.reachable:
+            raise SonosUnreachable("fake household switched off")
+        return [
+            RoomChoice(name=name, uid=_fake_uid(index), ip=f"192.0.2.{10 + index}")
+            for index, name in enumerate(self.rooms)
+        ]

@@ -3,12 +3,18 @@
 """The runtime: connects the HTTP layer, the tile library and the speaker.
 
 HTTP handlers call the public methods of :class:`Runtime`. Reading state
-never touches the network. Commands are handed to one of two worker lanes:
+never touches the network. Commands are handed to worker lanes:
 
 * the *transport lane* resolves the room, starts tiles, sends transport
   commands and polls the playback state every two seconds;
 * the *volume lane* runs the volume guard every second and handles
-  louder/quieter, so that a slow playback start never delays a correction.
+  louder/quieter, so that a slow playback start never delays a correction;
+* the *setup lane* searches rooms and tests a newly chosen room, so that the
+  parents' page never blocks the kids.
+
+Everything that belongs to the chosen room lives in a :class:`RoomSession`.
+Choosing another room swaps the session; results of jobs that still ran for
+the old session are dropped, so nothing leaks from one room to the other.
 """
 
 from __future__ import annotations
@@ -24,11 +30,18 @@ from pathlib import Path
 from typing import Any
 
 from muckebox import __version__
-from muckebox.config import Settings
 from muckebox.library import Library, Tile
+from muckebox.settings import (
+    SettingsError,
+    SettingsStore,
+    StoredSettings,
+    validate_room,
+    validate_seed_ip,
+)
 from muckebox.sonos.backend import TRANSPORT_ACTIONS, SonosBackend
 from muckebox.sonos.errors import ActionNotAvailable, RoomNotFound, SonosError
-from muckebox.sonos.model import Favorite, Playback, Route
+from muckebox.sonos.model import Favorite, Playback, RoomChoice, RoomInfo, Route
+from muckebox.storage import atomic_write
 
 from .breaker import CircuitBreaker
 from .clock import Clock, SystemClock
@@ -47,6 +60,9 @@ COMMAND_WAIT = 3.5
 VOLUME_WAIT = 2.5
 FAVORITES_WAIT = 15.0
 FAVORITES_TTL = 60.0
+SETUP_WAIT = 20.0  # a room search (discovery plus network scan) or a room test
+ROOM_SEARCH_TTL = 15.0  # seconds a room search result is reused
+ROOM_SEARCH_MIN_INTERVAL = 5.0  # a new search at most this often
 # Seconds to wait for running Sonos calls when shutting down (after the web
 # server has let running requests finish, which takes up to 5 s itself).
 STOP_TIMEOUT = 2.0
@@ -90,32 +106,51 @@ def _strip_query(uri: str) -> str:
     return uri.split("?", 1)[0]
 
 
+BackendFactory = Callable[[str, "str | None", "str | None"], SonosBackend]
+RoomFinder = Callable[["str | None"], list[RoomChoice]]
+
+
+class RoomSession:
+    """Everything that belongs to the chosen room."""
+
+    def __init__(self, backend: SonosBackend, max_volume: Callable[[], int], clock: Clock) -> None:
+        self.backend = backend
+        self.guard = VolumeGuard(backend, max_volume, clock)
+        self.transport_breaker = CircuitBreaker(clock, min_cooldown=2, max_cooldown=30)
+        # The guard must never pause for long, so its breaker caps at 5 s.
+        self.volume_breaker = CircuitBreaker(clock, min_cooldown=1, max_cooldown=5)
+        self.resolved_at: float | None = None
+        self.fixed_volume = False
+        self.favorites: tuple[float, list[Favorite]] | None = None
+
+
 class Runtime:
     def __init__(
         self,
-        settings: Settings,
-        backend: SonosBackend,
+        store: SettingsStore,
         library: Library,
+        data_dir: Path,
         *,
+        backend_factory: BackendFactory,
+        room_finder: RoomFinder,
         clock: Clock | None = None,
         lane_factory: Callable[[str, Callable[[], None] | None, float], Any] = Lane,
         policy: CommandPolicy | None = None,
     ) -> None:
-        self.settings = settings
-        self.backend = backend
+        self.store = store
         self.library = library
+        self.data_dir = data_dir
+        self.backend_factory = backend_factory
+        self.room_finder = room_finder
         self.clock = clock or SystemClock()
         self.policy = policy or CommandPolicy()
         self.transport_lane = lane_factory(
             "transport", self.poll_transport, TRANSPORT_POLL_INTERVAL
         )
         self.volume_lane = lane_factory("volume", self.poll_volume, VOLUME_POLL_INTERVAL)
-        self.transport_breaker = CircuitBreaker(self.clock, min_cooldown=2, max_cooldown=30)
-        # The guard must never pause for long, so its breaker caps at 5 s.
-        self.volume_breaker = CircuitBreaker(self.clock, min_cooldown=1, max_cooldown=5)
-        self.guard = VolumeGuard(backend, self.max_volume, self.clock)
+        self.setup_lane = lane_factory("setup", None, 60.0)
         self.state = StateCache(
-            sonos={"status": "starting", "room": None},
+            sonos={"status": "not_configured", "room": None},
             playback={"state": "unknown", "tile_id": None},
             actions=[],
             volume=None,
@@ -124,45 +159,60 @@ class Runtime:
         )
         self._command_lock = threading.Lock()
         self._volume_lock = threading.Lock()
-        self._room_resolved_at: float | None = None
-        self._now_playing: NowPlaying | None = self._load_now_playing()
-        self._favorites: tuple[float, list[Favorite]] | None = None
-        self.fixed_volume = False
-        if not settings.sonos_config_ok:
-            code = next(p.code for p in settings.problems if p.severity == "error")
-            self.state.update(sonos={"status": "config_error", "room": None, "problem": code})
+        self._switch_lock = threading.RLock()
+        self._search_lock = threading.Lock()
+        self._searches: dict[str | None, tuple[float, list[RoomChoice]]] = {}
+        self._session: RoomSession | None = None
+        self._room_uid: str | None = None
+        self._now_playing: NowPlaying | None = None
+        current = store.current()
+        if current.configured:
+            self._room_uid = current.room_uid
+            self._now_playing = self._load_now_playing(current.room_uid)
+            self._install(
+                RoomSession(
+                    backend_factory(current.room, current.room_uid, current.seed_ip),
+                    self.max_volume,
+                    self.clock,
+                ),
+                current.room,
+            )
 
     # -- lifecycle --------------------------------------------------------
 
-    @property
-    def enabled(self) -> bool:
-        return self.settings.sonos_config_ok
-
     def start(self) -> None:
-        if not self.enabled:
-            log.warning("Sonos control disabled because of configuration errors")
-            return
-        self.transport_lane.start()
-        self.volume_lane.start()
+        # The lanes always run: without a room their idle tasks do nothing,
+        # and choosing a room later needs them.
+        for lane in (self.transport_lane, self.volume_lane, self.setup_lane):
+            lane.start()
 
     def stop(self, timeout: float = STOP_TIMEOUT) -> None:
-        """Stop both lanes, waiting at most ``timeout`` seconds in total."""
-        for lane in (self.transport_lane, self.volume_lane):
+        """Stop all lanes, waiting at most ``timeout`` seconds in total."""
+        lanes = (self.transport_lane, self.volume_lane, self.setup_lane)
+        for lane in lanes:
             lane.request_stop()
         deadline = self.clock.monotonic() + timeout
-        for lane in (self.transport_lane, self.volume_lane):
+        for lane in lanes:
             lane.join(deadline - self.clock.monotonic())
 
     def max_volume(self) -> int:
-        return self.settings.max_volume
+        return self.store.current().max_volume
+
+    def volume_step(self) -> int:
+        return self.store.current().volume_step
+
+    @property
+    def configured(self) -> bool:
+        return self._session is not None
 
     # -- reading state (never blocks) ---------------------------------------
 
     def state_document(self) -> dict[str, Any]:
         data, rev = self.state.snapshot()
         sonos = data["sonos"]
-        if sonos.get("status") not in ("ok", "starting", "config_error"):
-            sonos["retry_in"] = self.transport_breaker.retry_in()
+        session = self._session
+        if session and sonos.get("status") not in ("ok", "starting", "not_configured"):
+            sonos["retry_in"] = session.transport_breaker.retry_in()
         last_error = data["last_error"]
         if last_error and self.clock.time() - last_error["at"] > LAST_ERROR_TTL:
             last_error = None
@@ -187,7 +237,7 @@ class Runtime:
             "volume": {
                 "value": volume,
                 "max": self.max_volume(),
-                "step": self.settings.volume_step,
+                "step": self.volume_step(),
             },
             "pending": data["pending"],
             "last_error": last_error,
@@ -198,42 +248,42 @@ class Runtime:
     def play_tile(self, tile_id: str) -> str:
         """Start a tile. Returns "accepted", "resumed" or "noop"."""
         tile = self.library.get(tile_id)  # raises TileNotFound
-        self._check_available("play")
+        session = self._check_available("play")
         playback = self.state.get("playback")
         if playback["tile_id"] == tile.id:
             if playback["state"] in ("playing", "transitioning"):
                 return "noop"
-            self._submit_exclusive(lambda: self._resume_job(tile.id), pending=None)
+            self._submit_exclusive(lambda: self._resume_job(session, tile.id), pending=None)
             return "resumed"
         pending = {"action": "start", "tile_id": tile.id, "since": int(self.clock.time())}
-        self._submit_exclusive(lambda: self._start_tile(tile), pending=pending)
+        self._submit_exclusive(lambda: self._start_tile(session, tile), pending=pending)
         return "accepted"
 
     def transport(self, action: str) -> dict[str, Any]:
         if action not in (*TRANSPORT_ACTIONS, "toggle"):
             raise ValueError(action)
-        self._check_available(action)
+        session = self._check_available(action)
         playing = self.state.get("playback")["state"] in ("playing", "transitioning")
         if action == "toggle":
             action = "pause" if playing else "play"
         elif (action == "pause" and not playing) or (action == "play" and playing):
             # Already done: a double tap must not undo the first tap.
             return self.state_document()["playback"]
-        future = self._submit_exclusive(lambda: self._transport_job(action), pending=None)
-        self._wait(future, COMMAND_WAIT)
+        future = self._submit_exclusive(lambda: self._transport_job(session, action), pending=None)
+        self._wait(future, COMMAND_WAIT, session)
         return self.state_document()["playback"]
 
     def change_volume(self, direction: str) -> dict[str, Any]:
         if direction not in ("up", "down"):
             raise ValueError(direction)
-        self._check_available("volume")
+        session = self._check_available("volume")
         with self._volume_lock:
             # One tap at a time: taps must not pile up while the speaker is slow.
             if self.volume_lane.busy:
                 raise Busy()
-            future = self.volume_lane.submit(lambda: self._volume_job(direction))
+            future = self.volume_lane.submit(lambda: self._volume_job(session, direction))
         try:
-            self._wait(future, VOLUME_WAIT)
+            self._wait(future, VOLUME_WAIT, session)
         except Unavailable as exc:
             raise Unavailable("volume_unknown", exc.retry_in) from exc
         return self.state_document()["volume"]
@@ -241,96 +291,230 @@ class Runtime:
     # -- commands from the parents' page --------------------------------------
 
     def favorites(self, refresh: bool = False) -> list[Favorite]:
-        self._check_available("favorites")
-        cached = self._favorites
+        session = self._check_available("favorites")
+        cached = session.favorites
         if cached and not refresh and self.clock.monotonic() - cached[0] < FAVORITES_TTL:
             return cached[1]
-        future = self.transport_lane.submit(self._favorites_job)
-        return self._wait(future, FAVORITES_WAIT)
+        future = self.transport_lane.submit(lambda: self._favorites_job(session))
+        return self._wait(future, FAVORITES_WAIT, session)
 
     def cached_favorites(self) -> list[Favorite] | None:
-        """The last favorites list, however old (no speaker access)."""
-        return self._favorites[1] if self._favorites else None
+        """The last favorites list of this room, however old (no speaker access)."""
+        session = self._session
+        return session.favorites[1] if session and session.favorites else None
 
     def fetch_art(self, uri: str) -> bytes:
         """Download album art (runs in the calling thread; no UPnP involved)."""
-        return self.backend.fetch_art(uri)
+        session = self._session
+        if session is None:
+            raise Unavailable("not_configured")
+        return session.backend.fetch_art(uri)
 
     def status(self) -> dict[str, Any]:
         """Diagnostics for parents."""
-        room = self.state.get("sonos")
+        session = self._session
+        current = self.store.current()
+        problems = []
+        if session is None:
+            problems.append("not_configured")
+        if current.pin_generated:
+            problems.append("pin_generated")
+        if self.store.load_problem:
+            problems.append(self.store.load_problem)
         return {
-            "sonos": room,
-            "config_problems": [p.code for p in self.settings.problems],
+            "sonos": self.state.get("sonos"),
+            "config_problems": problems,
             "library_problem": self.library.load_problem,
             "volume_guard": {
-                "max": self.max_volume(),
-                "corrections": self.guard.corrections,
-                "fighting": self.guard.fighting,
-                "fixed_volume": self.fixed_volume,
+                "max": current.max_volume,
+                "corrections": session.guard.corrections if session else 0,
+                "fighting": session.guard.fighting if session else False,
+                "fixed_volume": session.fixed_volume if session else False,
             },
             "breaker": {
-                "transport_retry_in": self.transport_breaker.retry_in(),
-                "volume_retry_in": self.volume_breaker.retry_in(),
+                "transport_retry_in": session.transport_breaker.retry_in() if session else None,
+                "volume_retry_in": session.volume_breaker.retry_in() if session else None,
             },
         }
+
+    def settings(self) -> StoredSettings:
+        return self.store.current()
+
+    # -- setting up the room --------------------------------------------------
+
+    def search_rooms(self, seed_ip: str | None, refresh: bool = False) -> list[RoomChoice]:
+        """Find the household's rooms (via ``seed_ip`` or discovery)."""
+        cached = self._searches.get(seed_ip)
+        if cached:
+            age = self.clock.monotonic() - cached[0]
+            # Reuse a fresh result; even "search again" at most every few seconds.
+            if age < ROOM_SEARCH_MIN_INTERVAL or (not refresh and age < ROOM_SEARCH_TTL):
+                return cached[1]
+        if not self._search_lock.acquire(blocking=False):
+            raise Busy()
+        try:
+            future = self.setup_lane.submit(lambda: self.room_finder(seed_ip))
+            rooms = self._wait(future, SETUP_WAIT)
+        finally:
+            self._search_lock.release()
+        now = self.clock.monotonic()
+        self._searches = {
+            seed: found
+            for seed, found in self._searches.items()
+            if now - found[0] < ROOM_SEARCH_TTL
+        }
+        self._searches[seed_ip] = (now, rooms)
+        return rooms
+
+    def choose_room(self, room: object, seed_ip: object) -> RoomInfo:
+        """Test the room, then save it and switch to it (nothing is saved on failure).
+
+        Raises :class:`~muckebox.settings.SettingsError` for invalid input,
+        :class:`Unavailable` if the room cannot be reached and :class:`Busy`
+        while a room search or another test is running.
+        """
+        room = validate_room(room)
+        seed_ip = validate_seed_ip(seed_ip)
+        # The speaker ID comes from our own search result, never from the client.
+        found = [self._searches.get(seed_ip), *self._searches.values()]
+        uid = next((r.uid for f in found if f for r in f[1] if r.name == room), None)
+        if not self._search_lock.acquire(blocking=False):
+            raise Busy()
+        try:
+            session = RoomSession(
+                self.backend_factory(room, uid, seed_ip), self.max_volume, self.clock
+            )
+            future = self.setup_lane.submit(lambda: self._test_room(session))
+            info = self._wait(future, SETUP_WAIT)
+        finally:
+            self._search_lock.release()
+        room_uid = info.player_uid or uid
+        with self._switch_lock:
+            self.store.set_room(info.name, room_uid, seed_ip)  # raises OSError: nothing changes
+            if room_uid != self._room_uid:
+                self._set_now_playing(None)  # another room: forget the highlighted tile
+            self._room_uid = room_uid
+            self._install(session, info.name, grouped=info.grouped, status="ok")
+        log.info("Now controlling room %s", info.name)
+        return info
+
+    def _test_room(self, session: RoomSession) -> RoomInfo:
+        info = session.backend.resolve()
+        session.resolved_at = self.clock.monotonic()
+        self._detect_fixed_volume(session)
+        return info
+
+    def _install(
+        self,
+        session: RoomSession,
+        room: str | None,
+        *,
+        grouped: bool = False,
+        status: str = "starting",
+    ) -> None:
+        with self._switch_lock:
+            self._session = session
+            sonos: dict[str, Any] = {"status": status, "room": room}
+            if status == "ok":
+                sonos["grouped"] = grouped
+            self.state.update(
+                sonos=sonos,
+                playback={"state": "unknown", "tile_id": None},
+                actions=[],
+                volume=None,
+                pending=None,
+                last_error=None,
+            )
+
+    def _publish(self, session: RoomSession, **sections: Any) -> None:
+        """Update the shared state, unless ``session`` has been replaced meanwhile."""
+        with self._switch_lock:
+            if session is self._session:
+                self.state.update(**sections)
+
+    def _current(self, session: RoomSession) -> bool:
+        return session is self._session
 
     # -- lane jobs --------------------------------------------------------
 
     def poll_transport(self) -> None:
         """Idle task of the transport lane."""
-        if not self.transport_breaker.allow():
+        session = self._session
+        if session is None or not session.transport_breaker.allow():
             return
         try:
-            self._ensure_room()
-            self._refresh_playback()
-            self.transport_breaker.success()
+            self._ensure_room(session)
+            self._refresh_playback(session)
+            session.transport_breaker.success()
         except SonosError as exc:
-            self._on_error(exc)
+            self._on_error(session, exc)
 
     def poll_volume(self) -> None:
         """Idle task of the volume lane: the volume guard."""
-        if not self.volume_breaker.allow():
+        session = self._session
+        if session is None or not session.volume_breaker.allow():
             return
         try:
-            volume = self.guard.step()
+            volume = session.guard.step()
         except SonosError as exc:
             if exc.connection_problem:
-                self.volume_breaker.failure()
-                self.state.update(volume=None)  # the bar shows "unknown", buttons disable
+                session.volume_breaker.failure()
+                self._publish(session, volume=None)  # the bar shows "unknown"
             else:
                 log.info("Volume check failed: %s", exc)
             return
-        self.volume_breaker.success()
-        self.state.update(volume=volume)
+        session.volume_breaker.success()
+        self._publish(session, volume=volume)
 
-    def _ensure_room(self, force: bool = False) -> None:
+    def _ensure_room(self, session: RoomSession, force: bool = False) -> None:
         now = self.clock.monotonic()
         if (
             not force
-            and self._room_resolved_at is not None
-            and now - self._room_resolved_at < RESOLVE_INTERVAL
+            and session.resolved_at is not None
+            and now - session.resolved_at < RESOLVE_INTERVAL
         ):
             return
-        first = self._room_resolved_at is None
-        room = self.backend.resolve()
-        self._room_resolved_at = now
-        self.state.update(sonos={"status": "ok", "room": room.name, "grouped": room.grouped})
+        first = session.resolved_at is None
+        room = session.backend.resolve()
+        session.resolved_at = now
+        with self._switch_lock:
+            if not self._current(session):
+                return
+            self.state.update(sonos={"status": "ok", "room": room.name, "grouped": room.grouped})
+            self._remember_rename(room)
         if first:
             log.info("Controlling room %s", room.name)
-            try:
-                self.fixed_volume = self.backend.fixed_volume()
-            except SonosError:
-                self.fixed_volume = False
-            if self.fixed_volume:
-                log.warning("The room's volume is fixed; the volume limit has no effect")
+            self._detect_fixed_volume(session)
 
-    def _refresh_playback(self) -> Playback:
-        playback = self.backend.playback()
-        self.state.update(
-            playback={"state": playback.state, "tile_id": self._match(playback)},
-            actions=sorted(playback.actions),
-        )
+    def _remember_rename(self, room: RoomInfo) -> None:
+        """Keep the stored room name up to date after a rename in the Sonos app."""
+        current = self.store.current()
+        room_uid = room.player_uid or current.room_uid
+        if (room.name, room_uid) == (current.room, current.room_uid):
+            return
+        try:
+            self.store.set_room(room.name, room_uid, current.seed_ip)
+        except (SettingsError, OSError) as exc:
+            log.warning("Could not save the new room name: %s", exc)
+            return
+        self._room_uid = room_uid
+
+    def _detect_fixed_volume(self, session: RoomSession) -> None:
+        try:
+            session.fixed_volume = session.backend.fixed_volume()
+        except SonosError:
+            session.fixed_volume = False
+        if session.fixed_volume:
+            log.warning("The room's volume is fixed; the volume limit has no effect")
+
+    def _refresh_playback(self, session: RoomSession) -> Playback:
+        playback = session.backend.playback()
+        with self._switch_lock:
+            if self._current(session):
+                self.state.update(
+                    playback={"state": playback.state, "tile_id": self._match(playback)},
+                    actions=sorted(playback.actions),
+                )
         return playback
 
     def _match(self, playback: Playback) -> str | None:
@@ -360,95 +544,103 @@ class Runtime:
             return None
         return now_playing.tile_id if matches else None
 
-    def _start_tile(self, tile: Tile) -> None:
+    def _start_tile(self, session: RoomSession, tile: Tile) -> None:
         try:
             try:
-                self._ensure_room()
+                self._ensure_room(session)
                 if tile.kind == "favorite":
-                    route = self.backend.play_favorite(tile.favorite_ref(), tile.favorite_route())
+                    route = session.backend.play_favorite(
+                        tile.favorite_ref(), tile.favorite_route()
+                    )
                 else:
-                    self.backend.play_share_link(tile.share_link(), tile.title)
+                    session.backend.play_share_link(tile.share_link(), tile.title)
                     route = Route.QUEUE
             except SonosError as exc:
                 log.warning("Starting tile %s failed: %s", tile.id, exc)
-                self._on_error(exc)
-                self._report_error(exc.code, tile.id)
+                self._on_error(session, exc)
+                self._report_error(session, exc.code, tile.id)
                 return
             except Exception:
                 log.exception("Starting tile %s failed unexpectedly", tile.id)
-                self._report_error("sonos_error", tile.id)
+                self._report_error(session, "sonos_error", tile.id)
                 return
             # The speaker accepted the start: remember it, whatever happens next.
-            self._set_now_playing(
-                NowPlaying(tile_id=tile.id, route=route.value, uri=tile.source.get("uri", ""))
-            )
-            self.state.update(last_error=None)
-            self.transport_breaker.success()
+            with self._switch_lock:
+                if self._current(session):
+                    self._set_now_playing(
+                        NowPlaying(
+                            tile_id=tile.id, route=route.value, uri=tile.source.get("uri", "")
+                        )
+                    )
+                    self.state.update(last_error=None)
+            session.transport_breaker.success()
             try:
-                self._refresh_playback()  # also learns the first queue item
+                self._refresh_playback(session)  # also learns the first queue item
             except SonosError as exc:
                 log.info("Reading the state after starting %s failed: %s", tile.id, exc)
                 if exc.connection_problem:
-                    self._on_error(exc)
+                    self._on_error(session, exc)
         finally:
+            # Always clear "pending", even for a replaced session: the kids
+            # view must never stay locked.
             self.state.update(pending=None)
 
-    def _resume_job(self, tile_id: str) -> None:
+    def _resume_job(self, session: RoomSession, tile_id: str) -> None:
         try:
-            self._transport_job("play")
+            self._transport_job(session, "play")
         except SonosError as exc:
-            self._report_error(exc.code, tile_id)
+            self._report_error(session, exc.code, tile_id)
         except Exception:
             log.exception("Resuming tile %s failed unexpectedly", tile_id)
-            self._report_error("sonos_error", tile_id)
+            self._report_error(session, "sonos_error", tile_id)
 
-    def _report_error(self, code: str, tile_id: str) -> None:
-        self.state.update(
-            last_error={"code": code, "tile_id": tile_id, "at": int(self.clock.time())}
+    def _report_error(self, session: RoomSession, code: str, tile_id: str) -> None:
+        self._publish(
+            session, last_error={"code": code, "tile_id": tile_id, "at": int(self.clock.time())}
         )
 
-    def _transport_job(self, action: str) -> None:
+    def _transport_job(self, session: RoomSession, action: str) -> None:
         try:
-            self.backend.transport(action)
+            session.backend.transport(action)
         except ActionNotAvailable:
             log.debug("Transport action %s not available right now", action)
         except SonosError as exc:
-            self._on_error(exc)
+            self._on_error(session, exc)
             raise
-        self._refresh_playback()
+        self._refresh_playback(session)
 
-    def _volume_job(self, direction: str) -> int:
+    def _volume_job(self, session: RoomSession, direction: str) -> int:
         try:
-            volume = self.guard.change(direction, self.settings.volume_step)
+            volume = session.guard.change(direction, self.volume_step())
         except SonosError as exc:
             if exc.connection_problem:
-                self.volume_breaker.failure()
+                session.volume_breaker.failure()
             raise
-        self.volume_breaker.success()
-        self.state.update(volume=volume)
+        session.volume_breaker.success()
+        self._publish(session, volume=volume)
         return volume
 
-    def _favorites_job(self) -> list[Favorite]:
+    def _favorites_job(self, session: RoomSession) -> list[Favorite]:
         try:
-            self._ensure_room()
-            favorites = self.backend.list_favorites()
+            self._ensure_room(session)
+            favorites = session.backend.list_favorites()
         except SonosError as exc:
-            self._on_error(exc)
+            self._on_error(session, exc)
             raise
-        self._favorites = (self.clock.monotonic(), favorites)
+        session.favorites = (self.clock.monotonic(), favorites)
         return favorites
 
     # -- helpers ----------------------------------------------------------
 
-    def _check_available(self, command: str) -> None:
-        if not self.enabled:
-            raise Unavailable("config_error")
-        sonos = self.state.get("sonos")
-        if self.transport_breaker.is_open:
-            raise Unavailable(
-                sonos.get("status") or "sonos_unreachable", self.transport_breaker.retry_in()
-            )
+    def _check_available(self, command: str) -> RoomSession:
+        session = self._session
+        if session is None:
+            raise Unavailable("not_configured")
+        if session.transport_breaker.is_open:
+            status = self.state.get("sonos").get("status")
+            raise Unavailable(status or "sonos_unreachable", session.transport_breaker.retry_in())
         self.policy.check(command)
+        return session
 
     def _submit_exclusive(self, job: Callable[[], Any], pending: dict | None) -> Future:
         """Submit a transport job unless another one is running or queued."""
@@ -459,39 +651,42 @@ class Runtime:
                 self.state.update(pending=pending)
             return self.transport_lane.submit(job)
 
-    def _wait(self, future: Future, timeout: float) -> Any:
+    def _wait(self, future: Future, timeout: float, session: RoomSession | None = None) -> Any:
         try:
             return future.result(timeout)
         except FutureTimeout as exc:
             future.cancel()  # a command reported as failed must not run later
             raise Unavailable("sonos_timeout") from exc
         except SonosError as exc:
-            raise Unavailable(exc.code, self.transport_breaker.retry_in()) from exc
+            retry = session.transport_breaker.retry_in() if session else None
+            raise Unavailable(exc.code, retry) from exc
         except Exception as exc:
             log.exception("A command failed unexpectedly")
             raise Unavailable("sonos_error") from exc
 
-    def _on_error(self, exc: SonosError) -> None:
+    def _on_error(self, session: RoomSession, exc: SonosError) -> None:
         if exc.connection_problem:
-            self.transport_breaker.failure()
-            self._room_resolved_at = None
-            self.state.update(
+            session.transport_breaker.failure()
+            session.resolved_at = None
+            self._publish(
+                session,
                 sonos={"status": exc.code, "room": self.state.get("sonos").get("room")},
                 playback={"state": "unknown", "tile_id": None},
                 actions=[],
             )
-            detail = f": {exc}" if isinstance(exc, RoomNotFound) else ""
-            log.warning(
-                "Sonos not reachable (%s%s); retrying in %ss",
-                exc.code,
-                detail,
-                self.transport_breaker.retry_in(),
-            )
+            if self._current(session):
+                detail = f": {exc}" if isinstance(exc, RoomNotFound) else ""
+                log.warning(
+                    "Sonos not reachable (%s%s); retrying in %ss",
+                    exc.code,
+                    detail,
+                    session.transport_breaker.retry_in(),
+                )
         else:
             log.info("Sonos command failed: %s (%s)", exc.code, exc)
 
     def _state_file(self) -> Path:
-        return self.settings.data_dir / "state.json"
+        return self.data_dir / "state.json"
 
     def _set_now_playing(self, now_playing: NowPlaying | None) -> None:
         if now_playing == self._now_playing:
@@ -502,15 +697,16 @@ class Runtime:
             if now_playing is None:
                 path.unlink(missing_ok=True)
             else:
-                tmp = path.with_suffix(".tmp")
-                tmp.write_text(json.dumps({"now_playing": asdict(now_playing)}), encoding="utf-8")
-                tmp.replace(path)
+                data = {"room_uid": self._room_uid, "now_playing": asdict(now_playing)}
+                atomic_write(path, json.dumps(data).encode("utf-8"))
         except OSError as exc:
             log.warning("Could not save state.json: %s", exc)
 
-    def _load_now_playing(self) -> NowPlaying | None:
+    def _load_now_playing(self, room_uid: str | None) -> NowPlaying | None:
         try:
             data = json.loads(self._state_file().read_text(encoding="utf-8"))
+            if data.get("room_uid") != room_uid:
+                return None  # started in another room
             return NowPlaying(**data["now_playing"])
         except (OSError, ValueError, KeyError, TypeError):
             return None
