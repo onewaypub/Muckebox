@@ -68,9 +68,12 @@ def main(
         log.error("%s", exc)
         return EXIT_DATA_DIR
 
-    for problem in settings.problems:
-        level = logging.ERROR if problem.severity == "error" else logging.WARNING
-        log.log(level, "Configuration: %s", problem.detail)
+    if settings.legacy:
+        log.warning(
+            "Ignoring %s: these settings are now made on the parents' page (/admin) and "
+            "saved in DATA_DIR. You can remove them from your compose file.",
+            ", ".join(settings.legacy),
+        )
 
     try:
         services = build_services(settings, fake_sonos=environ.get("MUCKEBOX_FAKE_SONOS") == "1")
@@ -78,6 +81,7 @@ def main(
         log.error("%s", exc)
         return EXIT_CONFIG
     app = create_app(services)
+    log_setup_hints(services.store)
     services.runtime.start()
     reach = {LISTEN_ALL: "the whole network", LISTEN_LOCALHOST: "this computer only"}
     log.info(
@@ -143,11 +147,25 @@ def build_services(settings: Settings, *, fake_sonos: bool = False) -> Services:
     )
     return Services(
         settings=settings,
+        store=store,
         runtime=runtime,
         library=library,
         covers=covers,
         secret_key=load_secret_key(settings.data_dir / "secret_key"),
     )
+
+
+def log_setup_hints(store: SettingsStore) -> None:
+    """Tell the parents what is still to do (on every start until it is done)."""
+    current = store.current()
+    if current.pin.generated:
+        log.warning(
+            "Parents' PIN: %s (created by Muckebox). Please set your own PIN on the "
+            "parents' page (/admin); until then it is shown here on every start.",
+            current.pin.generated,
+        )
+    if not current.configured:
+        log.warning("No room chosen yet: log in on the parents' page (/admin) and choose one.")
 
 
 def load_secret_key(path: Path) -> bytes:

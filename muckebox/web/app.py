@@ -19,6 +19,7 @@ from muckebox.config import Settings
 from muckebox.covers import CoverStore
 from muckebox.library import Library
 from muckebox.runtime.service import Runtime
+from muckebox.settings import SettingsStore
 
 from . import admin, api, pages
 from .auth import SESSION_LIFETIME
@@ -54,6 +55,7 @@ class Services:
     """Everything the HTTP layer needs, created once in ``__main__``."""
 
     settings: Settings
+    store: SettingsStore
     runtime: Runtime
     library: Library
     covers: CoverStore
