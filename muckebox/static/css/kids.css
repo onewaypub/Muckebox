@@ -637,3 +637,244 @@ svg {
   background: none;
   text-decoration: underline;
 }
+
+/* -- games ------------------------------------------------------------------------ */
+
+.games-button[hidden],
+.bedtime-breathing[hidden],
+.game-layer[hidden],
+.game-picker[hidden],
+.game-stage[hidden] {
+  display: none;
+}
+
+.games-button {
+  background: var(--panel);
+  color: var(--accent);
+}
+
+.bedtime-breathing {
+  display: inline-flex;
+  gap: 12px;
+  align-items: center;
+  margin-top: 16px;
+  padding: 10px 20px 10px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 10%);
+  color: var(--text);
+  font: inherit;
+  font-size: 1.2rem;
+}
+
+.bedtime-breathing img {
+  width: 48px;
+  height: 48px;
+}
+
+.game-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 15;
+  display: grid;
+  background: var(--bg-deep);
+}
+
+.game-close {
+  position: absolute;
+  top: max(16px, env(safe-area-inset-top));
+  left: max(16px, env(safe-area-inset-left));
+  z-index: 2;
+  width: 64px;
+  height: 64px;
+  padding: 14px;
+  border: 0;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 12%);
+  color: var(--text);
+}
+
+.game-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 40vw), 1fr));
+  gap: var(--gap);
+  place-content: center;
+  padding: 96px 32px 32px;
+}
+
+.game-card {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  padding: 20px;
+  border: 0;
+  border-radius: var(--tile-radius);
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: 1.3rem;
+  font-weight: 700;
+}
+
+.game-card:disabled {
+  opacity: 0.35;
+}
+
+.game-card img {
+  width: min(140px, 25vw);
+  height: min(140px, 25vw);
+}
+
+.game-stage {
+  position: relative;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 24px;
+  padding: 96px 24px 24px;
+  text-align: center;
+}
+
+.game-picture {
+  width: min(40vmin, 320px);
+  height: min(40vmin, 320px);
+}
+
+.game-text {
+  margin: 0;
+  font-size: 1.6rem;
+  font-weight: 700;
+}
+
+.game-text.big {
+  font-size: 3rem;
+}
+
+/* Atemübung: a circle to breathe with; the screen slowly goes dark. */
+.game-breathing {
+  background: #060b14;
+}
+
+.breathing-circle {
+  width: min(45vmin, 360px);
+  height: min(45vmin, 360px);
+  border-radius: 50%;
+  background: radial-gradient(circle, rgb(168 218 220 / 80%), rgb(69 123 157 / 40%));
+  transform: scale(0.55);
+  transition-property: transform;
+  transition-timing-function: ease-in-out;
+}
+
+.breathing-circle.in {
+  transform: scale(1);
+}
+
+.breathing-label {
+  margin: 0;
+  min-height: 1.5em;
+  font-size: 1.5rem;
+  opacity: 0.7;
+}
+
+.breathing-dim {
+  position: absolute;
+  inset: 0;
+  background: #000;
+  opacity: 0;
+  transition: opacity 4s linear;
+  pointer-events: none;
+}
+
+.game-picture.night {
+  opacity: 0.35;
+}
+
+/* Geräusche-Rätsel */
+.quiz-replay {
+  width: 96px;
+  height: 96px;
+  padding: 22px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--bg-deep);
+}
+
+.quiz-choices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--gap);
+}
+
+.quiz-choices[data-count="3"] {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+@media (min-aspect-ratio: 4/3) {
+  .quiz-choices[data-count="4"] {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.quiz-choice {
+  padding: 16px;
+  border: 4px solid transparent;
+  border-radius: var(--tile-radius);
+  background: rgb(255 255 255 / 92%);
+}
+
+.quiz-choice img {
+  display: block;
+  width: min(26vmin, 200px);
+  height: min(26vmin, 200px);
+}
+
+.quiz-choice.right {
+  border-color: var(--accent);
+  box-shadow: 0 0 32px rgb(255 209 102 / 80%);
+}
+
+.quiz-choice.wrong {
+  animation: wobble 0.5s ease-in-out;
+}
+
+@keyframes wobble {
+  25% {
+    transform: rotate(-6deg);
+  }
+
+  75% {
+    transform: rotate(6deg);
+  }
+}
+
+/* Beweg dich wie ... */
+.move-holder {
+  display: grid;
+  justify-items: center;
+  gap: 16px;
+}
+
+.move-bar {
+  width: min(70vw, 600px);
+  height: 12px;
+  border-radius: 6px;
+  background: var(--accent);
+  transform-origin: left;
+  transform: scaleX(0);
+}
+
+/* Stopptanz: only a calm colour and one word */
+.game-freeze_dance[data-phase="dance"] {
+  background: #2a6f67;
+}
+
+.game-freeze_dance[data-phase="freeze"] {
+  background: #1d3557;
+}
+
+.freeze-holder {
+  display: grid;
+  justify-items: center;
+  gap: 16px;
+}

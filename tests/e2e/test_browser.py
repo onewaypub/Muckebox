@@ -92,6 +92,13 @@ class Server:
         self.server.close()
         self.runtime.stop()
 
+    def vanish(self):
+        """Like a NAS that was switched off: also end open keep-alive connections,
+        which waitress would otherwise keep serving after close()."""
+        self.server.close()
+        for channel in list(self.server._map.values()):
+            channel.close()
+
     def add_tiles(self, *indexes):
         tiles = []
         for index in indexes:
@@ -186,7 +193,7 @@ def test_sleeping_speaker_and_recovery(page, server):
 def test_server_gone_shows_offline_overlay(page, server):
     page.goto(server.url)
     expect(page.locator("#empty")).to_be_visible()
-    server.server.close()
+    server.vanish()
     overlay = page.locator("#overlay")
     expect(overlay).to_be_visible(timeout=10_000)
     expect(overlay).to_contain_text("Keine Verbindung zur Muckebox")
@@ -403,3 +410,121 @@ def test_parents_see_and_reset_where_an_album_stopped(page, server):
         ".tile-row", has=page.locator("input[name=title][value='Kinderradio']")
     )
     expect(radio_row.locator(".resume")).to_be_hidden()  # radio has no positions
+
+
+# -- games ----------------------------------------------------------------------------
+
+RECORD_AUDIO = """
+window.__played = [];
+window.__spoken = [];
+window.Audio = class {
+  constructor() { this.src = ""; }
+  play() {
+    window.__played.push(this.src);
+    setTimeout(() => this.onended && this.onended(), 10);
+    return Promise.resolve();
+  }
+  pause() {}
+};
+window.SpeechSynthesisUtterance = class { constructor(text) { this.text = text; } };
+Object.defineProperty(window, "speechSynthesis", { value: {
+  speak(utterance) {
+    window.__spoken.push(utterance.text);
+    setTimeout(() => utterance.onend && utterance.onend(), 10);
+  },
+  cancel() {},
+  getVoices() { return []; },
+}});
+"""
+
+
+def enable_games(server, *games, level=1, dance_tile=None):
+    server.store.set_games(
+        {
+            "daily_minutes": 30,
+            "dance_tile": dance_tile,
+            "items": {game: {"enabled": True, "level": level} for game in games},
+        }
+    )
+
+
+def open_game(page, game):
+    page.locator("#games-button").tap()
+    page.locator(f".game-card[data-game='{game}']").tap()
+
+
+def test_sound_quiz(page, server):
+    page.add_init_script(RECORD_AUDIO)
+    enable_games(server, "sound_quiz", level=1)
+    page.goto(server.url)
+    expect(page.locator("#games-button")).to_be_visible()
+    open_game(page, "sound_quiz")
+    for _ in range(5):
+        expect(page.locator(".quiz-choice")).to_have_count(2)
+        played = None
+        deadline = time.time() + 5
+        while not played and time.time() < deadline:  # (the page's CSP forbids wait_for_function)
+            played = page.evaluate(
+                "window.__played.filter((src) => !src.includes('silence')).at(-1)"
+            )
+            time.sleep(0.05)
+        answer = played.rsplit("/", 1)[1].removesuffix(".mp3")
+        page.evaluate("window.__played = []")
+        page.locator(f".quiz-choice[data-id='{answer}']").tap()
+    expect(page.locator(".game-stage")).to_contain_text("Fertig! Toll zugehört.")
+    expect(page.locator("#game-layer")).to_be_hidden(timeout=5000)
+    spoken = page.evaluate("window.__spoken")
+    assert sum(text.startswith("Richtig, ") for text in spoken) == 5
+    assert server.runtime.games.active() is None
+    assert 0 < server.runtime.games.used_today() < 60  # the unused time came back
+
+
+def test_freeze_dance_mutes_the_speaker(page, server):
+    page.add_init_script(RECORD_AUDIO)
+    (tile,) = server.add_tiles(0)
+    enable_games(server, "freeze_dance", level=3, dance_tile=tile.id)
+    page.clock.install()
+    page.goto(server.url)
+    open_game(page, "freeze_dance")
+    expect(page.locator(".game-stage")).to_have_attribute("data-phase", "dance")
+    assert server.fake.state == "playing"  # the dance music
+    page.clock.run_for(12_500)  # the first dance lasts at least 12 s
+    expect(page.locator(".game-stage")).to_have_attribute("data-phase", "freeze")
+    expect(page.locator(".game-stage")).to_contain_text("Stopp!")
+    deadline = time.time() + 5
+    while not server.fake.muted and time.time() < deadline:
+        time.sleep(0.05)
+    assert server.fake.muted
+    page.locator("#game-close").tap()
+    expect(page.locator("#game-layer")).to_be_hidden()
+    deadline = time.time() + 5
+    while (server.fake.muted or server.fake.state != "paused") and time.time() < deadline:
+        time.sleep(0.05)
+    assert (server.fake.muted, server.fake.state) == (False, "paused")
+
+
+def test_move_like(page, server):
+    page.add_init_script(RECORD_AUDIO)
+    enable_games(server, "move_like", level=1)
+    page.goto(server.url)
+    open_game(page, "move_like")
+    expect(page.locator(".move-holder .game-text")).to_contain_text("Beweg dich wie")
+    page.locator("#game-close").tap()
+    expect(page.locator("#game-layer")).to_be_hidden()
+    assert server.runtime.games.active() is None
+
+
+def test_breathing_at_bedtime(page, evening_server):
+    page.add_init_script(RECORD_AUDIO)
+    enable_games(evening_server, "breathing", level=1)
+    page.clock.install()
+    page.goto(evening_server.url)
+    button = page.locator("#bedtime-breathing")
+    expect(button).to_be_visible()
+    button.tap()
+    expect(page.locator(".breathing-circle")).to_be_visible()
+    page.clock.run_for(4 * 60 * 1000)
+    expect(page.locator(".game-picture.night")).to_be_visible()
+    page.locator("#game-stage").tap()
+    expect(page.locator("#game-layer")).to_be_hidden()
+    assert "Gute Nacht." in page.evaluate("window.__spoken")
