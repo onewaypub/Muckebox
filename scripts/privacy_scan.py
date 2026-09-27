@@ -55,8 +55,8 @@ def gitleaks(binary: str, *args: str, stdin: str | None = None, cwd: Path = ROOT
 
 
 def scan_history(binary: str) -> bool:
-    print("• git history (all local branches)")
-    return gitleaks(binary, "git", "--log-opts=--branches", ".")
+    print("• git history (all refs)")
+    return gitleaks(binary, "git", "--log-opts=--all", ".")
 
 
 def scan_working_tree(binary: str) -> bool:
@@ -76,12 +76,12 @@ def scan_working_tree(binary: str) -> bool:
 
 def scan_commit_messages(binary: str) -> bool:
     print("• commit messages")
-    return gitleaks(binary, "stdin", stdin=git("log", "--branches", "--format=%B"))
+    return gitleaks(binary, "stdin", stdin=git("log", "--all", "--format=%B"))
 
 
 def check_commit_emails() -> bool:
     print("• commit author and committer emails")
-    emails = set(git("log", "--branches", "--format=%ae%n%ce").split())
+    emails = set(git("log", "--all", "--format=%ae%n%ce").split())
     bad = sorted(e for e in emails if not ALLOWED_COMMIT_EMAIL.search(e))
     for email in bad:
         # Show only the domain; the local part may itself be private.
