@@ -102,9 +102,9 @@ require a same-origin `Origin` header when the browser sends one
 | Method and path | Purpose |
 |---|---|
 | `GET /api/admin/session` | `{"ok": true, "logged_in": true}` |
-| `POST /api/admin/login` `{"pin": "…"}` | Start a session. `401 pin_wrong`, `429 pin_rate_limited` (with `retry_in`). Failed attempts are counted per client (5) and in total (20) for 15 minutes; a new PIN clears the counters. |
+| `POST /api/admin/login` `{"pin": "…"}` | Start a session. `401 pin_wrong`, `429 pin_rate_limited` (with `retry_in`). Failed attempts are counted per client (5) and in total (20) for 15 minutes, checks still running included; a new PIN clears the counters. |
 | `POST /api/admin/logout` | End the session. |
-| `POST /api/admin/pin` `{"current": "…", "new": "…"}` | Change the PIN. Ends all other sessions; this one stays logged in. `403 pin_wrong` (counted like a failed login), `429 pin_rate_limited`, `422 pin_too_short` / `pin_placeholder` / `pin_invalid`. Answers like `GET /api/admin/settings`. |
+| `POST /api/admin/pin` `{"current": "…", "new": "…"}` | Change the PIN. Ends all other sessions; this one stays logged in. `403 pin_wrong` (counted like a failed login), `429 pin_rate_limited`, `422 pin_too_short` / `pin_placeholder` / `pin_invalid`, `409 pin_changed` (the PIN was changed elsewhere, e.g. with `reset-pin`, while this request ran). Answers like `GET /api/admin/settings`. |
 | `GET /api/admin/settings` | `{"ok": true, "settings": {"room": "Kids room" \| null, "seed_ip": "192.0.2.10" \| null, "max_volume": 25, "volume_step": 3, "pin_generated": false}, "sonos": {…}}`. Never contains PIN data. `pin_generated` is true while the PIN is still the one Muckebox created and printed in its log. |
 | `PUT /api/admin/settings/volume` `{"max_volume": 25, "volume_step": 3}` | Set the volume limit (1–100) and the step of the volume buttons (1–limit). Applies at once. `422 max_volume_invalid` / `volume_step_invalid`. |
 | `POST /api/admin/rooms/search` `{"seed_ip": "…" \| null, "refresh": false}` | Find the household's rooms, through the speaker at `seed_ip` or by discovery. `{"ok": true, "rooms": [{"name": "…", "ip": "…", "grouped": false, "chosen": true}]}`. Results are reused for 15 s (with `refresh`, at most every 5 s). One search or room test at a time: `409 busy`. `422 seed_ip_invalid`, `503 <code>`. |
