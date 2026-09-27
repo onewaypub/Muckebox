@@ -87,21 +87,38 @@ def test_rate_limit_per_client(client):
     assert other.status_code == 200
 
 
+def fail(limiter, client):
+    assert limiter.begin(client) is None
+    limiter.finish(client, ok=False)
+
+
 def test_global_rate_limit():
     limiter = auth.RateLimiter(clock=lambda: 0.0)
     for number in range(auth.MAX_FAILURES_GLOBAL):
-        limiter.failure(f"192.0.2.{number}")
-    assert limiter.retry_in("198.51.100.1") is not None
+        fail(limiter, f"192.0.2.{number}")
+    assert limiter.begin("198.51.100.1") is not None
+
+
+def test_running_checks_count_against_the_limit():
+    """Parallel requests must not get more guesses while scrypt runs."""
+    limiter = auth.RateLimiter(clock=lambda: 0.0)
+    for _ in range(auth.MAX_FAILURES_PER_CLIENT):
+        assert limiter.begin("192.0.2.5") is None
+    assert limiter.begin("192.0.2.5") == 1  # try again once the running ones finish
+    assert limiter.begin("192.0.2.6") is None  # other clients are not affected
+    for _ in range(auth.MAX_FAILURES_PER_CLIENT):
+        limiter.finish("192.0.2.5", ok=False)
+    assert limiter.begin("192.0.2.5") > 1
 
 
 def test_rate_limit_expires():
     now = {"t": 0.0}
     limiter = auth.RateLimiter(clock=lambda: now["t"])
     for _ in range(auth.MAX_FAILURES_PER_CLIENT):
-        limiter.failure("192.0.2.5")
-    assert limiter.retry_in("192.0.2.5") is not None
+        fail(limiter, "192.0.2.5")
+    assert limiter.begin("192.0.2.5") is not None
     now["t"] = auth.FAILURE_WINDOW + 1
-    assert limiter.retry_in("192.0.2.5") is None
+    assert limiter.begin("192.0.2.5") is None
 
 
 def test_a_pin_changed_elsewhere_ends_sessions(admin, services, tmp_path, monkeypatch):
@@ -425,9 +442,9 @@ def test_oversized_upload_names_the_limit(admin):
 def test_rate_limiter_forgets_old_failures():
     now = {"t": 0.0}
     limiter = auth.RateLimiter(clock=lambda: now["t"])
-    limiter.failure("192.0.2.5")
+    fail(limiter, "192.0.2.5")
     now["t"] = auth.FAILURE_WINDOW + 1
-    limiter.retry_in("192.0.2.6")
+    limiter.begin("192.0.2.6")
     assert limiter._per_client == {}
     assert not limiter._global
 
@@ -612,3 +629,37 @@ def test_changing_the_pin_needs_the_current_one(admin, services):
 def test_new_pin_rules(admin, services, new, code):
     assert error_code(change_pin(admin, new=new)) == (422, code)
     assert services.store.verify_pin("2468")
+
+
+def check_then(services, monkeypatch, meanwhile):
+    """Run ``meanwhile`` after the PIN check but before the request ends."""
+    real_check = services.store.check
+
+    def check(pin):
+        version = real_check(pin)
+        meanwhile()
+        return version
+
+    monkeypatch.setattr(services.store, "check", check)
+
+
+def test_a_login_during_a_pin_change_gets_no_session(client, services, monkeypatch):
+    check_then(services, monkeypatch, lambda: services.store.change_pin("9753"))
+    assert login(client).status_code == 200  # the old PIN was right when it was checked
+    assert client.get("/api/admin/tiles").status_code == 401
+
+
+def test_pin_change_is_refused_after_a_reset_meanwhile(admin, services, monkeypatch):
+    check_then(services, monkeypatch, services.store.reset_pin)
+    assert error_code(change_pin(admin)) == (409, "pin_changed")
+    assert not services.store.verify_pin("9753")
+
+
+def test_unencodable_pins(client, admin):
+    body = b'{"pin": "\\ud800"}'
+    other = client.application.test_client()
+    response = other.post(
+        "/api/admin/login", data=body, headers={**POST, "Content-Type": "application/json"}
+    )
+    assert error_code(response) == (401, "pin_wrong")
+    assert error_code(change_pin(admin, new="12\ud80034")) == (422, "pin_invalid")
