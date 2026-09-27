@@ -131,3 +131,38 @@ def test_covers_in_use(library):
     tile = add(library)
     library.set_cover(tile.id, "0123456789abcdef0123.jpg")
     assert library.covers_in_use() == {"0123456789abcdef0123.jpg"}
+
+
+def test_titles_lose_control_characters_and_broken_emoji(library):
+    tile = add(library, "Bibi \ud83d Tina\x07")
+    assert tile.title == "Bibi Tina"
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda lib, tile: lib.add("New", tile.source),
+        lambda lib, tile: lib.rename(tile.id, "Renamed"),
+        lambda lib, tile: lib.move(tile.id, "down"),
+        lambda lib, tile: lib.set_cover(tile.id, "0123456789abcdef0123.jpg"),
+        lambda lib, tile: lib.remove(tile.id),
+    ],
+    ids=["add", "rename", "move", "cover", "remove"],
+)
+def test_a_failed_write_changes_nothing(library, monkeypatch, change):
+    tile = add(library, "A")
+    add(library, "B")
+    before = [(t.id, t.title, t.cover) for t in library.tiles()]
+    rev = library.rev
+
+    def disk_full(*args, **kwargs):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr("muckebox.library.os.fsync", disk_full)
+    with pytest.raises(OSError):
+        change(library, tile)
+    assert [(t.id, t.title, t.cover) for t in library.tiles()] == before
+    assert library.rev == rev
+    monkeypatch.undo()
+    library.rename(tile.id, "Works again")
+    assert library.rev == rev + 1
