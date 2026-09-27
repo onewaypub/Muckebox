@@ -98,7 +98,7 @@ def _serve(app: Flask, port: int) -> None:
         app,
         # IPv4 on all interfaces: tablets on the home network connect to the
         # host's LAN address. Muckebox must not be exposed to the internet.
-        host="0.0.0.0",  # noqa: S104
+        host="0.0.0.0",  # noqa: S104  # nosec B104
         port=port,
         threads=WEB_THREADS,
         ident="Muckebox",
