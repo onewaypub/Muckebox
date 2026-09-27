@@ -123,6 +123,21 @@ SPDX-License-Identifier: AGPL-3.0-or-later
       </form>
     </section>
 
+    <section id="sleep-section" class="card">
+      <h2 data-i18n="admin.sleep_timer"></h2>
+      <p id="sleep-status" class="schedule-status" hidden></p>
+      <button id="sleep-cancel" type="button" class="secondary" data-i18n="admin.sleep_cancel" hidden></button>
+      <form id="sleep-timer" class="fields">
+        <label class="check"><input id="sleep-enabled" type="checkbox"> <span data-i18n="admin.sleep_enabled"></span></label>
+        <label for="sleep-minutes" data-i18n="admin.sleep_minutes"></label>
+        <input id="sleep-minutes" type="number" min="5" max="90" step="5" inputmode="numeric" required>
+        <label for="sleep-wake" data-i18n="admin.sleep_wake"></label>
+        <input id="sleep-wake" type="time" step="300" required>
+        <p class="hint" data-i18n="admin.sleep_hint"></p>
+        <button type="submit" data-i18n="admin.save"></button>
+      </form>
+    </section>
+
     <section id="pin-section" class="card">
       <h2 data-i18n="admin.pin_change"></h2>
       <form id="pin-form" class="fields">

@@ -18,7 +18,7 @@ MESSAGES: dict[str, str] = {
     "kids.error": "Das hat gerade nicht geklappt",
     "kids.bedtime": "Schlafenszeit",
     "kids.bedtime_until": "Wieder ab {time} Uhr",
-    "kids.bedtime_soon": "Gleich ist Schlafenszeit",
+    "kids.sleep_timer": "Einschlaf-Timer",
     "kids.pad_title": "Eltern-Freigabe: PIN eingeben",
     "kids.pad_delete": "Löschen",
     "kids.pad_15": "+15 Min.",
@@ -103,6 +103,17 @@ MESSAGES: dict[str, str] = {
     "admin.override_60": "+1 Std.",
     "admin.override_morning": "Bis morgen früh",
     "admin.override_end": "Freigabe beenden",
+    "admin.sleep_timer": "Einschlaf-Timer",
+    "admin.sleep_enabled": "Mond-Knopf für die Kinder zeigen",
+    "admin.sleep_minutes": "Dauer (Minuten)",
+    "admin.sleep_wake": "Gesperrt bis (an Tagen ohne Nutzungszeit)",
+    "admin.sleep_hint": (
+        "Das Kind tippt auf den Mond und die Musik läuft noch so lange. Zum Schluss wird sie "
+        "leiser und pausiert; danach bleiben die Kacheln bis zur nächsten erlaubten Zeit "
+        "gesperrt. Eine Freigabe hebt das auf."
+    ),
+    "admin.sleep_running": "Läuft bis {time}.",
+    "admin.sleep_cancel": "Timer beenden",
     "admin.pin_change": "PIN ändern",
     "admin.pin_current": "Aktuelle PIN",
     "admin.pin_new": "Neue PIN",

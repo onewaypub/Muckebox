@@ -127,3 +127,11 @@ def override():
         minutes=None if until == "morning" else minutes, morning=until == "morning"
     )
     return jsonify(ok=True, schedule=runtime.keeper.document()["schedule"])
+
+
+@bp.post("/api/sleep-timer/start")
+def start_sleep_timer():
+    """The kids start the sleep timer with the moon button."""
+    runtime = _services().runtime
+    runtime.keeper.start_sleep_timer()  # Refused -> 409 sleep_timer_off / bedtime
+    return jsonify(ok=True, sleep_timer=runtime.keeper.document()["sleep_timer"])

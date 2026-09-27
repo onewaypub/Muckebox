@@ -153,6 +153,10 @@ class TimeKeeper:
             raise Refused("sleep_timer_off")
         if not self.phase(now).allowed:
             raise Refused("bedtime")
+        with self.timers.read() as state:
+            running = state.sleep
+        if running is not None and running.ends_at > now:
+            return running  # a second tap does not start it again
         ends_at = now + timer.minutes * 60
         fade = min(settings.schedule.fade_minutes * 60, timer.minutes * 30)
         lock_end = next_morning(settings.schedule, ends_at, self.zone().tz, timer.wake)

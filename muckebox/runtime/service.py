@@ -368,7 +368,7 @@ class Runtime:
                 "zone": zone.name,
                 "source": zone.source,
             },
-            "schedule": self.keeper.document()["schedule"],
+            **self.keeper.document(),
             "config_problems": problems,
             "library_problem": self.library.load_problem,
             "volume_guard": {

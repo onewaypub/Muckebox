@@ -33,12 +33,24 @@ export function isBedtime(state) {
   return Boolean(state && state.schedule && state.schedule.phase === "closed");
 }
 
-/** The small moon in the controls: while the music fades or the sleep timer runs. */
-export function showsSmallMoon(state) {
-  if (!state || isBedtime(state)) return false;
-  const fading = Boolean(state.schedule && state.schedule.phase === "fading");
-  const timer = Boolean(state.sleep_timer && state.sleep_timer.ends_at);
-  return fading || timer;
+/**
+ * The small moon in the controls:
+ * "running" while the sleep timer runs, "fading" while the music fades,
+ * "start" when the kids may start the sleep timer, otherwise "hidden".
+ */
+export function moonMode(state) {
+  if (!state || isBedtime(state)) return "hidden";
+  const timer = state.sleep_timer || {};
+  if (timer.ends_at) return "running";
+  if (state.schedule && state.schedule.phase === "fading") return "fading";
+  return timer.enabled ? "start" : "hidden";
+}
+
+/** Share of the sleep timer still left (1 = just started, 0 = over). */
+export function sleepLeft(endsAt, minutes, nowMs) {
+  if (!endsAt || !minutes) return 0;
+  const left = (endsAt * 1000 - nowMs) / (minutes * 60000);
+  return Math.max(0, Math.min(1, left));
 }
 
 // -- the parents' PIN pad on the kids tablet --------------------------------------------

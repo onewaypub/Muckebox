@@ -90,6 +90,7 @@ function showLogin() {
 function renderStatus(status) {
   serverZone = status.time.zone;
   renderScheduleStatus(status.schedule);
+  renderSleepStatus(status.sleep_timer);
   const list = $("status");
   const sonos = status.sonos || {};
   const own = ["ok", "starting", "not_configured"].includes(sonos.status);
@@ -373,7 +374,22 @@ async function loadSettings() {
   const result = await guarded(() => get("/api/admin/settings"));
   if (!result) return;
   renderSettings(result.data);
-  renderScheduleForm(result.data.settings.schedule); // only here: never over unsaved edits
+  // Forms only here and after their own save: never over unsaved edits.
+  renderScheduleForm(result.data.settings.schedule);
+  renderSleepForm(result.data.settings.sleep_timer);
+}
+
+function renderSleepForm(timer) {
+  $("sleep-enabled").checked = timer.enabled;
+  $("sleep-minutes").value = String(timer.minutes);
+  $("sleep-wake").value = timer.wake;
+}
+
+function renderSleepStatus(timer) {
+  const running = Boolean(timer.ends_at);
+  $("sleep-status").hidden = !running;
+  $("sleep-cancel").hidden = !running;
+  if (running) $("sleep-status").textContent = t("admin.sleep_running", { time: clockText(timer.ends_at) });
 }
 
 // -- usage times ------------------------------------------------------------------------
@@ -530,6 +546,23 @@ function bind() {
     if (!result) return;
     renderScheduleForm(result.data.settings.schedule);
     loadStatus();
+  });
+  $("sleep-timer").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const body = {
+      enabled: $("sleep-enabled").checked,
+      minutes: $("sleep-minutes").valueAsNumber,
+      wake: $("sleep-wake").value,
+    };
+    const result = await busy(
+      event.target.querySelector("button[type=submit]"),
+      guarded(() => request("PUT", "/api/admin/settings/sleep-timer", { body }), { success: t("admin.saved") }),
+    );
+    if (result) renderSleepForm(result.data.settings.sleep_timer);
+  });
+  $("sleep-cancel").addEventListener("click", async (event) => {
+    const result = await busy(event.target, guarded(() => request("DELETE", "/api/admin/sleep-timer")));
+    if (result) renderSleepStatus(result.data.sleep_timer);
   });
   for (const button of document.querySelectorAll("[data-override]")) {
     button.addEventListener("click", () => override(button.dataset.override, button));

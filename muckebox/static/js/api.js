@@ -35,6 +35,7 @@ export async function request(method, path, { body, etag, timeout = TIMEOUT_MS }
   } finally {
     clearTimeout(timer);
   }
+  noteServerTime(response.headers.get("Date"));
   if (response.status === 304) {
     return { status: 304, data: null, etag };
   }
@@ -48,6 +49,19 @@ export async function request(method, path, { body, etag, timeout = TIMEOUT_MS }
     throw new ApiError(response.status, error.code || fallback, error.retry_in);
   }
   return { status: response.status, data, etag: response.headers.get("ETag") };
+}
+
+// The tablet's own clock may be off; countdowns use the server's time instead.
+let serverOffsetMs = 0;
+
+function noteServerTime(header) {
+  const serverMs = Date.parse(header || "");
+  if (Number.isFinite(serverMs)) serverOffsetMs = serverMs - Date.now();
+}
+
+/** The server's current time in milliseconds (to the second). */
+export function serverNow() {
+  return Date.now() + serverOffsetMs;
 }
 
 export const get = (path, options) => request("GET", path, options);
