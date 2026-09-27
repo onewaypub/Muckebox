@@ -42,6 +42,7 @@ allowed-confusables = ["×", "–", "‘", "’"]
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-ra --strict-markers --strict-config"
+markers = ["e2e: end-to-end tests in real browser engines (need Playwright browsers)"]
 filterwarnings = ["error"]
 
 [tool.coverage.run]

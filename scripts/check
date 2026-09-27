@@ -26,7 +26,7 @@ ruff check .
 step "ruff (format)"
 ruff format --check .
 
-step "pytest (with coverage)"
+step "pytest (with coverage; browser tests run if Playwright browsers are installed)"
 MUCKEBOX_REQUIRE_GITLEAKS=1 pytest --cov --cov-report=term
 
 if command -v node >/dev/null; then
