@@ -16,7 +16,14 @@ from muckebox import __version__
 from muckebox.covers import CoverError, normalise
 from muckebox.library import LibraryError, RevConflict, TileNotFound, favorite_source
 from muckebox.runtime.service import Busy, Unavailable
-from muckebox.settings import SettingsError, SettingsFileError, validate_seed_ip
+from muckebox.schedule import schedule_to_json
+from muckebox.settings import (
+    SettingsError,
+    SettingsFileError,
+    games_to_json,
+    sleep_timer_to_json,
+    validate_seed_ip,
+)
 from muckebox.sonos.errors import SonosError
 from muckebox.sonos.model import Favorite
 
@@ -160,6 +167,9 @@ def _settings_response():
             "volume_step": current.volume_step,
             "pin_generated": current.pin_generated,
             "time_zone": current.time_zone,
+            "schedule": schedule_to_json(current.schedule),
+            "sleep_timer": sleep_timer_to_json(current.sleep_timer),
+            "games": games_to_json(current.games),
         },
         sonos=services.runtime.state.get("sonos"),
     )
@@ -177,6 +187,34 @@ def set_volume():
     body = _body()
     _settings_call(_services().store.set_volume, body.get("max_volume"), body.get("volume_step"))
     return _settings_response()
+
+
+@bp.put("/settings/schedule")
+@auth.require_admin
+def set_schedule():
+    _settings_call(_services().store.set_schedule, _body())
+    return _settings_response()
+
+
+@bp.post("/override")
+@auth.require_admin
+def override():
+    """More time now: {"minutes": 15|30|60} or {"until": "morning"}."""
+    body = _body()
+    minutes, until = body.get("minutes"), body.get("until")
+    if not (type(minutes) is int and minutes in (15, 30, 60)) and until != "morning":
+        raise ApiError(400, "bad_request")
+    keeper = _services().runtime.keeper
+    keeper.override(minutes=None if until == "morning" else minutes, morning=until == "morning")
+    return jsonify(ok=True, schedule=keeper.document()["schedule"])
+
+
+@bp.delete("/override")
+@auth.require_admin
+def end_override():
+    keeper = _services().runtime.keeper
+    keeper.end_override()
+    return jsonify(ok=True, schedule=keeper.document()["schedule"])
 
 
 @bp.put("/settings/time-zone")

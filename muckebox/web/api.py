@@ -13,9 +13,14 @@ from muckebox import __version__
 from muckebox.library import TileNotFound
 from muckebox.runtime.service import Busy, Unavailable
 
+from . import auth
 from .errors import ApiError
 
 bp = Blueprint("api", __name__)
+# Its own limiter: a kid mashing the PIN pad must not lock the parents out of
+# the parents' page.
+_override_limiter = auth.RateLimiter()
+OVERRIDE_MINUTES = (15, 30, 60)
 
 
 def _services():
@@ -105,3 +110,20 @@ def cover(name: str):
         abort(404)
     # Cover names are content hashes: a changed image gets a new URL.
     return send_file(path, mimetype="image/jpeg", max_age=365 * 24 * 3600)
+
+
+@bp.post("/api/override")
+def override():
+    """Parents allow more time from the kids tablet (PIN, no session)."""
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        raise ApiError(400, "bad_request")
+    minutes, until = body.get("minutes"), body.get("until")
+    if not (minutes in OVERRIDE_MINUTES and type(minutes) is int) and until != "morning":
+        raise ApiError(400, "bad_request")
+    auth.check_pin(body.get("pin"), _override_limiter)
+    runtime = _services().runtime
+    runtime.keeper.override(
+        minutes=None if until == "morning" else minutes, morning=until == "morning"
+    )
+    return jsonify(ok=True, schedule=runtime.keeper.document()["schedule"])

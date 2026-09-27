@@ -16,6 +16,7 @@ POST = {"X-Muckebox": "1"}
 @pytest.fixture(autouse=True)
 def fresh_rate_limiter(monkeypatch):
     monkeypatch.setattr("muckebox.web.admin._limiter", auth.RateLimiter())
+    monkeypatch.setattr("muckebox.web.api._override_limiter", auth.RateLimiter())
 
 
 def login(client, pin="2468", **kwargs):
@@ -466,7 +467,8 @@ def error_code(response):
 
 def test_settings_never_contain_pin_data(admin, services):
     data = admin.get("/api/admin/settings").get_json()
-    assert data["settings"] == {
+    settings = data["settings"]
+    assert {key: settings[key] for key in list(settings)[:6]} == {
         "room": "Kinderzimmer",
         "seed_ip": None,
         "max_volume": 25,
@@ -474,6 +476,7 @@ def test_settings_never_contain_pin_data(admin, services):
         "pin_generated": False,
         "time_zone": None,
     }
+    assert set(settings) - {"schedule", "sleep_timer", "games"} == set(list(settings)[:6])
     assert data["sonos"]["status"] == "ok"
     text = admin.get("/api/admin/settings").get_data(as_text=True)
     pin = services.store.current().pin
@@ -685,3 +688,91 @@ def test_parents_choose_the_time_zone(admin, services):
     assert admin.get("/api/admin/status").get_json()["time"]["zone"] == "Europe/Lisbon"
     bad = admin.put("/api/admin/settings/time-zone", json={"zone": "../x"}, headers=POST)
     assert error_code(bad) == (422, "time_zone_invalid")
+
+
+# -- usage times and override ------------------------------------------------------------
+
+DAILY = {
+    "enabled": True,
+    "fade_minutes": 10,
+    "days": {
+        day: {"from": "07:00", "to": "19:00"}
+        for day in ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+    },
+}
+
+
+def set_evening(services, text="2026-09-28 19:30"):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    services.store.set_time_zone("Europe/Berlin")
+    services.runtime.clock.set_time(
+        datetime.fromisoformat(text).replace(tzinfo=ZoneInfo("Europe/Berlin")).timestamp()
+    )
+
+
+def test_parents_set_the_usage_times(admin, services):
+    response = admin.put("/api/admin/settings/schedule", json=DAILY, headers=POST)
+    assert response.get_json()["settings"]["schedule"] == DAILY
+    bad = {**DAILY, "days": {**DAILY["days"], "mon": {"from": "20:00", "to": "07:00"}}}
+    response = admin.put("/api/admin/settings/schedule", json=bad, headers=POST)
+    assert error_code(response) == (422, "schedule_order_invalid")
+
+
+def test_bedtime_refuses_kids_commands_with_409(admin, client, services):
+    admin.put("/api/admin/settings/schedule", json=DAILY, headers=POST)
+    set_evening(services)
+    tile = add_favorite(admin, 3).get_json()["tile"]
+    response = client.post(f"/api/tiles/{tile['id']}/play", headers=POST)
+    assert error_code(response) == (409, "bedtime")
+    state = client.get("/api/state").get_json()
+    assert state["schedule"]["phase"] == "closed"
+    assert admin.get("/api/admin/status").get_json()["schedule"]["phase"] == "closed"
+
+
+def test_parents_allow_more_time(admin, services):
+    admin.put("/api/admin/settings/schedule", json=DAILY, headers=POST)
+    set_evening(services)
+    response = admin.post("/api/admin/override", json={"minutes": 30}, headers=POST)
+    schedule = response.get_json()["schedule"]
+    assert schedule["phase"] == "open"
+    assert schedule["override_until"] == int(services.runtime.clock.time()) + 1800
+    response = admin.delete("/api/admin/override", headers=POST)
+    assert response.get_json()["schedule"]["phase"] == "closed"
+    morning = admin.post("/api/admin/override", json={"until": "morning"}, headers=POST)
+    assert morning.get_json()["schedule"]["phase"] == "open"
+    assert admin.post("/api/admin/override", json={"minutes": 7}, headers=POST).status_code == 400
+
+
+def test_override_from_the_kids_tablet(admin, client, services):
+    admin.put("/api/admin/settings/schedule", json=DAILY, headers=POST)
+    set_evening(services)
+    tablet = client.application.test_client()
+    body = {"pin": "2468", "minutes": 15}
+    response = tablet.post("/api/override", json=body, headers=POST)
+    assert response.get_json()["schedule"]["phase"] == "open"
+    assert tablet.get("/api/admin/settings").status_code == 401  # no session for the tablet
+
+
+def test_pin_pad_mashing_does_not_lock_the_parents_out(admin, client, services):
+    admin.put("/api/admin/settings/schedule", json=DAILY, headers=POST)
+    set_evening(services)
+    tablet = client.application.test_client()
+    for _ in range(auth.MAX_FAILURES_PER_CLIENT):
+        tablet.post("/api/override", json={"pin": "1111", "minutes": 15}, headers=POST)
+    blocked = tablet.post("/api/override", json={"pin": "2468", "minutes": 15}, headers=POST)
+    assert error_code(blocked) == (429, "pin_rate_limited")
+    assert login(tablet).status_code == 200  # the parents' page has its own counter
+
+
+@pytest.mark.parametrize(
+    "body", [{"pin": "2468"}, {"pin": "2468", "minutes": 45}, {"pin": "2468", "until": "noon"}, []]
+)
+def test_invalid_override_requests(client, body):
+    assert client.post("/api/override", json=body, headers=POST).status_code == 400
+
+
+def test_override_without_usage_times(client):
+    response = client.post("/api/override", json={"pin": "2468", "minutes": 15}, headers=POST)
+    assert error_code(response) == (409, "schedule_off")

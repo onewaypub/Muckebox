@@ -102,6 +102,27 @@ SPDX-License-Identifier: AGPL-3.0-or-later
       </form>
     </section>
 
+    <section id="schedule-section" class="card">
+      <h2 data-i18n="admin.schedule"></h2>
+      <p id="schedule-status" class="schedule-status"></p>
+      <div id="override-buttons" class="override-buttons">
+        <button type="button" class="secondary" data-override="15" data-i18n="admin.override_15"></button>
+        <button type="button" class="secondary" data-override="30" data-i18n="admin.override_30"></button>
+        <button type="button" class="secondary" data-override="60" data-i18n="admin.override_60"></button>
+        <button type="button" class="secondary" data-override="morning" data-i18n="admin.override_morning"></button>
+        <button id="override-end" type="button" class="secondary" data-i18n="admin.override_end" hidden></button>
+      </div>
+      <form id="schedule" class="fields schedule-form">
+        <label class="check"><input id="schedule-enabled" type="checkbox"> <span data-i18n="admin.schedule_enabled"></span></label>
+        <div id="days" class="days"></div>
+        <button id="copy-monday" type="button" class="link" data-i18n="admin.copy_monday"></button>
+        <label for="fade-minutes" data-i18n="admin.fade_minutes"></label>
+        <input id="fade-minutes" type="number" min="0" max="30" step="1" inputmode="numeric" required>
+        <p class="hint" data-i18n="admin.schedule_hint"></p>
+        <button type="submit" data-i18n="admin.save"></button>
+      </form>
+    </section>
+
     <section id="pin-section" class="card">
       <h2 data-i18n="admin.pin_change"></h2>
       <form id="pin-form" class="fields">
@@ -139,6 +160,16 @@ SPDX-License-Identifier: AGPL-3.0-or-later
         <button type="button" class="danger delete" data-i18n="admin.delete"></button>
       </div>
     </li>
+  </template>
+
+  <template id="day-row">
+    <div class="day-row">
+      <span class="day"></span>
+      <input class="from" type="time" step="300" data-i18n-label="admin.from">
+      <span aria-hidden="true">–</span>
+      <input class="to" type="time" step="300" data-i18n-label="admin.to">
+      <label class="check"><input class="free" type="checkbox"> <span data-i18n="admin.day_free"></span></label>
+    </div>
   </template>
 
   <template id="room-row">

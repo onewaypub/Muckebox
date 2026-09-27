@@ -88,6 +88,8 @@ function showLogin() {
 }
 
 function renderStatus(status) {
+  serverZone = status.time.zone;
+  renderScheduleStatus(status.schedule);
   const list = $("status");
   const sonos = status.sonos || {};
   const own = ["ok", "starting", "not_configured"].includes(sonos.status);
@@ -369,7 +371,90 @@ async function loadTiles() {
 
 async function loadSettings() {
   const result = await guarded(() => get("/api/admin/settings"));
-  if (result) renderSettings(result.data);
+  if (!result) return;
+  renderSettings(result.data);
+  renderScheduleForm(result.data.settings.schedule); // only here: never over unsaved edits
+}
+
+// -- usage times ------------------------------------------------------------------------
+
+const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+let serverZone = null;
+
+function buildDays() {
+  const box = $("days");
+  const template = $("day-row");
+  for (const day of DAYS) {
+    const row = template.content.firstElementChild.cloneNode(true);
+    translatePage(row);
+    row.dataset.day = day;
+    row.querySelector(".day").textContent = t(`admin.day_${day}`);
+    const free = row.querySelector(".free");
+    free.addEventListener("change", () => updateDayRow(row));
+    box.append(row);
+  }
+}
+
+function updateDayRow(row) {
+  const free = row.querySelector(".free").checked;
+  for (const input of row.querySelectorAll("input[type=time]")) input.disabled = free;
+}
+
+// A time input cannot show 24:00: "00:00" as the end means midnight.
+function renderScheduleForm(schedule) {
+  $("schedule-enabled").checked = schedule.enabled;
+  $("fade-minutes").value = String(schedule.fade_minutes);
+  // Nothing set up yet: suggest a window on every day instead of "free".
+  const fresh = !schedule.enabled && Object.values(schedule.days).every((day) => !day);
+  for (const row of $("days").children) {
+    const window = schedule.days[row.dataset.day];
+    row.querySelector(".free").checked = !window && !fresh;
+    row.querySelector(".from").value = window ? window.from : "07:00";
+    row.querySelector(".to").value = window ? (window.to === "24:00" ? "00:00" : window.to) : "19:00";
+    updateDayRow(row);
+  }
+}
+
+function scheduleFromForm() {
+  const days = {};
+  for (const row of $("days").children) {
+    const to = row.querySelector(".to").value;
+    days[row.dataset.day] = row.querySelector(".free").checked
+      ? null
+      : { from: row.querySelector(".from").value, to: to === "00:00" ? "24:00" : to };
+  }
+  return { enabled: $("schedule-enabled").checked, fade_minutes: $("fade-minutes").valueAsNumber, days };
+}
+
+// Times are shown in the Muckebox's zone: that is the one the usage times use.
+function clockText(epoch) {
+  return new Intl.DateTimeFormat("de-DE", {
+    timeZone: serverZone || undefined,
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(epoch * 1000));
+}
+
+function renderScheduleStatus(schedule) {
+  const texts = {
+    off: () => t("admin.phase_off"),
+    open: () => (schedule.ends_at ? t("admin.phase_open", { time: clockText(schedule.ends_at) }) : t("admin.phase_open_free")),
+    fading: () => t("admin.phase_fading", { time: clockText(schedule.ends_at) }),
+    closed: () =>
+      schedule.opens_at ? t("admin.phase_closed", { time: clockText(schedule.opens_at) }) : t("admin.phase_closed_open_end"),
+  };
+  let text = (texts[schedule.phase] || texts.off)();
+  if (schedule.override_until) text += ` ${t("admin.override_until", { time: clockText(schedule.override_until) })}`;
+  $("schedule-status").textContent = text;
+  $("override-buttons").hidden = schedule.phase === "off"; // nothing to release
+  $("override-end").hidden = !schedule.override_until;
+}
+
+async function override(value, button) {
+  const body = value === "morning" ? { until: "morning" } : { minutes: Number(value) };
+  const result = await busy(button, guarded(() => post("/api/admin/override", body)));
+  if (result) renderScheduleStatus(result.data.schedule);
 }
 
 async function loadFavorites(refresh = false) {
@@ -420,6 +505,38 @@ function bind() {
       renderSettings(result.data);
       loadStatus();
     }
+  });
+  buildDays();
+  $("copy-monday").addEventListener("click", () => {
+    const [monday, ...others] = $("days").children;
+    for (const row of others) {
+      for (const name of ["from", "to", "free"]) {
+        const source = monday.querySelector(`.${name}`);
+        const target = row.querySelector(`.${name}`);
+        if (name === "free") target.checked = source.checked;
+        else target.value = source.value;
+      }
+      updateDayRow(row);
+    }
+  });
+  $("schedule").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const result = await busy(
+      event.target.querySelector("button[type=submit]"),
+      guarded(() => request("PUT", "/api/admin/settings/schedule", { body: scheduleFromForm() }), {
+        success: t("admin.saved"),
+      }),
+    );
+    if (!result) return;
+    renderScheduleForm(result.data.settings.schedule);
+    loadStatus();
+  });
+  for (const button of document.querySelectorAll("[data-override]")) {
+    button.addEventListener("click", () => override(button.dataset.override, button));
+  }
+  $("override-end").addEventListener("click", async (event) => {
+    const result = await busy(event.target, guarded(() => request("DELETE", "/api/admin/override")));
+    if (result) renderScheduleStatus(result.data.schedule);
   });
   $("pin-form").addEventListener("submit", async (event) => {
     event.preventDefault();

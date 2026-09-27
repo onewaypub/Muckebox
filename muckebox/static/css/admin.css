@@ -326,3 +326,69 @@ footer {
   gap: 8px 12px;
   margin: 12px 0 0;
 }
+
+.override-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.schedule-form {
+  max-width: none;
+}
+
+.schedule-form #fade-minutes {
+  max-width: 8em;
+}
+
+.days {
+  display: grid;
+  gap: 8px;
+}
+
+.day-row {
+  display: grid;
+  grid-template-columns: 7.5em auto auto auto 1fr;
+  gap: 8px;
+  align-items: center;
+}
+
+.day-row input[type="time"] {
+  width: auto;
+}
+
+.day-row input:disabled {
+  opacity: 0.4;
+}
+
+label.check {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  font-weight: 400;
+}
+
+label.check input {
+  width: auto;
+  min-height: auto;
+}
+
+.schedule-form button.link {
+  justify-self: start;
+}
+
+@media (max-width: 520px) {
+  .day-row {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .day-row .day {
+    grid-column: 1 / -1;
+    font-weight: 600;
+  }
+
+  .day-row [aria-hidden="true"] {
+    display: none;
+  }
+}
