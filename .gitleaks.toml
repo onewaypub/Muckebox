@@ -28,6 +28,7 @@ tags = ["privacy"]
   regexes = [
     '''@users\.noreply\.github\.com$''',
     '''^noreply@(anthropic|github)\.com$''',
+    '''^support@github\.com$''',  # Dependabot's Signed-off-by trailer
     '''@example\.(com|org|net)$''',
   ]
 

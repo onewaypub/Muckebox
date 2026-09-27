@@ -34,6 +34,8 @@ pytestmark = pytest.mark.skipif(
 
 def findings(lines, tmp_path):
     """Scan all lines at once (gitleaks starts slowly); return {line_number: {rule ids}}."""
+    if GITLEAKS is None:
+        pytest.fail("gitleaks not found; run scripts/install-gitleaks", pytrace=False)
     report = tmp_path / "report.json"
     subprocess.run(
         [GITLEAKS, "stdin", "--config", str(CONFIG), "--no-banner", "--log-level", "error",
@@ -66,6 +68,7 @@ ALLOWED = [
     "public resolver 8.8.8.8, not private 172.32.0.1",
     "Co-Authored-By: someone <onewaypub@users.noreply.github.com>",
     "Co-Authored-By: Claude <noreply@anthropic.com>",
+    "Signed-off-by: dependabot[bot] <support@github.com>",
     "mail parent@example.com",
     "mac 00:00:5E:00:53:01",
     "uid RINCON_00005E00530101400 or RINCON_00000000000001400",

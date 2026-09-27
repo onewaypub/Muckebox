@@ -17,6 +17,9 @@ FAST=0
 
 step() { printf '\n== %s\n' "$1"; }
 
+step "gitleaks (pinned download on first use)"
+scripts/install-gitleaks
+
 step "ruff (lint)"
 ruff check .
 
@@ -35,7 +38,6 @@ if [ "$FAST" -eq 0 ]; then
 fi
 
 step "privacy scan (gitleaks)"
-scripts/install-gitleaks
 python scripts/privacy_scan.py
 
 printf '\nAll checks passed.\n'
