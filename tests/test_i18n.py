@@ -50,6 +50,7 @@ def test_every_config_problem_has_a_text():
         {},
         {"SONOS_IP": "not a host"},
         {"SONOS_IP": "192.0.2.1", "MAX_VOLUME": "0", "VOLUME_STEP": "0", "ADMIN_PIN": "1"},
+        {"SONOS_IP": "192.0.2.1", "ADMIN_PIN": "change-me"},
     ]
     problem_codes = {p.code for env in environments for p in load_settings(env).problems}
     assert problem_codes == {
@@ -59,6 +60,7 @@ def test_every_config_problem_has_a_text():
         "volume_step_invalid",
         "admin_pin_missing",
         "admin_pin_too_short",
+        "admin_pin_placeholder",
     }
     for code in problem_codes:
         assert f"error.{code}" in CATALOGUES[DEFAULT_LANG]

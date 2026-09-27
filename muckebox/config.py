@@ -22,6 +22,8 @@ DEFAULT_VOLUME_STEP = 3
 DEFAULT_DATA_DIR = "/data"
 DEFAULT_PORT = 8484
 MIN_PIN_LENGTH = 4
+# Example values from docker-compose.yml that must never work as a real PIN.
+PLACEHOLDER_PINS = frozenset({"change-me", "changeme", "1234", "0000"})
 
 # Ports Muckebox must not listen on:
 # - 1400-1499: Sonos speakers use 1400, and SoCo's event listener (used by
@@ -133,6 +135,15 @@ def load_settings(environ: Mapping[str, str]) -> Settings:
                 "ADMIN_PIN is not set; the parents' page is locked.",
             )
         )
+    elif admin_pin.casefold() in PLACEHOLDER_PINS:
+        problems.append(
+            ConfigProblem(
+                "admin_pin_placeholder",
+                "warning",
+                "ADMIN_PIN is still an example value; the parents' page is locked.",
+            )
+        )
+        admin_pin = None
     elif len(admin_pin) < MIN_PIN_LENGTH:
         problems.append(
             ConfigProblem(

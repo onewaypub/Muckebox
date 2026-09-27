@@ -10,12 +10,12 @@ no timeout of their own).
 from __future__ import annotations
 
 import copy
+import html
 import logging
 import socket
 import threading
 from collections.abc import Callable, Iterable
 from typing import Any
-from xml.sax.saxutils import escape
 
 import requests
 import soco
@@ -114,6 +114,11 @@ def translate(exc: BaseException) -> SonosError:
     if isinstance(exc, OSError):
         return SonosUnreachable(str(exc))
     raise exc
+
+
+def _xml_text(text: str) -> str:
+    """Escape text for an XML element (&, < and >)."""
+    return html.escape(text, quote=False)
 
 
 def _int_or_none(value: Any) -> int | None:
@@ -273,7 +278,7 @@ class SocoBackend:
 
     def _start(self, coordinator: Any, ref: FavoriteRef, route: Route) -> None:
         if route is Route.DIRECT:
-            meta = ref.res_md or _DIRECT_META.format(title=escape(ref.title))
+            meta = ref.res_md or _DIRECT_META.format(title=_xml_text(ref.title))
             self._call(
                 coordinator.avTransport.SetAVTransportURI,
                 [_INSTANCE, ("CurrentURI", ref.uri), ("CurrentURIMetaData", meta)],
@@ -325,7 +330,7 @@ class SocoBackend:
         first = self._enqueue(
             coordinator,
             lambda: plugin.add_share_link_to_queue(
-                plugin_uri(link), dc_title=escape(title), timeout=SLOW_TIMEOUT
+                plugin_uri(link), dc_title=_xml_text(title), timeout=SLOW_TIMEOUT
             ),
         )
         self._play_queue(coordinator, first)
