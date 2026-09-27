@@ -11,7 +11,7 @@ that parents can rely on.
 
 > **Status:** early development (milestone M0). Nothing is ready for use yet.
 > See [docs/architecture.md](docs/architecture.md) for the design and the
-> planned milestones.
+> [planned milestones](docs/architecture.md#milestones).
 
 ## Features (planned for v1)
 
@@ -65,11 +65,17 @@ Muckebox is configured with environment variables.
 |---|---|---|
 | `SONOS_ROOM` | – | Name of the room to control (case-insensitive). |
 | `SONOS_IP` | – | IP address of any Sonos speaker in your household. Required when the speakers are in another VLAN. At least one of `SONOS_ROOM` and `SONOS_IP` must be set. |
-| `MAX_VOLUME` | `25` | Highest volume the kids can reach (Sonos volume value 0–100). Enforced by the server. |
+| `MAX_VOLUME` | `25` | Highest volume the kids can reach (1–100 on the Sonos volume scale). Enforced by the server. |
 | `VOLUME_STEP` | `3` | How much one tap on louder/quieter changes the volume (1–`MAX_VOLUME`). |
 | `ADMIN_PIN` | – | PIN for the parents' page. Without a PIN (or with fewer than 4 characters) the parents' page stays locked. |
 | `DATA_DIR` | `/data` | Directory for the tile library and cover images. |
-| `PORT` | `8484` | HTTP port. Ports 1400–1499 (Sonos) and common NAS ports are rejected. |
+| `PORT` | `8484` | HTTP port (1024–65535). Ports 1400–1499 (Sonos), the Synology DSM ports 5000, 5001 and 5357, and ports that browsers block are rejected. |
+
+**Tip:** as a second safety net, also set a volume limit for the kids room in
+the Sonos app (room settings → Volume Limit). Sonos scales the volume range
+with that limit rather than cutting it off, so the effective maximum becomes
+`MAX_VOLUME × Sonos limit / 100` (for example 25 × 50 / 100 ≈ 12). That limit
+also applies when Muckebox is not running.
 
 If the Sonos or volume settings are invalid, Muckebox still starts and shows
 the problem instead of playing music. An invalid `PORT` or an unusable
@@ -120,9 +126,10 @@ Docker image.
 ## Support this project
 
 Muckebox is a hobby project. If it makes your family's life a little easier,
-you can support its development through the **Sponsor** button of this
-repository (GitHub Sponsors or Ko-fi). Bug reports, translations and pull
-requests are just as welcome.
+you will be able to support its development through GitHub Sponsors or Ko-fi
+once these accounts are set up; a **Sponsor** button will then appear at the
+top of this repository. Bug reports, translations and pull requests are just
+as welcome.
 
 ## License
 
