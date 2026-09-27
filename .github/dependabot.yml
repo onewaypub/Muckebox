@@ -1,0 +1,19 @@
+# SPDX-FileCopyrightText: 2026 Muckebox contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Pip updates change requirements*.txt; regenerate the lock files with
+# scripts/lock if a pull request only touches one of them.
+
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      python:
+        patterns: ["*"]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
