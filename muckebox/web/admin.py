@@ -391,12 +391,19 @@ def _tile_json(tile) -> dict[str, Any]:
         summary.update(description=source.get("description", ""), route=source.get("route"))
     else:
         summary.update(service=source["service"], kind=source["kind"], url=source.get("url"))
+    saved = _services().runtime.resume.saved(tile.id)
     return {
         "id": tile.id,
         "title": tile.title,
         "cover": cover_url(tile.cover),
         "created_at": tile.created_at,
         "source": summary,
+        "resume": {
+            "available": tile.can_resume,
+            "enabled": tile.resumes,
+            "default": tile.resume_default,
+            "position": {"track": saved.track, "seconds": saved.seconds} if saved else None,
+        },
     }
 
 
@@ -483,6 +490,28 @@ def delete_tile(tile_id: str):
     services = _services()
     _library_call(services.library.remove, tile_id, _rev(request.args.get("rev")))
     services.covers.delete_unused(services.library.covers_in_use())
+    return _tiles_response()
+
+
+@bp.put("/tiles/<tile_id>/resume")
+@auth.require_admin
+def set_resume(tile_id: str):
+    """Weiterhören for this tile: true, false or null (the default for its kind)."""
+    body = _body()
+    enabled = body.get("enabled")
+    if enabled is not None and not isinstance(enabled, bool):
+        raise ApiError(400, "bad_request")
+    _library_call(_services().library.set_resume, tile_id, enabled, _rev(body.get("rev")))
+    return _tiles_response()
+
+
+@bp.delete("/tiles/<tile_id>/position")
+@auth.require_admin
+def restart_tile(tile_id: str):
+    """ "Von vorn": forget where the tile stopped."""
+    services = _services()
+    _library_call(services.library.get, tile_id)
+    services.runtime.resume.clear(tile_id)
     return _tiles_response()
 
 

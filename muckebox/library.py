@@ -61,6 +61,26 @@ class Tile:
     created_at: str = field(default_factory=lambda: _now())
 
     @property
+    def resume_default(self) -> bool:
+        """Albums (usually audio plays) resume by default; playlists and radio do not."""
+        source = self.source
+        if source.get("type") == "sharelink":
+            return source.get("kind") == "album"
+        return source.get("route") == "queue" and ".album" in source.get("item_class", "")
+
+    @property
+    def resumes(self) -> bool:
+        if not self.can_resume:
+            return False
+        choice = self.source.get("resume")
+        return choice if isinstance(choice, bool) else self.resume_default
+
+    @property
+    def can_resume(self) -> bool:
+        """Only a queue has tracks and positions to come back to."""
+        return self.source.get("type") == "sharelink" or self.source.get("route") == "queue"
+
+    @property
     def kind(self) -> str:
         return self.source["type"]
 
@@ -182,6 +202,22 @@ class Library:
             tile = self._find(tile_id)
             old, tile.cover = tile.cover, cover
             self._commit(lambda: setattr(tile, "cover", old))
+            return Tile(**asdict(tile))
+
+    def set_resume(
+        self, tile_id: str, enabled: bool | None, expected_rev: int | None = None
+    ) -> Tile:
+        """Weiterhören on/off for a tile; None = the default for its kind."""
+        with self._lock:
+            self._check_rev(expected_rev)
+            tile = self._find(tile_id)
+            # Kept in "source", which older versions read without complaint.
+            old = dict(tile.source)
+            if enabled is None:
+                tile.source.pop("resume", None)
+            else:
+                tile.source["resume"] = enabled
+            self._commit(lambda: setattr(tile, "source", old))
             return Tile(**asdict(tile))
 
     def remove(self, tile_id: str, expected_rev: int | None = None) -> Tile:

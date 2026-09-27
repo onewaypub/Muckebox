@@ -385,3 +385,21 @@ def test_kids_start_the_sleep_timer_with_the_moon(page, server):
     assert timer is not None and timer.ends_at > time.time() + 29 * 60
     moon.tap()  # a second tap changes nothing
     assert server.runtime.keeper.timers.state.sleep.ends_at == timer.ends_at
+
+
+def test_parents_see_and_reset_where_an_album_stopped(page, server):
+    from muckebox.sonos.model import Position
+
+    album, _radio = server.add_tiles(1, 2)
+    server.runtime.resume.record(album.id, Position(3, 760, 1200, "x"), 5)
+    log_in(page, server)
+    row = page.locator(".tile-row").nth(0)  # tiles in the order they were added
+    expect(row.locator(".resume-toggle")).to_be_checked()
+    expect(row.locator(".resume-position")).to_have_text("Stand: Titel 3, 12:40")
+    row.locator(".resume-restart").tap()
+    expect(row.locator(".resume-position")).to_be_hidden()
+    assert server.runtime.resume.get(album.id) is None
+    radio_row = page.locator(
+        ".tile-row", has=page.locator("input[name=title][value='Kinderradio']")
+    )
+    expect(radio_row.locator(".resume")).to_be_hidden()  # radio has no positions

@@ -71,6 +71,9 @@ MESSAGES: dict[str, str] = {
         "Das Limit gilt sofort (1 bis 100). Stelle zusätzlich in der Sonos-App ein "
         "Lautstärke-Limit für den Raum ein."
     ),
+    "admin.resume": "Weiterhören",
+    "admin.resume_position": "Stand: Titel {track}, {time}",
+    "admin.resume_restart": "Von vorn",
     "admin.schedule": "Nutzungszeiten",
     "admin.schedule_enabled": "Nutzungszeiten einschalten",
     "admin.day_mon": "Montag",

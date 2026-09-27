@@ -138,6 +138,8 @@ require a same-origin `Origin` header when the browser sends one
 | `PATCH /api/admin/tiles/<id>` `{"title": "…", "rev": 8}` | Rename a tile. |
 | `POST /api/admin/tiles/<id>/move` `{"direction": "up" \| "down", "rev": 8}` | Reorder. |
 | `DELETE /api/admin/tiles/<id>?rev=8` | Remove a tile and its unused cover. |
+| `PUT /api/admin/tiles/<id>/resume` `{"enabled": true\|false\|null, "rev": 8}` | "Weiterhören": the tile continues where it stopped. `null` = the default (on for albums, off for playlists; radio and other direct sources cannot resume). Tile JSON has `resume {available, enabled, default, position: {track, seconds} \| null}`. |
+| `DELETE /api/admin/tiles/<id>/position` | "Von vorn": forget where the tile stopped. |
 | `PUT /api/admin/tiles/<id>/cover` (multipart field `cover`) | Upload a custom cover (JPEG, PNG and other common formats, at most 10 MiB). `413 upload_too_large`, `422 upload_not_image`. |
 
 A stale `rev` on any mutation returns `409 rev_conflict`.
