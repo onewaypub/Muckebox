@@ -9,4 +9,5 @@ pip-audit
 pip-tools
 pytest
 pytest-cov
+requests-mock
 ruff

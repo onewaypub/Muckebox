@@ -110,6 +110,7 @@ into the Docker image (kept in sync with `requirements.txt` by a test).
 
 | Package | License |
 |---|---|
+| [SoCo](https://github.com/SoCo/SoCo) | MIT |
 | [Flask](https://flask.palletsprojects.com/) | BSD-3-Clause |
 | [Werkzeug](https://werkzeug.palletsprojects.com/) | BSD-3-Clause |
 | [Jinja2](https://jinja.palletsprojects.com/) | BSD-3-Clause |
@@ -118,6 +119,16 @@ into the Docker image (kept in sync with `requirements.txt` by a test).
 | [Click](https://click.palletsprojects.com/) | BSD-3-Clause |
 | [Blinker](https://blinker.readthedocs.io/) | MIT |
 | [waitress](https://docs.pylonsproject.org/projects/waitress/) | ZPL-2.1 |
+| [Pillow](https://python-pillow.github.io/) | MIT-CMU |
+| [Requests](https://requests.readthedocs.io/) | Apache-2.0 |
+| [urllib3](https://urllib3.readthedocs.io/) | MIT |
+| [idna](https://github.com/kjd/idna) | BSD-3-Clause |
+| [charset-normalizer](https://github.com/jawah/charset_normalizer) | MIT |
+| [certifi](https://github.com/certifi/python-certifi) | MPL-2.0 |
+| [lxml](https://lxml.de/) | BSD-3-Clause (its binary wheels bundle libxml2 and libxslt, MIT; libiconv, LGPL-2.1; zlib, Zlib) |
+| [xmltodict](https://github.com/martinblech/xmltodict) | MIT |
+| [ifaddr](https://github.com/ifaddr/ifaddr) | MIT |
+| [appdirs](https://github.com/ActiveState/appdirs) | MIT |
 
 Development tools (pytest, ruff, bandit, pip-audit, pip-tools, gitleaks and
 others) are used only to build and test Muckebox and are not part of the

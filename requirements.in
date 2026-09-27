@@ -5,4 +5,7 @@
 # Every package here and its dependencies must be listed in the README's
 # dependency table with its license.
 flask~=3.1
+pillow~=12.3
+requests~=2.34
+soco==0.31.4
 waitress~=3.0
