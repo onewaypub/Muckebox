@@ -13,10 +13,12 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import secrets
 import shutil
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -84,8 +86,13 @@ def _now() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+# Control characters, lone surrogates (half an emoji from a truncated
+# JSON string) and non-characters: never stored in titles.
+_UNSAFE_TITLE_RE = re.compile("[\x00-\x1f\x7f-\x9f\ud800-\udfff\ufffe\uffff]")
+
+
 def clean_title(title: str) -> str:
-    cleaned = " ".join(str(title).split())
+    cleaned = " ".join(_UNSAFE_TITLE_RE.sub(" ", str(title)).split())
     if not cleaned or len(cleaned) > MAX_TITLE_LENGTH:
         raise InvalidTitle(f"title must have 1 to {MAX_TITLE_LENGTH} characters")
     return cleaned
@@ -137,15 +144,15 @@ class Library:
                 id="t" + secrets.token_hex(8), title=clean_title(title), source=source, cover=cover
             )
             self._tiles.append(tile)
-            self._save()
+            self._commit(lambda: self._tiles.remove(tile))
             return Tile(**asdict(tile))
 
     def rename(self, tile_id: str, title: str, expected_rev: int | None = None) -> Tile:
         with self._lock:
             self._check_rev(expected_rev)
             tile = self._find(tile_id)
-            tile.title = clean_title(title)
-            self._save()
+            old, tile.title = tile.title, clean_title(title)
+            self._commit(lambda: setattr(tile, "title", old))
             return Tile(**asdict(tile))
 
     def move(self, tile_id: str, direction: str, expected_rev: int | None = None) -> None:
@@ -156,23 +163,29 @@ class Library:
             index = self._tiles.index(self._find(tile_id))
             target = index - 1 if direction == "up" else index + 1
             if 0 <= target < len(self._tiles):
-                self._tiles[index], self._tiles[target] = self._tiles[target], self._tiles[index]
-                self._save()
+                tiles = self._tiles
+
+                def swap() -> None:
+                    tiles[index], tiles[target] = tiles[target], tiles[index]
+
+                swap()
+                self._commit(swap)
 
     def set_cover(self, tile_id: str, cover: str | None, expected_rev: int | None = None) -> Tile:
         with self._lock:
             self._check_rev(expected_rev)
             tile = self._find(tile_id)
-            tile.cover = cover
-            self._save()
+            old, tile.cover = tile.cover, cover
+            self._commit(lambda: setattr(tile, "cover", old))
             return Tile(**asdict(tile))
 
     def remove(self, tile_id: str, expected_rev: int | None = None) -> Tile:
         with self._lock:
             self._check_rev(expected_rev)
             tile = self._find(tile_id)
+            index = self._tiles.index(tile)
             self._tiles.remove(tile)
-            self._save()
+            self._commit(lambda: self._tiles.insert(index, tile))
             return tile
 
     # -- internals ----------------------------------------------------------
@@ -207,22 +220,32 @@ class Library:
         self._tiles, self._rev = tiles, rev
 
     def _save(self) -> None:
-        self._rev += 1
+        """Write the library; advance the revision only once the file is in place."""
         data = {
             "schema": SCHEMA,
-            "rev": self._rev,
+            "rev": self._rev + 1,
             "updated_at": _now(),
             "tiles": [asdict(tile) for tile in self._tiles],
         }
+        payload = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_name(self.path.name + ".tmp")
-        with open(tmp, "w", encoding="utf-8") as handle:
-            json.dump(data, handle, ensure_ascii=False, indent=2)
+        with open(tmp, "wb") as handle:
+            handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
         if self.path.exists():
             shutil.copy2(self.path, self.path.with_name(self.path.name + ".bak"))
         os.replace(tmp, self.path)
+        self._rev += 1
+
+    def _commit(self, undo: Callable[[], None]) -> None:
+        """Save; if that fails, undo the in-memory change and re-raise."""
+        try:
+            self._save()
+        except BaseException:
+            undo()
+            raise
 
 
 def favorite_source(item_id: str, ref: FavoriteRef, route: Route, description: str) -> dict:
