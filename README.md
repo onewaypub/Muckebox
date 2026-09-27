@@ -84,7 +84,8 @@ python3 -m venv .venv
 . .venv/bin/activate
 pip install -r requirements-dev.txt
 scripts/check        # lint, tests, license headers, secret scan
-python -m muckebox   # starts the server on http://localhost:8484
+# start the server on http://localhost:8484 (192.0.2.10 is a placeholder address)
+DATA_DIR=./data SONOS_IP=192.0.2.10 python -m muckebox
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow and
