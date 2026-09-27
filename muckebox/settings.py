@@ -54,6 +54,7 @@ _HOSTNAME_RE = re.compile(
     r"^(?=.{1,253}$)(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.(?!-)[A-Za-z0-9-]{1,63}(?<!-))*$"
 )
 _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
+_HEX_RE = re.compile(r"^[0-9a-f]{16,128}$")
 # At most two expensive scrypt checks at the same time.
 _hashing = threading.BoundedSemaphore(2)
 
@@ -108,7 +109,7 @@ class StoredSettings:
 
 
 def validate_pin(pin: object) -> str:
-    if not isinstance(pin, str) or _CONTROL_RE.search(pin):
+    if not isinstance(pin, str) or _CONTROL_RE.search(pin) or not _encodable(pin):
         raise SettingsError("pin_invalid")
     pin = pin.strip()
     if len(pin) < MIN_PIN_LENGTH or len(pin) > MAX_PIN_LENGTH:
@@ -173,6 +174,8 @@ def hash_pin(pin: str, params: dict[str, int] | None = None, generated: bool = F
 
 
 def check_pin(record: PinRecord, pin: str) -> bool:
+    if not _encodable(pin):
+        return False  # e.g. a lone surrogate from JSON: can never be the PIN
     digest = _scrypt(pin, bytes.fromhex(record.salt), {"n": record.n, "r": record.r, "p": record.p})
     return hmac.compare_digest(digest.hex(), record.hash)
 
@@ -190,8 +193,66 @@ def _scrypt(pin: str, salt: bytes, params: dict[str, int]) -> bytes:
         )
 
 
+def _encodable(text: str) -> bool:
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
 def generate_pin() -> str:
     return f"{secrets.randbelow(10**GENERATED_PIN_DIGITS):0{GENERATED_PIN_DIGITS}d}"
+
+
+# -- reading the file ---------------------------------------------------------------
+
+
+def _parse(data: dict[str, Any]) -> StoredSettings:
+    """Check every value, so a hand-edited file can never loosen the limit."""
+    try:
+        sonos, volume, admin = data["sonos"], data["volume"], data["admin"]
+        pin = admin["pin"] if isinstance(admin, dict) else None
+        if not all(isinstance(part, dict) for part in (sonos, volume, admin, pin)):
+            raise ValueError("unexpected structure")
+        room = sonos.get("room")
+        room = None if room is None else validate_room(room)
+        room_uid = sonos.get("room_uid")
+        if room_uid is not None and (
+            not isinstance(room_uid, str)
+            or not 1 <= len(room_uid) <= 64
+            or _CONTROL_RE.search(room_uid)
+        ):
+            raise ValueError("invalid room_uid")
+        seed_ip = validate_seed_ip(sonos.get("seed_ip"))
+        max_volume, step = validate_volume(volume.get("max"), volume.get("step"))
+        generated = admin.get("generated_pin")
+        if generated is not None:
+            generated = validate_pin(generated)
+        record = PinRecord(
+            salt=pin.get("salt"),
+            hash=pin.get("hash"),
+            n=pin.get("n"),
+            r=pin.get("r"),
+            p=pin.get("p"),
+            generated=generated,
+        )
+    except (KeyError, SettingsError) as exc:
+        raise ValueError(f"invalid settings ({exc})") from None
+    _check_record(record)
+    return StoredSettings(room, room_uid, seed_ip, max_volume, step, record)
+
+
+def _check_record(record: PinRecord) -> None:
+    for text in (record.salt, record.hash):
+        if not isinstance(text, str) or not _HEX_RE.match(text):
+            raise ValueError("invalid PIN hash")
+    for value, low, high in ((record.n, 2, 2**20), (record.r, 1, 32), (record.p, 1, 16)):
+        if type(value) is not int or not low <= value <= high:
+            raise ValueError("invalid PIN hash parameters")
+    # A power of two, and well within the memory limit of _scrypt().
+    if record.n & (record.n - 1) or 128 * record.r * record.n > 32 * 1024 * 1024:
+        raise ValueError("invalid PIN hash parameters")
 
 
 # -- the store ------------------------------------------------------------------------
@@ -214,6 +275,7 @@ class SettingsStore:
         self._clock = clock
         self._mutex = threading.RLock()
         self._signature: tuple[int, int, int] | None = None
+        self._failed_signature: tuple[int, int, int] | None = None
         self._checked_at = 0.0
         #: Set when the file could not be read at startup and was moved aside.
         self.load_problem: str | None = None
@@ -227,19 +289,33 @@ class SettingsStore:
         if now - self._checked_at >= RELOAD_INTERVAL:
             self._checked_at = now
             with self._mutex:
-                if self._file_signature() != self._signature:
+                signature = self._file_signature()
+                if signature not in (self._signature, self._failed_signature):
                     try:
                         self._current = self._read()
-                    except (OSError, ValueError, KeyError, TypeError) as exc:
+                    except (OSError, ValueError, SettingsFileError) as exc:
+                        # Logged once per version of the file, not every second.
+                        self._failed_signature = signature
                         log.error(
                             "Could not re-read %s (%s); keeping the last settings", self.path, exc
                         )
+                    else:
+                        self._failed_signature = None
         return self._current
 
-    def verify_pin(self, pin: str) -> bool:
+    def verify_pin(self, pin: object) -> bool:
+        return self.check(pin) is not None
+
+    def check(self, pin: object) -> str | None:
+        """The version of the PIN that ``pin`` matched, or None.
+
+        Callers bind sessions to this version, not to whatever is current
+        after the (slow) check: a PIN change meanwhile must end them too.
+        """
         if not isinstance(pin, str):
-            return False
-        return check_pin(self.current().pin, pin.strip())
+            return None
+        record = self.current().pin
+        return record.version if check_pin(record, pin.strip()) else None
 
     # -- changing -----------------------------------------------------------
 
@@ -252,10 +328,17 @@ class SettingsStore:
         max_volume, step = validate_volume(max_volume, step)
         return self._update(lambda s: replace(s, max_volume=max_volume, volume_step=step))
 
-    def change_pin(self, new_pin: object) -> StoredSettings:
+    def change_pin(self, new_pin: object, expected_version: str | None = None) -> StoredSettings:
+        """Set a new PIN; with ``expected_version``, only if the PIN is still that one."""
         pin = validate_pin(new_pin)
         record = hash_pin(pin, self._scrypt)
-        return self._update(lambda s: replace(s, pin=record))
+
+        def change(settings: StoredSettings) -> StoredSettings:
+            if expected_version is not None and settings.pin.version != expected_version:
+                raise SettingsError("pin_changed")  # e.g. reset-pin ran meanwhile
+            return replace(settings, pin=record)
+
+        return self._update(change)
 
     def reset_pin(self) -> str:
         """Set a new random PIN (shown in the log until changed) and return it."""
@@ -268,7 +351,14 @@ class SettingsStore:
         with self._mutex, self._file_lock():
             # Start from the file, not from memory: another process may have
             # changed it (e.g. a PIN reset from the command line).
-            base = self._read() if self.path.exists() else self._current
+            base = self._current
+            if self.path.exists():
+                try:
+                    base = self._read()
+                except ValueError as exc:
+                    # Unusable (e.g. a broken hand edit): keep a copy, then
+                    # replace it with the last good settings plus this change.
+                    self._move_aside(exc)
             updated = change(base)
             self._write(updated)
             self._current = updated
@@ -281,15 +371,17 @@ class SettingsStore:
             if self.path.exists():
                 try:
                     return self._read()
-                except SettingsFileError:
-                    raise
-                except (OSError, ValueError, KeyError, TypeError) as exc:
+                except OSError as exc:
+                    # Not corrupt, just not ours to read (e.g. after "user:" was
+                    # changed): never throw the settings away for that.
+                    raise SettingsFileError(
+                        f"{self.path} cannot be read ({exc.strerror or exc}); make sure it "
+                        "belongs to the user Muckebox runs as"
+                    ) from exc
+                except ValueError as exc:
                     if not create:
                         raise SettingsFileError(f"{self.path} cannot be read: {exc}") from exc
-                    broken = self.path.with_name(f"{self.path.name}.corrupt-{int(time.time())}")
-                    shutil.move(self.path, broken)
-                    self.load_problem = "settings_corrupt"
-                    log.error("%s could not be read (%s); moved to %s", self.path, exc, broken)
+                    self._move_aside(exc)
             if not create:
                 raise SettingsFileError(f"{self.path} does not exist yet")
             pin = generate_pin()
@@ -305,35 +397,26 @@ class SettingsStore:
             return fresh
 
     def _read(self) -> StoredSettings:
-        raw = self.path.read_bytes()
+        """Read and check the file; raises ValueError if its content is unusable."""
         signature = self._file_signature()
-        data = json.loads(raw)
-        if data.get("schema") != SCHEMA:
-            if isinstance(data.get("schema"), int) and data["schema"] > SCHEMA:
-                raise SettingsFileError(
-                    f"{self.path} was written by a newer Muckebox (schema {data['schema']}); "
-                    "update Muckebox or restore a backup"
-                )
-            raise ValueError(f"unsupported schema {data.get('schema')!r}")
-        sonos, volume, admin = data["sonos"], data["volume"], data["admin"]
-        pin = admin["pin"]
-        settings = StoredSettings(
-            room=sonos.get("room"),
-            room_uid=sonos.get("room_uid"),
-            seed_ip=sonos.get("seed_ip"),
-            max_volume=int(volume["max"]),
-            volume_step=int(volume["step"]),
-            pin=PinRecord(
-                salt=pin["salt"],
-                hash=pin["hash"],
-                n=int(pin["n"]),
-                r=int(pin["r"]),
-                p=int(pin["p"]),
-                generated=admin.get("generated_pin"),
-            ),
-        )
+        data = json.loads(self.path.read_bytes())
+        schema = data.get("schema") if isinstance(data, dict) else None
+        if type(schema) is int and schema > SCHEMA:
+            raise SettingsFileError(
+                f"{self.path} was written by a newer Muckebox (schema {schema}); "
+                "update Muckebox or restore a backup"
+            )
+        if schema != SCHEMA:
+            raise ValueError(f"unsupported schema {schema!r}")
+        settings = _parse(data)
         self._signature = signature
         return settings
+
+    def _move_aside(self, reason: Exception) -> None:
+        broken = self.path.with_name(f"{self.path.name}.corrupt-{int(time.time())}")
+        shutil.move(self.path, broken)
+        self.load_problem = "settings_corrupt"
+        log.error("%s could not be read (%s); moved to %s", self.path, reason, broken)
 
     def _write(self, settings: StoredSettings) -> None:
         pin = settings.pin
@@ -384,8 +467,19 @@ class SettingsStore:
 
     @contextlib.contextmanager
     def _file_lock(self, create: bool = True) -> Iterator[None]:
-        if not create and not self._lock_path.exists():
-            yield  # read-only use (diagnostics): never create files
+        if not create:
+            # Read-only use (diagnostics): never create or change files, and
+            # work without write access (e.g. a read-only mount).
+            try:
+                fd = os.open(self._lock_path, os.O_RDONLY)
+            except OSError:
+                yield
+                return
+            try:
+                fcntl.flock(fd, fcntl.LOCK_SH)
+                yield
+            finally:
+                os.close(fd)  # also releases the lock
             return
         owner = self._owner()
         self._lock_path.parent.mkdir(parents=True, exist_ok=True)
