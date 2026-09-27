@@ -14,7 +14,6 @@ const SETUP_TIMEOUT_MS = 30000; // the server gives a room search or test 20 s
 let rev = null;
 let flashTimer = null;
 let settings = null;
-let searchSeed = null; // the speaker address the shown room list came from
 
 // -- helpers ----------------------------------------------------------------------
 
@@ -206,34 +205,41 @@ function renderSettings(data) {
   $("refresh").disabled = !settings.room;
 }
 
-function renderRooms(rooms) {
+function showRoomsMessage(text) {
+  $("rooms").replaceChildren(Object.assign(document.createElement("li"), { className: "hint", textContent: text }));
+}
+
+// `seed` is the speaker address the list was found with; choosing a room saves it.
+function renderRooms(rooms, seed) {
+  if (!rooms.length) {
+    showRoomsMessage(t("admin.rooms_none"));
+    return;
+  }
   const list = $("rooms");
   const template = $("room-row");
   list.replaceChildren();
-  if (!rooms.length) {
-    list.append(Object.assign(document.createElement("li"), { className: "hint", textContent: t("admin.rooms_none") }));
-    return;
-  }
   for (const room of rooms) {
     const row = template.content.firstElementChild.cloneNode(true);
     row.querySelector("strong").textContent = room.name;
     row.querySelector("small").textContent = room.grouped ? `${room.ip} · ${t("admin.room_grouped")}` : room.ip;
     const button = row.querySelector(".choose");
-    const chosen = room.name === (settings && settings.room);
-    button.textContent = t(chosen ? "admin.chosen" : "admin.choose");
-    button.disabled = chosen;
-    button.addEventListener("click", () => chooseRoom(room.name, rooms, button));
+    const sameRoom = Boolean(settings) && room.name === settings.room;
+    // The same room found with another speaker address can be saved again.
+    const current = sameRoom && seed === (settings.seed_ip || null);
+    button.textContent = t(current ? "admin.chosen" : sameRoom ? "admin.apply" : "admin.choose");
+    button.disabled = current;
+    button.addEventListener("click", () => chooseRoom(room.name, rooms, seed, button));
     list.append(row);
   }
 }
 
-async function chooseRoom(name, rooms, button) {
+async function chooseRoom(name, rooms, seed, button) {
   const result = await busy(
     button,
     guarded(
       () =>
         request("PUT", "/api/admin/settings/room", {
-          body: { room: name, seed_ip: searchSeed },
+          body: { room: name, seed_ip: seed },
           timeout: SETUP_TIMEOUT_MS,
         }),
       { success: t("admin.room_saved", { room: name }) },
@@ -241,19 +247,30 @@ async function chooseRoom(name, rooms, button) {
   );
   if (!result) return;
   renderSettings(result.data);
-  renderRooms(rooms);
+  renderRooms(rooms, seed);
   loadStatus();
   loadFavorites();
 }
 
 async function searchRooms(refresh) {
-  searchSeed = $("seed-ip").value.trim() || null;
-  $("rooms").replaceChildren(Object.assign(document.createElement("li"), { textContent: t("admin.searching") }));
-  const result = await guarded(() =>
-    post("/api/admin/rooms/search", { seed_ip: searchSeed, refresh }, { timeout: SETUP_TIMEOUT_MS }),
-  );
-  if (result) renderRooms(result.data.rooms);
-  else $("rooms").replaceChildren();
+  const button = $("room-search").querySelector("button");
+  if (button.disabled) return; // one search at a time, including the automatic one
+  const seed = $("seed-ip").value.trim() || null;
+  button.disabled = true;
+  showRoomsMessage(t("admin.searching"));
+  try {
+    const result = await post("/api/admin/rooms/search", { seed_ip: seed, refresh }, { timeout: SETUP_TIMEOUT_MS });
+    renderRooms(result.data.rooms, seed);
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 401) {
+      showLogin();
+      return;
+    }
+    // Stays visible (unlike a flash): it tells the parents what to do next.
+    showRoomsMessage(error.code === "room_not_found" ? t("admin.rooms_none") : errorText(error));
+  } finally {
+    button.disabled = false;
+  }
 }
 
 function renderFavorites(favorites) {
@@ -369,7 +386,7 @@ function bind() {
   $("refresh").addEventListener("click", (event) => busy(event.target, loadFavorites(true)));
   $("room-search").addEventListener("submit", (event) => {
     event.preventDefault();
-    busy(event.target.querySelector("button"), searchRooms(true));
+    searchRooms(true);
   });
   $("volume").addEventListener("submit", async (event) => {
     event.preventDefault();

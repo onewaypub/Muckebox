@@ -38,7 +38,7 @@ DEVICES = {"webkit": "iPad (gen 7) landscape", "chromium": "Galaxy Tab S4 landsc
 
 class Server:
     def __init__(self, tmp_path, set_up=True):
-        household = FakeHousehold()
+        household = self.household = FakeHousehold()
         self.fake = household.speaker("Kinderzimmer")
         settings = load_settings({"DATA_DIR": str(tmp_path)})
         store = self.store = SettingsStore(tmp_path, scrypt={"n": 2**4, "r": 8, "p": 1})
@@ -243,3 +243,31 @@ def test_first_start_setup(page, new_server):
     page.goto(new_server.url)
     expect(page.locator("#empty")).to_be_visible()
     expect(overlay).to_be_hidden()
+
+
+def log_in(page, server):
+    page.goto(server.url + "/admin")
+    page.locator("#pin").fill("2468")
+    page.locator("#login button").tap()
+    expect(page.locator("#room-current")).to_have_text("Gewählter Raum: Kinderzimmer")
+
+
+def test_the_chosen_room_can_get_a_speaker_address(page, server):
+    log_in(page, server)
+    page.locator("#seed-ip").fill("192.0.2.10")
+    page.locator("#room-search button").tap()
+    button = page.locator(".room-row", has_text="Kinderzimmer").locator("button")
+    expect(button).to_have_text("Übernehmen")
+    button.tap()
+    expect(button).to_have_text("Gewählt")
+    expect(button).to_be_disabled()
+    assert server.store.current().seed_ip == "192.0.2.10"
+
+
+def test_a_failed_room_search_leaves_a_hint(page, server):
+    log_in(page, server)
+    server.household.reachable = False
+    page.locator("#room-search button").tap()
+    expect(page.locator("#rooms")).to_contain_text("nicht erreichbar")
+    page.wait_for_timeout(5500)  # longer than a flash message stays
+    expect(page.locator("#rooms")).to_contain_text("nicht erreichbar")
