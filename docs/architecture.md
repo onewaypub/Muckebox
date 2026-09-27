@@ -29,10 +29,10 @@ Goals:
 - **Private by default.** No telemetry, no third-party resources in the UI,
   all data stays in one local data directory.
 
-Non-goals for v1 (the design leaves seams for them, see
-[Seams for later features](#seams-for-later-features)): sleep timer or
-bedtime lock, night mode with a lower limit, reading titles aloud, several
-rooms or profiles, a battery-powered ESP32 touch client.
+Non-goals for now (the design leaves seams for them, see
+[Seams for later features](#seams-for-later-features)): night mode with a
+lower limit, reading titles aloud, several rooms or profiles, a
+battery-powered ESP32 touch client.
 
 ## Overview
 
@@ -72,12 +72,15 @@ Later: ESP32 client ─┘                     │
 | `muckebox.web` | Flask app factory, kids and admin endpoints, JSON error envelope, security headers. `create_app()` starts no threads. |
 | `muckebox.i18n` | One message catalogue (German in v1, English keys) used by Python and served to the browser. |
 | `muckebox.sonos` | The only package that imports `soco`. Room search and resolution, favorites, playback routing, share-link playback, error classification, `FakeSonos` and `FakeHousehold` for tests and demo mode. |
-| `muckebox.runtime` | Worker lanes, room sessions, circuit breaker, state cache, volume guard, command policy. |
+| `muckebox.runtime` | Worker lanes, room sessions, circuit breaker, state cache, volume guard, command policy, the time keeper (usage times, override, sleep timer), resume positions and the games' server side. |
+| `muckebox.schedule` | Pure time logic of the usage windows: open, fading, closed; overrides and the sleep lock as intervals. |
+| `muckebox.localtime` | The time zone: parents' choice, `TZ`, the system, or UTC. |
+| `muckebox.assets` | Sources and licences of the games' sounds and pictures. |
 | `muckebox.library` | Tile model and the JSON store in `DATA_DIR`. |
 | `muckebox.covers` | Downloads or accepts cover images, normalises them with Pillow, stores them content-addressed. |
 | `muckebox.linkmeta` | Parses share links and fetches title/cover without API keys. |
 | `muckebox.diag` | Command-line diagnostics that run inside the container. |
-| `muckebox/static`, `muckebox/templates` | Kids and admin pages: static HTML, native ES modules, plain CSS. No build step. |
+| `muckebox/static`, `muckebox/templates` | Kids and admin pages: static HTML, native ES modules, plain CSS. No build step. The games run in the browser (`games.js`, pure logic in `gamelogic.js`, sound and voice in `audio.js`); sounds and pictures are in `static/sounds` and `static/pictures`. |
 
 Import rules (enforced by a test): `soco` is imported only inside
 `muckebox.sonos`, and `muckebox.sonos` never imports Flask.
@@ -255,6 +258,8 @@ Everything lives in `DATA_DIR` (a bind mount in Docker):
 | `settings.lock` | The lock file for `settings.json`. |
 | `secret_key` | Random key for signing the admin session (mode 0600). |
 | `state.json` | The last started tile and the speaker ID of its room, so the "now playing" highlight survives a restart. |
+| `timers.json` | Override interval, sleep timer and lock, the last handled end, the volume before a fade, today's game seconds, the game-mute flag. Written from the transport lane only (never in a request, never under a lock). |
+| `resume.json` | Per album tile: track, second, length, track URI and queue length. Written on pause, stop, tile switch, every 5 minutes while playing and at shutdown, so the NAS disk can sleep. |
 
 No personal data about the children is stored. See
 [PRIVACY.md](../PRIVACY.md) for the full privacy statement.
@@ -306,25 +311,51 @@ No personal data about the children is stored. See
 - **Hardware checklists** per milestone cover what automation cannot:
   real speakers, real tablets, the NAS network path.
 
+## Usage times, sleep timer and games
+
+- **Time logic** (`muckebox.schedule`) is pure: one window per weekday,
+  built per local calendar day with `zoneinfo` (so daylight saving days are
+  right). A parents' override is an extra allowed interval; the kids' sleep
+  lock is an interval in which nothing is allowed. `evaluate()` answers
+  open, fading or closed, and gives the latest end at or before now.
+- **Pausing once:** the transport lane pauses when that latest end has not
+  been handled yet and is at most 15 minutes old, then records it. So a
+  restart right after 19:00 still pauses, and later nothing ever pauses
+  music that adults start from the Sonos app. A grouped room playing other
+  music is only faded.
+- **Fading** is a soft limit in the volume guard: from the volume when the
+  fade began down to 20 %. It is not counted as a correction. After the
+  confirmed pause the earlier volume is restored.
+- **Commands** pass `TimeKeeper.check()` (the former `CommandPolicy` seam):
+  while closed only pause and quieter are allowed; others get `409 bedtime`.
+- **Resume** (`ResumeStore`): positions are read every 10 s while an album
+  tile plays. Starting it again seeks to the track (checking that the same
+  track is still there) and 5 s before the second; a refused seek is retried
+  once after Play and never fails the start.
+- **Games:** the tablet runs them; the server grants a round (daily limit,
+  never into the fade), gives back unused time, and for the freeze dance
+  mutes the kids room's own player. Every mute is a 12 s lease that the
+  volume lane ends when it is not renewed, so the speaker never stays
+  silent by accident; after a crash it is unmuted on the next start.
+
 ## Seams for later features
 
-| Later feature | Seam in v1 |
+| Later feature | Seam |
 |---|---|
-| Sleep timer, bedtime lock | `CommandPolicy.check(command)` sits between the API and the lanes and allows everything in v1. |
-| Night mode with a lower limit | The volume guard, the kids' volume bar and the parents' status all read the limit from `Runtime.max_volume()`. |
-| Several rooms or profiles | Everything per room already lives in a `RoomSession`; `settings.json` and `library.json` carry schema versions for migrations. |
+| Night mode with a lower limit | The volume guard's soft limit (used by the fade) and `Runtime.volume_limit()`. |
+| Several rooms or profiles | Everything per room already lives in a `RoomSession`; `settings.json` and `library.json` carry schema versions and tolerate unknown fields. |
 | ESP32 battery client | `/api/state` carries `state_rev` and an `ETag`, so a client can poll cheaply with `If-None-Match`. Covers are baseline JPEGs. |
 | Another Sonos backend | The Sonos backend is an interface; only `muckebox.sonos` knows SoCo. |
 | Push events | `VolumeGuard.on_volume_observed()` and `StateCache.update()` accept observations from any source. |
-| Reading titles aloud | Would need the speakers to fetch audio from the NAS (an extra firewall rule); not prepared beyond stable tile ids and titles. |
+| More games | A runner in `games.js`, its logic in `gamelogic.js`, an entry in `muckebox.settings.GAMES` and, if it counts, in `runtime.games`. |
 
 ## Status and roadmap
 
-All v1 features are implemented and covered by automated tests (unit and API
-tests against `FakeSonos`, end-to-end tests in WebKit and Chromium). Tests on
-real Sonos hardware are the remaining step before v1.0.
+All features are implemented and covered by automated tests (unit and API
+tests against `FakeSonos`, node tests for the browser logic, end-to-end tests
+in WebKit and Chromium). The basics are tested on real Sonos hardware; the
+open hardware checks are in [hardware-checklist.md](hardware-checklist.md).
 
-Planned after v1 (see [Seams for later features](#seams-for-later-features)):
-sleep timer and bedtime lock, night mode with a lower limit, reading titles
-aloud, several rooms or profiles, an ESP32 touch display as a battery-powered
-client.
+Ideas for later (see [Seams for later features](#seams-for-later-features)):
+night mode with a lower limit, reading titles aloud, several rooms or
+profiles, an ESP32 touch display or NFC cards as a battery-powered client.

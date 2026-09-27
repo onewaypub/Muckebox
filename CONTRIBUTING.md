@@ -61,6 +61,16 @@ shows the PIN for the first login. Open <http://localhost:8484/admin>
 ("Kinderzimmer" or "Wohnzimmer"); the kids view is at
 <http://localhost:8484/>.
 
+## Sounds and pictures
+
+New sounds or pictures for the games must be public domain or CC0, or else
+CC BY / CC BY-SA with credit. Add the file to `muckebox/static/sounds` or
+`muckebox/static/pictures`, its author, licence and source to
+`muckebox/assets.py`, a matching entry to `REUSE.toml` and a row to
+`docs/credits.md`; `tests/test_assets.py` checks that they agree. Convert
+sounds to short mono MP3 files (a few seconds, faded, loudness-normalised)
+so that every tablet plays them.
+
 ## Checks
 
 Run all checks before every commit:
@@ -70,7 +80,9 @@ scripts/check
 ```
 
 It runs ruff (lint and format check), pytest with coverage (including the
-license header check), bandit, pip-audit and the privacy scan. The same
+license header check), ESLint and Stylelint against the browser baseline,
+the browser logic tests (`node --test`, e.g. the games' rounds and
+schedules), bandit, pip-audit and the privacy scan. The same
 checks run in CI for every pull request. `scripts/check --fast` skips
 pip-audit.
 
