@@ -106,16 +106,22 @@ def test_room_by_discovery_without_ip(kids, living):
     backend = SocoBackend(
         room="Kinderzimmer",
         seed_ip=None,
-        discover=lambda timeout: {kids, living},
+        discover=lambda timeout, allow_network_scan: {kids, living},
         soco_factory=lambda ip: zones[ip],
     )
     assert backend.resolve().player_ip == "192.0.2.10"
 
 
 def test_discovery_finding_nothing(kids):
-    backend = SocoBackend(room="Kinderzimmer", seed_ip=None, discover=lambda timeout: None)
+    seen = {}
+
+    def discover(**kwargs):
+        seen.update(kwargs)
+
+    backend = SocoBackend(room="Kinderzimmer", seed_ip=None, discover=discover)
     with pytest.raises(RoomNotFound):
         backend.resolve()
+    assert seen["allow_network_scan"] is True  # falls back to scanning the network
 
 
 def test_unreachable_seed(kids):
