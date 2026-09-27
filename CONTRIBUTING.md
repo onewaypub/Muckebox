@@ -96,6 +96,11 @@ and must be added to the dependency table in the README.
 
 ## Commits and pull requests
 
+Maintainers: merge pull requests with *Rebase and merge*. A squash or merge
+commit made in the GitHub web interface is authored with the account's
+profile name and email, which the privacy checks cannot review beforehand.
+Keep the account's email private and its display name equal to the login.
+
 - Keep commits small and focused; use [Conventional Commits](https://www.conventionalcommits.org/)
   prefixes (`feat:`, `fix:`, `docs:`, `test:`, `build:`, `ci:`, `chore:`).
 - Every commit should pass `scripts/check`.

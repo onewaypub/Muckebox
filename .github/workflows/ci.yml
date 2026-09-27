@@ -132,5 +132,16 @@ jobs:
         with:
           python-version: "3.13"
       - run: scripts/install-gitleaks
-      - name: Secret and private-data scan
-        run: python scripts/privacy_scan.py
+      - name: Secret and private-data scan (the commits this run adds)
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [ -n "$BASE_REF" ]; then
+            range="origin/$BASE_REF..HEAD"
+          elif [ -n "$BEFORE" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            range="$BEFORE..HEAD"
+          else
+            range="--all"   # first push or force push: check everything
+          fi
+          python scripts/privacy_scan.py --range "$range"
