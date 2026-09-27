@@ -160,7 +160,7 @@ def load_settings(environ: Mapping[str, str]) -> Settings:
         )
         admin_pin = None
 
-    data_dir = Path(get("DATA_DIR") or DEFAULT_DATA_DIR).absolute()
+    data_dir = data_dir_from(environ)
 
     port = _parse_int(get("PORT"), DEFAULT_PORT, 1024, 65535)
     if port is None or port in _SONOS_PORTS or port in _NAS_PORTS or port in _BROWSER_BAD_PORTS:
@@ -182,6 +182,11 @@ def load_settings(environ: Mapping[str, str]) -> Settings:
         listen=listen,
         problems=tuple(problems),
     )
+
+
+def data_dir_from(environ: Mapping[str, str]) -> Path:
+    """The data folder named by ``DATA_DIR`` (default ``/data``)."""
+    return Path(environ.get("DATA_DIR", "").strip() or DEFAULT_DATA_DIR).absolute()
 
 
 def _parse_listen(raw: str | None) -> str:
