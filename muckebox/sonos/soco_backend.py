@@ -753,6 +753,14 @@ class SocoBackend:
             timeout=VOLUME_TIMEOUT,
         )
 
+    def set_mute(self, muted: bool) -> None:
+        player = self._room_player()
+        self._call(
+            player.renderingControl.SetMute,
+            [_INSTANCE, ("Channel", "Master"), ("DesiredMute", 1 if muted else 0)],
+            timeout=VOLUME_TIMEOUT,
+        )
+
     def fixed_volume(self) -> bool:
         player = self._room_player()
         try:

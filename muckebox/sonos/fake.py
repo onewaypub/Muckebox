@@ -108,6 +108,7 @@ class FakeSonos:
     track: int = 1
     seconds: int = 0
     track_seconds: int = 1200
+    muted: bool = False
     #: The resume points the kids' tiles asked for.
     starts: list[StartAt | None] = field(default_factory=list)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
@@ -204,6 +205,10 @@ class FakeSonos:
     def set_volume(self, volume: int) -> None:
         self._enter("set_volume", volume)
         self.volume = max(0, min(100, volume))
+
+    def set_mute(self, muted: bool) -> None:
+        self._enter("set_mute", muted)
+        self.muted = muted
 
     def fixed_volume(self) -> bool:
         self._enter("fixed_volume")
