@@ -767,3 +767,36 @@ def test_only_one_room_search_at_a_time(household, make_runtime):
     finally:
         release.set()
         rt.stop()
+
+
+@pytest.mark.parametrize("content", ["null", "[]", "5", '"x"', '{"room_uid": 1}', "{broken"])
+def test_odd_state_file_is_ignored(make_runtime, tmp_path, content):
+    (tmp_path / "state.json").write_text(content)
+    rt = make_runtime()
+    rt.poll_transport()
+    assert rt.state_document()["playback"]["tile_id"] is None
+
+
+def test_a_slow_disk_never_delays_the_volume_guard(fake, library, make_runtime, monkeypatch):
+    """Writing state.json can take seconds on a sleeping NAS disk."""
+    from muckebox.runtime import service
+
+    release, writing = threading.Event(), threading.Event()
+
+    def slow_write(*args, **kwargs):
+        writing.set()
+        release.wait(10)
+
+    monkeypatch.setattr(service, "atomic_write", slow_write)
+    tile = add_favorite(library, fake, 0)
+    rt = make_runtime(threaded=True)
+    rt.start()
+    try:
+        rt.play_tile(tile.id)
+        assert writing.wait(5)
+        fake.volume = 90
+        wait_until(lambda: fake.volume == 25, timeout=3)  # while the write still hangs
+        assert rt.change_volume("down")["value"] == 22
+    finally:
+        release.set()
+        rt.stop()
