@@ -13,12 +13,15 @@ import pytest
 import muckebox
 
 ROOT = Path(__file__).resolve().parent.parent
+# REUSE-IgnoreStart
 SPDX_LICENSE = "SPDX-License-Identifier: AGPL-3.0-or-later"
 SPDX_COPYRIGHT = "SPDX-FileCopyrightText: 2026 Muckebox contributors"
+# REUSE-IgnoreEnd
 HEADER_LINES = 10
 
-# The license text itself is the only file exempt from REUSE annotations.
-EXEMPT = {"LICENSE"}
+# License texts are exempt (LICENSES/ is the REUSE location, LICENSE is kept
+# for GitHub's license detection).
+EXEMPT = {"LICENSE", "LICENSES/AGPL-3.0-or-later.txt"}
 
 
 def repository_files():
@@ -78,6 +81,10 @@ def test_readme_lists_exactly_the_runtime_dependencies():
     documented = {normalise(m.group(1)) for m in re.finditer(r"^\| \[([^\]]+)\]", section, re.M)}
     assert locked, "requirements.txt contains no pinned packages"
     assert documented == locked
+
+
+def test_license_copies_are_identical():
+    assert (ROOT / "LICENSE").read_bytes() == (ROOT / "LICENSES/AGPL-3.0-or-later.txt").read_bytes()
 
 
 def test_version_matches_pyproject():
