@@ -100,14 +100,15 @@ def change_pin():
     """Set a new PIN. Ends all other sessions; this one stays logged in."""
     body = _body()
     try:
-        auth.check_pin(body.get("current"), _limiter)
+        checked = auth.check_pin(body.get("current"), _limiter)
     except ApiError as exc:
         if exc.code == "pin_wrong":
             # 403, not 401: the parent is still logged in.
             raise ApiError(403, "pin_wrong") from exc
         raise
-    _settings_call(_services().store.change_pin, body.get("new"))
-    auth.start_session()
+    # Only if the PIN is still the one just checked (reset-pin may run meanwhile).
+    updated = _settings_call(_services().store.change_pin, body.get("new"), checked)
+    auth.start_session(updated.pin.version)
     log.info("The parents' PIN was changed")
     return _settings_response()
 
@@ -141,7 +142,7 @@ def _settings_call(function, *args, **kwargs):
     try:
         return function(*args, **kwargs)
     except SettingsError as exc:
-        raise ApiError(422, exc.code) from exc
+        raise ApiError(409 if exc.code == "pin_changed" else 422, exc.code) from exc
     except (OSError, SettingsFileError) as exc:
         log.error("Could not save the settings: %s", exc)
         raise ApiError(500, "settings_save_failed") from exc
