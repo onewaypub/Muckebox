@@ -51,9 +51,20 @@ Run all checks before every commit:
 scripts/check
 ```
 
-It runs ruff (lint and format check), pytest with coverage, the license
-header check, bandit, pip-audit and gitleaks. The same checks run in CI for
-every pull request.
+It runs ruff (lint and format check), pytest with coverage (including the
+license header check), bandit, pip-audit and the privacy scan. The same
+checks run in CI for every pull request. `scripts/check --fast` skips
+pip-audit.
+
+The privacy scan (`scripts/privacy_scan.py`, rules in `.gitleaks.toml`)
+checks the git history, the working tree, commit messages and commit email
+addresses for secrets and private data. `scripts/check` downloads the pinned
+gitleaks binary to `.tools/` on first use. Configure git in this repository
+to use your GitHub noreply address:
+
+```sh
+git config user.email "<id>+<username>@users.noreply.github.com"
+```
 
 ## Dependencies
 
