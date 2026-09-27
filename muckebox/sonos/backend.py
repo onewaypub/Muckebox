@@ -52,3 +52,15 @@ class SonosBackend(Protocol):
     def fetch_art(self, uri: str) -> bytes:
         """Download album art that Sonos serves or references."""
         ...
+
+
+class UnconfiguredBackend:
+    """Stands in when the Sonos settings are invalid; every call fails."""
+
+    def __getattr__(self, name: str):
+        from .errors import RoomNotFound
+
+        def fail(*args: object, **kwargs: object):
+            raise RoomNotFound("Sonos is not configured")
+
+        return fail

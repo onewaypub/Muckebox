@@ -164,12 +164,17 @@ class FakeSonos:
 
     def fetch_art(self, uri: str) -> bytes:
         self._enter("fetch_art", uri)
-        from PIL import Image
+        from PIL import Image, ImageDraw, ImageFont
 
         number = int(uri.rsplit(":", 1)[-1]) if uri.startswith("fake-art:") else 1
-        colour = _DEMO_FAVORITES[(number - 1) % len(_DEMO_FAVORITES)][4]
+        title, _, _, _, colour = _DEMO_FAVORITES[(number - 1) % len(_DEMO_FAVORITES)]
+        image = Image.new("RGB", (300, 300), colour)
+        draw = ImageDraw.Draw(image)
+        draw.ellipse((40, 40, 260, 260), outline=(255, 255, 255), width=10)
+        font = ImageFont.load_default(size=120)
+        draw.text((150, 150), title[0], fill=(255, 255, 255), font=font, anchor="mm")
         buffer = io.BytesIO()
-        Image.new("RGB", (300, 300), colour).save(buffer, "PNG")
+        image.save(buffer, "PNG")
         return buffer.getvalue()
 
     def _wait(self) -> None:

@@ -31,6 +31,7 @@ def server(tmp_path):
     env = {
         **os.environ,
         "SONOS_IP": "192.0.2.10",
+        "MUCKEBOX_FAKE_SONOS": "1",
         "DATA_DIR": str(tmp_path / "data"),
         "PORT": str(port),
     }

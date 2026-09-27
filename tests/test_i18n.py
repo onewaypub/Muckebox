@@ -62,3 +62,65 @@ def test_every_config_problem_has_a_text():
     }
     for code in problem_codes:
         assert f"error.{code}" in CATALOGUES[DEFAULT_LANG]
+
+
+# -- completeness: every code and key used anywhere has a text ------------------------
+
+import re  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+PACKAGE = Path(__file__).resolve().parent.parent / "muckebox"
+CATALOGUE = CATALOGUES[DEFAULT_LANG]
+
+
+def _subclasses(cls):
+    for sub in cls.__subclasses__():
+        yield sub
+        yield from _subclasses(sub)
+
+
+def test_every_error_class_has_a_text():
+    from muckebox.covers import CoverError
+    from muckebox.library import LibraryError
+    from muckebox.sonos.errors import SonosError
+
+    codes = {CoverError.code}
+    for base in (SonosError, LibraryError):
+        codes |= {base.code} | {sub.code for sub in _subclasses(base)}
+    missing = sorted(code for code in codes if f"error.{code}" not in CATALOGUE)
+    assert not missing
+
+
+def test_every_literal_error_code_in_the_code_has_a_text():
+    pattern = re.compile(r'(?:ApiError\(\d+, |Unavailable\()"([a-z_]+)"')
+    codes = {
+        code
+        for path in PACKAGE.rglob("*.py")
+        for code in pattern.findall(path.read_text(encoding="utf-8"))
+    }
+    assert "busy" in codes and "config_error" in codes  # the scan works
+    missing = sorted(code for code in codes if f"error.{code}" not in CATALOGUE)
+    assert not missing
+
+
+def test_every_key_used_by_pages_and_scripts_exists():
+    keys = set()
+    for path in (PACKAGE / "templates").glob("*.html"):
+        keys |= set(re.findall(r'data-i18n(?:-label|-placeholder)?="([^"]+)"', path.read_text()))
+    for path in (PACKAGE / "static" / "js").glob("*.js"):
+        keys |= set(re.findall(r'\bt\("([a-z_]+\.[a-z_]+)"', path.read_text()))
+        keys |= set(re.findall(r'"((?:kids|admin|status)\.[a-z_]+)"', path.read_text()))
+    assert len(keys) > 20  # the scan works
+    missing = sorted(key for key in keys if key not in CATALOGUE)
+    assert not missing
+
+
+def test_every_unplayable_reason_and_warning_has_a_text():
+    from muckebox.sonos.fake import demo_favorites
+
+    reasons = {"no_resource", "tv_input", "broken_metadata"}
+    reasons |= {f.reason for f in demo_favorites() if f.reason}
+    warnings = {"cover_missing", "title_missing", "sharelink_experimental"}
+    missing = [f"reason.{r}" for r in reasons if f"reason.{r}" not in CATALOGUE]
+    missing += [f"warning.{w}" for w in warnings if f"warning.{w}" not in CATALOGUE]
+    assert not missing

@@ -21,7 +21,12 @@ from muckebox.__main__ import (
 
 @pytest.fixture
 def env(tmp_path):
-    return {"SONOS_IP": "192.0.2.10", "DATA_DIR": str(tmp_path / "data"), "ADMIN_PIN": "2468"}
+    return {
+        "SONOS_IP": "192.0.2.10",
+        "DATA_DIR": str(tmp_path / "data"),
+        "ADMIN_PIN": "2468",
+        "MUCKEBOX_FAKE_SONOS": "1",
+    }
 
 
 def test_main_serves_app_on_configured_port(env):
@@ -33,7 +38,26 @@ def test_main_serves_app_on_configured_port(env):
 def test_main_creates_data_dir(env, tmp_path):
     main(env, serve=lambda app, port: None)
     assert (tmp_path / "data").is_dir()
-    assert list((tmp_path / "data").iterdir()) == []  # write test leaves nothing behind
+    assert not list((tmp_path / "data").glob(".write-test-*"))  # write test leaves nothing
+
+
+def test_secret_key_is_created_once_and_private(env, tmp_path):
+    main(env, serve=lambda app, port: None)
+    key_file = tmp_path / "data" / "secret_key"
+    key = key_file.read_bytes()
+    assert len(key) == 32
+    assert key_file.stat().st_mode & 0o077 == 0
+    main(env, serve=lambda app, port: None)
+    assert key_file.read_bytes() == key
+
+
+def test_invalid_sonos_settings_still_serve(env):
+    served = []
+    code = main(
+        {**env, "SONOS_IP": "", "MUCKEBOX_FAKE_SONOS": ""}, serve=lambda a, p: served.append(a)
+    )
+    assert code == EXIT_OK
+    assert served
 
 
 def test_invalid_port_exits_before_serving(env, caplog):
@@ -96,7 +120,7 @@ class FakeServer:
 
 
 @pytest.mark.parametrize("exc", [KeyboardInterrupt(), entry._Shutdown()])
-def test_serve_closes_server_on_shutdown(monkeypatch, exc):
+def test_serve_closes_server_on_shutdown(monkeypatch, exc, tmp_path):
     server = FakeServer(exc)
     options = {}
 
@@ -107,7 +131,8 @@ def test_serve_closes_server_on_shutdown(monkeypatch, exc):
     monkeypatch.setattr(entry, "create_server", fake_create_server)
     previous = signal.getsignal(signal.SIGTERM)
     try:
-        app = entry.create_app(entry.load_settings({"SONOS_IP": "192.0.2.10"}))
+        settings = entry.load_settings({"SONOS_IP": "192.0.2.10", "DATA_DIR": str(tmp_path)})
+        app = entry.create_app(entry.build_services(settings, fake_sonos=True))
         entry._serve(app, 9123)
         assert signal.getsignal(signal.SIGTERM) is entry._raise_shutdown
     finally:

@@ -1,0 +1,101 @@
+<!doctype html>
+<!--
+SPDX-FileCopyrightText: 2026 Muckebox contributors
+SPDX-License-Identifier: AGPL-3.0-or-later
+-->
+<html lang="{{ lang }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex">
+  <meta name="theme-color" content="#1d3557">
+  <title>Muckebox</title>
+  <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
+  <link rel="stylesheet" href="/static/css/admin.css?v={{ asset_version }}">
+  <script type="module" src="/static/js/admin.js?v={{ asset_version }}"></script>
+</head>
+<body class="admin">
+  <script id="i18n" type="application/json">{{ messages|tojson }}</script>
+  <header>
+    <h1 data-i18n="admin.title"></h1>
+    <nav>
+      <a href="/" data-i18n="admin.kids_view"></a>
+      <button id="logout" type="button" class="link" data-i18n="admin.logout" hidden></button>
+    </nav>
+  </header>
+
+  <div id="flash" class="flash" role="status" hidden></div>
+
+  <p id="locked" class="card" data-i18n="admin.locked" hidden></p>
+
+  <form id="login" class="card login" hidden>
+    <label for="pin" data-i18n="admin.pin"></label>
+    <input id="pin" name="pin" type="password" inputmode="numeric" autocomplete="current-password" required>
+    <button type="submit" data-i18n="admin.login"></button>
+  </form>
+
+  <main id="app" hidden>
+    <section class="card">
+      <h2 data-i18n="admin.status"></h2>
+      <dl id="status" class="status"></dl>
+      <ul id="problems" class="problems"></ul>
+    </section>
+
+    <section class="card">
+      <h2 data-i18n="admin.tiles"></h2>
+      <p id="tiles-empty" class="hint" data-i18n="admin.tiles_empty" hidden></p>
+      <ol id="tiles" class="tiles"></ol>
+    </section>
+
+    <section class="card">
+      <div class="section-head">
+        <h2 data-i18n="admin.favorites"></h2>
+        <button id="refresh" type="button" class="secondary" data-i18n="admin.refresh"></button>
+      </div>
+      <p class="hint" data-i18n="admin.favorites_hint"></p>
+      <ul id="favorites" class="favorites"></ul>
+    </section>
+
+    <section class="card">
+      <h2 data-i18n="admin.link"></h2>
+      <p class="hint" data-i18n="admin.link_hint"></p>
+      <form id="link" class="link-form">
+        <input id="link-url" name="url" type="url" required data-i18n-placeholder="admin.link_placeholder">
+        <button type="submit" data-i18n="admin.add"></button>
+      </form>
+    </section>
+  </main>
+
+  <footer>
+    <span id="version"></span>
+    <a id="source" href="https://github.com/onewaypub/Muckebox" rel="noopener" data-i18n="admin.source"></a>
+  </footer>
+
+  <template id="tile-row">
+    <li class="tile-row">
+      <img class="thumb" alt="">
+      <form class="rename">
+        <input name="title" maxlength="60" required>
+        <button type="submit" class="secondary" data-i18n="admin.save"></button>
+      </form>
+      <span class="meta"></span>
+      <div class="actions">
+        <button type="button" class="icon up" data-i18n-label="admin.up">▲</button>
+        <button type="button" class="icon down" data-i18n-label="admin.down">▼</button>
+        <label class="upload secondary"><span data-i18n="admin.cover"></span>
+          <input type="file" accept="image/jpeg,image/png" hidden>
+        </label>
+        <button type="button" class="danger delete" data-i18n="admin.delete"></button>
+      </div>
+    </li>
+  </template>
+
+  <template id="favorite-row">
+    <li class="favorite-row">
+      <img class="thumb" alt="">
+      <span class="name"><strong></strong><small></small></span>
+      <button type="button" class="add"></button>
+    </li>
+  </template>
+</body>
+</html>
