@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 Muckebox contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Share links: recognise them and resolve short links.
+"""Share links: recognise them, resolve short links, fetch title and cover.
 
 Parents paste share links from Spotify, Apple Music, TIDAL or Deezer into
 the admin page, often with some text from the share sheet around them.
@@ -9,32 +9,47 @@ the admin page, often with some text from the share sheet around them.
   ID and a canonical URL) without any network access.
 * :func:`resolve` does the same, but first follows short links such as
   spotify.link, link.deezer.com, tidal.link or apple.co.
+* :func:`metadata` finds a title and a cover image URL without API keys
+  (oEmbed endpoints and ``og:`` tags), and :func:`fetch_image` downloads the
+  cover.
 
-All network access goes through :class:`muckebox.netfetch.Fetcher`, with
-the host allowlist :data:`RESOLVE_HOSTS`. Error codes are i18n keys
-(``error.<code>``).
+All network access goes through :class:`muckebox.netfetch.Fetcher`, with a
+host allowlist per purpose (:data:`RESOLVE_HOSTS`, :data:`SERVICE_HOSTS`,
+:data:`IMAGE_HOSTS`). Error codes are i18n keys (``error.<code>``).
 """
 
 from __future__ import annotations
 
+import html
+import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
-from urllib.parse import parse_qs, quote, unquote, urlsplit, urlunsplit
+from html.parser import HTMLParser
+from urllib.parse import parse_qs, quote, unquote, urljoin, urlsplit, urlunsplit
 
-from .netfetch import Fetcher, FetchError, FetchResult
+from .netfetch import Fetcher, FetchError, FetchResult, host_allowed
 from .sonos.model import ShareLinkRef
 from .sonos.sharelink import KINDS
 
 UNSUPPORTED = "sharelink_unsupported"
 UNRESOLVABLE = "sharelink_unresolvable"
 
-#: Pages of each service (subdomains included).
+#: Pages and oEmbed endpoints of each service (subdomains included).
 SERVICE_HOSTS: dict[str, tuple[str, ...]] = {
     "spotify": ("spotify.com",),
     "apple_music": ("apple.com",),
     "tidal": ("tidal.com",),
     "deezer": ("deezer.com",),
 }
+#: Cover image CDNs of each service (subdomains included).
+IMAGE_HOSTS: dict[str, tuple[str, ...]] = {
+    "spotify": ("scdn.co", "spotifycdn.com"),
+    "apple_music": ("mzstatic.com",),
+    "tidal": ("resources.tidal.com",),
+    "deezer": ("dzcdn.net",),
+}
+ALL_IMAGE_HOSTS: tuple[str, ...] = tuple(host for hosts in IMAGE_HOSTS.values() for host in hosts)
 #: Hosts whose links only redirect to the real item, and their service.
 SHORT_LINK_HOSTS: dict[str, str] = {
     "spotify.link": "spotify",
@@ -54,7 +69,16 @@ RESOLVE_HOSTS: tuple[str, ...] = (
     *(host for hosts in SERVICE_HOSTS.values() for host in hosts),
 )
 
+HTML_MAX = 1024 * 1024
+JSON_MAX = 256 * 1024
+IMAGE_MAX = 10 * 1024 * 1024
 SHORT_LINK_MAX = 1024 * 1024
+
+SPOTIFY_OEMBED = "https://open.spotify.com/oembed?url="
+APPLE_OEMBED = "https://music.apple.com/api/oembed?url="
+DEEZER_OEMBED = "https://api.deezer.com/oembed?url="
+
+COVER_SIZE = 600
 
 # Item kinds each service has but Muckebox cannot play. Links to them are
 # "unsupported" (add them as a Sonos favorite instead), not "unresolvable".
@@ -147,6 +171,12 @@ class ShortLinkError(LinkError):
 class ParsedLink:
     ref: ShareLinkRef
     canonical_url: str
+
+
+@dataclass(frozen=True)
+class LinkMeta:
+    title: str | None
+    image_url: str | None
 
 
 # -- parsing (no network) ------------------------------------------------------
@@ -377,3 +407,354 @@ def _follow(
         stop_redirect=stop,
     )
     return result, stop.found if result.location else None
+
+
+# -- metadata ---------------------------------------------------------------------
+
+
+def metadata(link: ParsedLink, fetcher: Fetcher) -> LinkMeta:
+    """Return title and cover image URL of ``link``; ``None`` where unknown.
+
+    This is best effort: network and parse failures give ``None`` values,
+    never an exception. Titles may be longer than a tile title may be.
+    """
+    strategy = _STRATEGIES.get(link.ref.service)
+    if strategy is None:
+        return LinkMeta(None, None)
+    return strategy(link, fetcher)
+
+
+def fetch_image(url: str, fetcher: Fetcher) -> bytes:
+    """Download a cover image from one of the :data:`IMAGE_HOSTS`.
+
+    Raises :class:`~muckebox.netfetch.FetchError` (``bad_status`` for a
+    response other than 200).
+    """
+    result = fetcher.get(
+        url, max_bytes=IMAGE_MAX, accept="image/jpeg,image/png,image/*;q=0.8", allow=ALL_IMAGE_HOSTS
+    )
+    if result.status != 200:
+        raise FetchError("bad_status", f"image request answered {result.status}")
+    return result.body
+
+
+def _spotify_meta(link: ParsedLink, fetcher: Fetcher) -> LinkMeta:
+    page = _page_meta(link, fetcher, titles=("og:title", "twitter:title"))
+    if link.ref.kind in ("show", "episode"):
+        # oEmbed describes a show's latest episode, not the show.
+        return page
+    embed = _oembed(SPOTIFY_OEMBED, link, fetcher)
+    # og:image is 640 px, the oEmbed thumbnail only 300 px.
+    return LinkMeta(embed.title or page.title, page.image_url or embed.image_url)
+
+
+def _apple_meta(link: ParsedLink, fetcher: Fetcher) -> LinkMeta:
+    embed = LinkMeta(None, None)
+    if link.ref.kind != "song":  # oEmbed describes the album for song links
+        embed = _oembed(APPLE_OEMBED, link, fetcher)
+        if embed.title and embed.image_url:
+            return embed
+    page = _page_meta(
+        link,
+        fetcher,
+        titles=("apple:title", "og:title", "twitter:title"),
+        images=("twitter:image", "og:image"),
+    )
+    return LinkMeta(embed.title or page.title, embed.image_url or page.image_url)
+
+
+def _tidal_meta(link: ParsedLink, fetcher: Fetcher) -> LinkMeta:
+    page = _fetch_page(link.canonical_url, fetcher, "tidal")
+    if page is None:
+        return LinkMeta(None, None)
+    tags = _page_tags(page, "tidal", ("og:title", "twitter:title"), ("og:image", "twitter:image"))
+    if tags is None:
+        return LinkMeta(None, None)
+    name, image = _json_ld_item(page.json_ld)
+    return LinkMeta(
+        _clean_title(name, "tidal", decorated=False) or tags.title,
+        _image_url(image, "tidal", page.url) or tags.image_url,
+    )
+
+
+def _deezer_meta(link: ParsedLink, fetcher: Fetcher) -> LinkMeta:
+    embed = _oembed(DEEZER_OEMBED, link, fetcher)
+    if embed.title and embed.image_url:
+        return embed
+    page = _page_meta(link, fetcher, titles=("og:title", "twitter:title"))
+    return LinkMeta(embed.title or page.title, embed.image_url or page.image_url)
+
+
+_STRATEGIES: dict[str, Callable[[ParsedLink, Fetcher], LinkMeta]] = {
+    "spotify": _spotify_meta,
+    "apple_music": _apple_meta,
+    "tidal": _tidal_meta,
+    "deezer": _deezer_meta,
+}
+
+
+def _oembed(endpoint: str, link: ParsedLink, fetcher: Fetcher) -> LinkMeta:
+    service = link.ref.service
+    url = endpoint + quote(link.canonical_url, safe="")
+    try:
+        result = fetcher.get(
+            url, max_bytes=JSON_MAX, accept="application/json", allow=SERVICE_HOSTS[service]
+        )
+        if result.status != 200:
+            return LinkMeta(None, None)
+        data = json.loads(result.body.decode("utf-8"))
+    except (FetchError, ValueError, RecursionError):
+        return LinkMeta(None, None)
+    if not isinstance(data, dict) or "error" in data:
+        return LinkMeta(None, None)
+    return LinkMeta(
+        _clean_title(data.get("title"), service, decorated=False),
+        _image_url(data.get("thumbnail_url"), service, result.url),
+    )
+
+
+# -- HTML pages -------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _Page:
+    url: str
+    meta: dict[str, str]
+    title: str | None
+    json_ld: list[str]
+
+
+class _HeadParser(HTMLParser):
+    """Collects <meta> tags, the <title> and JSON-LD scripts."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.meta: dict[str, str] = {}
+        self.title: str | None = None
+        self.json_ld: list[str] = []
+        self._capture: str | None = None
+        self._buffer: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        values = {name: value for name, value in attrs if value is not None}
+        if tag == "meta":
+            key = (values.get("property") or values.get("name") or "").strip().lower()
+            if key and "content" in values:
+                self.meta.setdefault(key, values["content"])
+        elif tag == "title" and self.title is None:
+            self._start("title")
+        elif tag == "script" and values.get("type", "").strip().lower() == "application/ld+json":
+            self._start("ld")
+
+    def handle_data(self, data: str) -> None:
+        if self._capture:
+            self._buffer.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        text = "".join(self._buffer)
+        if self._capture == "title" and tag == "title":
+            self.title = text
+            self._capture = None
+        elif self._capture == "ld" and tag == "script":
+            self.json_ld.append(text)
+            self._capture = None
+
+    def _start(self, what: str) -> None:
+        self._capture = what
+        self._buffer = []
+
+
+def _fetch_page(url: str, fetcher: Fetcher, service: str) -> _Page | None:
+    try:
+        result = fetcher.get(
+            url,
+            max_bytes=HTML_MAX,
+            accept="text/html",
+            allow=SERVICE_HOSTS[service],
+            stop_at=b"</head>",
+            truncate=True,
+        )
+    except FetchError:
+        return None
+    if result.status != 200:
+        return None
+    parser = _HeadParser()
+    # Apple and TIDAL send "text/html" without a charset; the pages are UTF-8.
+    parser.feed(result.body.decode("utf-8", "replace"))
+    parser.close()
+    return _Page(result.url, parser.meta, parser.title, parser.json_ld)
+
+
+def _page_meta(
+    link: ParsedLink,
+    fetcher: Fetcher,
+    *,
+    titles: tuple[str, ...],
+    images: tuple[str, ...] = ("og:image", "twitter:image"),
+) -> LinkMeta:
+    page = _fetch_page(link.canonical_url, fetcher, link.ref.service)
+    tags = _page_tags(page, link.ref.service, titles, images) if page else None
+    return tags or LinkMeta(None, None)
+
+
+def _page_tags(
+    page: _Page, service: str, titles: tuple[str, ...], images: tuple[str, ...]
+) -> LinkMeta | None:
+    """Title and image from meta tags, or ``None`` for a generic page."""
+    headline = page.meta.get("og:title") or page.title
+    if headline and headline.strip() and _clean_title(headline, service, decorated=True) is None:
+        return None  # e.g. "Spotify" for a dead link, "Not Found - TIDAL"
+    title = next(
+        (
+            cleaned
+            for key in titles
+            if (cleaned := _clean_title(page.meta.get(key), service, decorated=True))
+        ),
+        None,
+    )
+    image = next(
+        (url for key in images if (url := _image_url(page.meta.get(key), service, page.url))),
+        None,
+    )
+    return LinkMeta(title or _clean_title(page.title, service, decorated=True), image)
+
+
+def _json_ld_item(blocks: list[str]) -> tuple[str | None, str | None]:
+    """Name and image of the first music item in JSON-LD blocks."""
+    for block in blocks:
+        try:
+            data = json.loads(block)
+        except (ValueError, RecursionError):
+            continue
+        items = data if isinstance(data, list) else [data]
+        if isinstance(data, dict) and isinstance(data.get("@graph"), list):
+            items = [data, *data["@graph"]]
+        for item in items:
+            if isinstance(item, dict) and _is_music_item(item.get("@type")):
+                name = item.get("name")
+                if isinstance(name, str) and name.strip():
+                    return name, _json_ld_image(item.get("image"))
+    return None, None
+
+
+_MUSIC_TYPES = frozenset({"MusicAlbum", "MusicRecording", "MusicPlaylist"})
+
+
+def _is_music_item(kind: object) -> bool:
+    kinds = kind if isinstance(kind, list) else [kind]
+    return any(isinstance(k, str) and k in _MUSIC_TYPES for k in kinds)
+
+
+def _json_ld_image(image: object) -> str | None:
+    if isinstance(image, list):
+        image = image[0] if image else None
+    if isinstance(image, dict):
+        image = image.get("url") or image.get("contentUrl")
+    return image if isinstance(image, str) else None
+
+
+# -- titles and images ------------------------------------------------------------
+
+_SUFFIX = re.compile(
+    r"(?:\s*[|·–—-]\s*|\s+(?:on|bei|auf)\s+)"
+    r"(?:podcast\s+(?:on|bei|auf)\s+)?(?:spotify|apple\s+music|tidal|deezer)\s*$",
+    re.IGNORECASE,
+)
+# "Global Warming - Album by Pitbull" (Spotify album og:title).
+_SPOTIFY_DECORATION = re.compile(
+    r"\s+[–—-]\s+(?:album|single|ep|compilation|playlist|song(?:\s+and\s+lyrics)?"
+    r"|podcast|episode|audiobook|hörbuch)\s+(?:by|von)\s+.+$",
+    re.IGNORECASE,
+)
+# "„Black Velvet“ von Alannah Myles" (Apple Music og:title in German).
+_APPLE_QUOTED = re.compile(r"^[„“«\"](.+?)[“”»\"]\s+(?:von|by)\s+\S.*$")
+_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+_GENERIC_TITLES = frozenset(
+    {
+        "spotify",
+        "apple music",
+        "tidal",
+        "deezer",
+        "not found",
+        "page not found",
+        "404",
+        "404 not found",
+        "error",
+        "web player",
+        "spotify web player",
+        "spotify web player music for everyone",
+        "apple music web player",
+    }
+)
+
+
+def _is_generic(title: str) -> bool:
+    return " ".join(re.sub(r"\W+", " ", title.casefold()).split()) in _GENERIC_TITLES
+
+
+def _clean_title(value: object, service: str, *, decorated: bool) -> str | None:
+    """Normalise a title; ``None`` if empty or a service placeholder.
+
+    ``decorated`` titles come from HTML pages: the parser already unescaped
+    them, and they may carry a service suffix such as " | Spotify". Titles
+    from JSON are unescaped here and not trimmed.
+    """
+    if not isinstance(value, str):
+        return None
+    text = value if decorated else html.unescape(value)
+    text = " ".join(_CONTROL.sub(" ", text).split())
+    cleaned = text
+    if decorated:
+        cleaned = _SUFFIX.sub("", cleaned)
+        if service == "spotify":
+            cleaned = _SPOTIFY_DECORATION.sub("", cleaned)
+        elif service == "apple_music" and (quoted := _APPLE_QUOTED.match(cleaned)):
+            cleaned = quoted[1]
+        cleaned = cleaned.strip()
+    if not cleaned or _is_generic(text) or _is_generic(cleaned):
+        return None
+    return cleaned
+
+
+def _image_url(value: object, service: str, base: str) -> str | None:
+    """An absolute https image URL on the service's image hosts, or ``None``."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parts = urlsplit(urljoin(base, value.strip()))
+        host = parts.hostname or ""
+    except ValueError:
+        return None
+    if parts.scheme.lower() == "http":
+        parts = parts._replace(scheme="https")
+    if parts.scheme.lower() != "https" or not host_allowed(host, IMAGE_HOSTS[service]):
+        return None  # e.g. Apple's generic apple-music.png on music.apple.com
+    url = urlunsplit(parts)
+    return apple_artwork(url) if service == "apple_music" else url
+
+
+_MZ_TEMPLATE = (("{w}", str(COVER_SIZE)), ("{h}", str(COVER_SIZE)), ("{c}", "bb"), ("{f}", "jpg"))
+_MZ_SIZE = re.compile(
+    r"/[0-9]+x[0-9]+([A-Za-z]{2}(?:\.[A-Za-z0-9]+)*)?(?:-[0-9]+)?\.(?:jpe?g|png|webp)$",
+    re.IGNORECASE,
+)
+
+
+def apple_artwork(url: str, size: int = COVER_SIZE) -> str:
+    """Ask Apple's image CDN (mzstatic) for a square ``size`` JPEG.
+
+    The last path segment encodes the size: ``1200x630wp.jpg`` (padded to a
+    wide image) becomes ``600x600bb.jpg``; other crop codes are kept. URLs
+    that do not follow the pattern are returned unchanged.
+    """
+    for placeholder, value in _MZ_TEMPLATE:
+        url = url.replace(placeholder, value)
+    parts = urlsplit(url)
+    match = _MZ_SIZE.search(parts.path)
+    if not match:
+        return url
+    crop = match[1] or "bb"
+    if crop.lower() == "wp":
+        crop = "bb"
+    path = f"{parts.path[: match.start()]}/{size}x{size}{crop}.jpg"
+    return urlunsplit(parts._replace(path=path))
