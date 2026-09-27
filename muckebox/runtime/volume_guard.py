@@ -15,7 +15,9 @@ from .clock import Clock
 log = logging.getLogger(__name__)
 
 FIGHT_WINDOW = 10.0  # seconds
-FIGHT_CORRECTIONS = 10  # corrections within the window that count as a fight
+# Corrections within the window that count as a fight. The guard polls about
+# once per second, so at most ~10 corrections fit into the window.
+FIGHT_CORRECTIONS = 5
 
 
 class VolumeGuard:
@@ -47,6 +49,8 @@ class VolumeGuard:
             self._backend.set_volume(limit)
             self._record_correction(volume, limit)
             volume = limit
+        else:
+            self._update_fight(self._clock.monotonic())
         self.last_volume = volume
         return volume
 
@@ -63,14 +67,19 @@ class VolumeGuard:
         self.last_volume = target
         return target
 
+    def _update_fight(self, now: float) -> bool:
+        while self._recent and now - self._recent[0] > FIGHT_WINDOW:
+            self._recent.popleft()
+        self.fighting = len(self._recent) >= FIGHT_CORRECTIONS
+        return self.fighting
+
     def _record_correction(self, observed: int, limit: int) -> None:
         now = self._clock.monotonic()
         self.corrections += 1
         self._recent.append(now)
-        while self._recent and now - self._recent[0] > FIGHT_WINDOW:
-            self._recent.popleft()
-        fighting = len(self._recent) > FIGHT_CORRECTIONS
-        if fighting and not self.fighting:
+        was_fighting = self.fighting
+        fighting = self._update_fight(now)
+        if fighting and not was_fighting:
             log.warning(
                 "Volume keeps being raised above the limit (%d corrections in %.0f s); "
                 "still enforcing %d",
@@ -78,5 +87,4 @@ class VolumeGuard:
                 FIGHT_WINDOW,
                 limit,
             )
-        self.fighting = fighting
         log.info("Volume %d was above the limit; set back to %d", observed, limit)
