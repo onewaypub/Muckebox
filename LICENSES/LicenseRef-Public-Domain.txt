@@ -1,0 +1,6 @@
+Public domain
+
+The author of this work has released it into the public domain, or its
+copyright has expired. It may be used, changed and shared by anyone for any
+purpose, without conditions. The source page named in REUSE.toml records
+the author's statement.

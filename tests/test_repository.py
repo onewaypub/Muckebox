@@ -21,7 +21,7 @@ HEADER_LINES = 10
 
 # License texts are exempt (LICENSES/ is the REUSE location, LICENSE is kept
 # for GitHub's license detection).
-EXEMPT = {"LICENSE", "LICENSES/AGPL-3.0-or-later.txt"}
+EXEMPT = {"LICENSE"}  # and the licence texts in LICENSES/ (REUSE: no header there)
 
 
 def repository_files():
@@ -50,7 +50,7 @@ def reuse_annotated(path):
 def test_every_file_has_an_spdx_header_or_reuse_annotation():
     missing = []
     for path in repository_files():
-        if path in EXEMPT or reuse_annotated(path):
+        if path in EXEMPT or path.startswith("LICENSES/") or reuse_annotated(path):
             continue
         try:
             head = (ROOT / path).read_text(encoding="utf-8").splitlines()[:HEADER_LINES]
