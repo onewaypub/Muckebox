@@ -23,12 +23,50 @@ export function overlayKind(serverFailures, state) {
   if (!state) return null;
   const status = state.sonos && state.sonos.status;
   if (status === "not_configured") return "config";
-  if (SLEEPING.has(status)) return "sleeping";
+  // At bedtime the moon says enough, even if the speaker sleeps too.
+  if (SLEEPING.has(status) && !isBedtime(state)) return "sleeping";
   return null;
+}
+
+/** The usage time is over: the moon replaces the tiles. */
+export function isBedtime(state) {
+  return Boolean(state && state.schedule && state.schedule.phase === "closed");
+}
+
+/** The small moon in the controls: while the music fades or the sleep timer runs. */
+export function showsSmallMoon(state) {
+  if (!state || isBedtime(state)) return false;
+  const fading = Boolean(state.schedule && state.schedule.phase === "fading");
+  const timer = Boolean(state.sleep_timer && state.sleep_timer.ends_at);
+  return fading || timer;
+}
+
+// -- the parents' PIN pad on the kids tablet --------------------------------------------
+
+export const PAD_MIN = 4;
+export const PAD_MAX = 12;
+/** Wrong PINs in a row before the long press is locked for a while. */
+export const PAD_TRIES = 3;
+
+/** The PIN after pressing ``key`` ("0"-"9" or "back"). */
+export function padPress(pin, key) {
+  if (key === "back") return pin.slice(0, -1);
+  if (/^[0-9]$/.test(key) && pin.length < PAD_MAX) return pin + key;
+  return pin;
+}
+
+export function padReady(pin) {
+  return pin.length >= PAD_MIN;
 }
 
 export function overlayTextKey(kind) {
   return { offline: "kids.offline", config: "kids.config", sleeping: "kids.sleeping" }[kind];
+}
+
+/** Segments above the current limit (e.g. while fading) are shown dimmed. */
+export function limitSegments(limit, max, count = 10) {
+  if (limit === null || limit === undefined || !max) return count;
+  return Math.max(1, Math.round(Math.max(0, Math.min(1, limit / max)) * count));
 }
 
 /** Number of lit segments in the volume bar; full bar = maximum volume. */

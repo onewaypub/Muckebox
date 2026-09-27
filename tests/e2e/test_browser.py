@@ -14,6 +14,7 @@ import itertools
 import os
 import re
 import threading
+import time
 
 import pytest
 
@@ -36,8 +37,25 @@ REQUIRED = os.environ.get("MUCKEBOX_REQUIRE_E2E") == "1"
 DEVICES = {"webkit": "iPad (gen 7) landscape", "chromium": "Galaxy Tab S4 landscape"}
 
 
+class ShiftedClock:
+    """Real time, shifted to a chosen local time (for usage-time tests)."""
+
+    def __init__(self, local):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        target = datetime.fromisoformat(local).replace(tzinfo=ZoneInfo("Europe/Berlin"))
+        self.offset = target.timestamp() - time.time()
+
+    def monotonic(self):
+        return time.monotonic()
+
+    def time(self):
+        return time.time() + self.offset
+
+
 class Server:
-    def __init__(self, tmp_path, set_up=True):
+    def __init__(self, tmp_path, set_up=True, clock=None):
         household = self.household = FakeHousehold()
         self.fake = household.speaker("Kinderzimmer")
         settings = load_settings({"DATA_DIR": str(tmp_path)})
@@ -52,6 +70,7 @@ class Server:
             tmp_path,
             backend_factory=household.backend,
             room_finder=household.find_rooms,
+            clock=clock,
         )
         services = Services(
             settings=settings,
@@ -294,3 +313,60 @@ def test_parents_set_usage_times_and_allow_more(page, server):
     expect(page.locator("#schedule-status")).to_contain_text("Freigabe bis")
     page.locator("#override-end").tap()
     expect(page.locator("#override-end")).to_be_hidden()
+
+
+DAILY = {
+    "enabled": True,
+    "fade_minutes": 10,
+    "days": {
+        day: {"from": "07:00", "to": "19:00"}
+        for day in ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+    },
+}
+
+
+@pytest.fixture
+def evening_server(tmp_path):
+    """A Muckebox at 20:00 with usage times until 19:00: bedtime."""
+    server = Server(tmp_path, clock=ShiftedClock("2026-09-28 20:00"))
+    server.store.set_time_zone("Europe/Berlin")
+    server.store.set_schedule(DAILY)
+    server.start()
+    yield server
+    server.stop()
+
+
+def hold(page, selector, seconds=3.2):
+    page.locator(selector).dispatch_event("pointerdown")
+    page.wait_for_timeout(seconds * 1000)
+    page.locator(selector).dispatch_event("pointerup")
+
+
+def type_pin(page, pin):
+    for digit in pin:
+        page.locator(".pad-key", has_text=digit).tap()
+
+
+def test_bedtime_moon_and_the_parents_pin_pad(page, evening_server):
+    evening_server.add_tiles(0)
+    page.goto(evening_server.url)
+    bedtime = page.locator("#bedtime")
+    expect(bedtime).to_be_visible()
+    expect(bedtime).to_contain_text("Schlafenszeit")
+    expect(bedtime).to_contain_text("Wieder ab 07:00 Uhr")
+    expect(page.locator("#tiles")).to_be_hidden()
+    expect(page.locator("#louder")).to_be_disabled()
+    page.locator("#moon").tap()  # a short tap does nothing
+    expect(page.locator("#pin-pad")).to_be_hidden()
+    hold(page, "#moon")
+    pad = page.locator("#pin-pad")
+    expect(pad).to_be_visible()
+    expect(pad.locator("[data-choice='15']")).to_be_disabled()
+    type_pin(page, "1111")
+    pad.locator("[data-choice='15']").tap()
+    expect(page.locator("#pad-message")).to_have_text("Falsche PIN")
+    type_pin(page, "2468")
+    pad.locator("[data-choice='15']").tap()
+    expect(pad).to_be_hidden()
+    expect(bedtime).to_be_hidden(timeout=5000)
+    expect(page.locator(".tile")).to_have_count(1)

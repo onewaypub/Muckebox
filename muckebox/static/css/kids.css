@@ -436,3 +436,171 @@ svg {
     transition: none !important;
   }
 }
+
+/* -- bedtime -------------------------------------------------------------------- */
+
+.tiles[hidden],
+.bedtime[hidden],
+.small-moon[hidden],
+.pin-pad[hidden],
+.pad-message[hidden] {
+  display: none;
+}
+
+.bedtime {
+  position: absolute;
+  inset: 0 0 var(--bar-height);
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 12px;
+  padding: 24px;
+  text-align: center;
+}
+
+.moon {
+  width: min(42vmin, 320px);
+  height: min(42vmin, 320px);
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--accent);
+  touch-action: none;
+  -webkit-touch-callout: none;
+  user-select: none;
+  cursor: default;
+}
+
+.moon svg,
+.small-moon svg {
+  width: 100%;
+  height: 100%;
+  fill: currentcolor;
+  filter: drop-shadow(0 0 24px rgb(255 209 102 / 35%));
+}
+
+.moon.holding svg,
+.small-moon.holding svg {
+  animation: hold 3s linear forwards;
+}
+
+@keyframes hold {
+  to {
+    filter: drop-shadow(0 0 48px rgb(255 255 255 / 90%));
+    transform: scale(1.08);
+  }
+}
+
+.bedtime-text {
+  margin: 0;
+  font-size: 2rem;
+  font-weight: 700;
+}
+
+.bedtime-until {
+  margin: 0;
+  opacity: 0.75;
+}
+
+.small-moon {
+  padding: 14px;
+  background: none;
+  color: var(--accent);
+  touch-action: none;
+  -webkit-touch-callout: none;
+}
+
+.volume i.over {
+  opacity: 0.25;
+}
+
+/* -- the parents' PIN pad ------------------------------------------------------------ */
+
+.pin-pad {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgb(10 20 35 / 88%);
+}
+
+.pad-card {
+  display: grid;
+  gap: 14px;
+  width: min(100%, 380px);
+  padding: 20px;
+  border-radius: var(--tile-radius);
+  background: var(--bg-deep);
+  text-align: center;
+}
+
+.pad-title,
+.pad-message {
+  margin: 0;
+}
+
+.pad-message {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.pad-dots {
+  margin: 0;
+  min-height: 1.5em;
+  font-size: 1.4rem;
+  letter-spacing: 0.3em;
+}
+
+.pad-keys {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.pad-keys .pad-back {
+  grid-column: 1;
+}
+
+.pad-key,
+.pad-choices button,
+.pad-close {
+  min-height: 56px;
+  border: 0;
+  border-radius: 14px;
+  background: rgb(255 255 255 / 10%);
+  color: var(--text);
+  font: inherit;
+  font-size: 1.4rem;
+  font-weight: 700;
+}
+
+.pad-key:active,
+.pad-choices button:active {
+  background: rgb(255 255 255 / 25%);
+}
+
+.pad-choices {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+.pad-choices button {
+  font-size: 1.1rem;
+  background: var(--accent);
+  color: var(--bg-deep);
+}
+
+.pad-choices button:disabled {
+  opacity: 0.35;
+}
+
+.pad-close {
+  font-size: 1rem;
+  font-weight: 400;
+  background: none;
+  text-decoration: underline;
+}

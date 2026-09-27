@@ -198,6 +198,7 @@ class TimeKeeper:
                 "opens_at": _epoch(phase.opens_at),
                 "fade_from": _epoch(phase.fade_from),
                 "override_until": _epoch(override[1]) if override and override[1] > now else None,
+                "zone": self.zone().name,
             },
             "sleep_timer": {
                 "enabled": settings.sleep_timer.enabled,
