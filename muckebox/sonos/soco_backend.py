@@ -219,7 +219,9 @@ class SocoBackend:
                 if not sources:
                     raise SonosUnreachable(f"cannot resolve {self._seed_ip}: {exc}") from exc
         elif not sources:
-            zones = self._discover(timeout=DISCOVERY_TIMEOUT) or set()
+            # Multicast discovery first; if nothing answers (e.g. a firewall
+            # drops the replies), probe the local networks on TCP 1400.
+            zones = self._discover(timeout=DISCOVERY_TIMEOUT, allow_network_scan=True) or set()
             sources = sorted(zone.ip_address for zone in zones)
             if not sources:
                 raise RoomNotFound("no Sonos speaker found on this network")
