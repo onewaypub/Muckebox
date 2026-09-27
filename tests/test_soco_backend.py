@@ -402,7 +402,128 @@ def test_playback_reads_state_and_first_queue_item(kids):
     playback = backend_for(zones, seed="192.0.2.10").playback()
     assert playback.state == "playing"
     assert playback.first_queue_uri == "x-sonos-http:song%3a1.mp4"
+    assert playback.queue_length == 10
     assert playback.can_next and playback.can_prev and playback.can_pause
+
+
+# -- resuming (Weiterhören) --------------------------------------------------------------
+
+
+def queue_item(uri):
+    return {
+        "Result": (
+            '<DIDL-Lite xmlns:dc="http://purl.org/dc/elements/1.1/" '
+            'xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" '
+            'xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/">'
+            '<item id="Q:0/3" parentID="Q:0" restricted="true">'
+            f'<res protocolInfo="sonos.com-http:*:audio/mp4:*">{uri}</res>'
+            "<dc:title>Folge 3</dc:title><upnp:class>object.item.audioItem.musicTrack</upnp:class>"
+            "</item></DIDL-Lite>"
+        ),
+        "TotalMatches": "12",
+    }
+
+
+TRACK_3 = "x-sonos-http:track%3a1003.mp4?sid=204&flags=8224&sn=1"
+
+
+def seeks(zone):
+    return [
+        (args["Unit"], args["Target"]) for name, args, _ in zone.avTransport.calls if name == "Seek"
+    ]
+
+
+def test_position(kids):
+    zones = household(kids)
+    kids.avTransport.responses["GetPositionInfo"] = {
+        "Track": "3",
+        "RelTime": "0:12:40",
+        "TrackDuration": "0:20:05",
+        "TrackURI": TRACK_3,
+    }
+    position = backend_for(zones, seed="192.0.2.10").position()
+    assert (position.track, position.seconds, position.duration) == (3, 760, 1205)
+    assert position.track_uri == TRACK_3
+    kids.avTransport.responses["GetPositionInfo"] = {"Track": "1", "RelTime": "NOT_IMPLEMENTED"}
+    assert backend_for(zones, seed="192.0.2.10").position() is None
+
+
+def test_resume_at_the_saved_track_and_second(kids):
+    from muckebox.sonos.model import StartAt
+
+    zones = household(kids)
+    # The account was linked again: the query part changed, the track did not.
+    kids.contentDirectory.responses["Browse"] = queue_item(TRACK_3.replace("sn=1", "sn=2"))
+    start = StartAt(track=3, seconds=760, track_uri=TRACK_3)
+    backend_for(zones, seed="192.0.2.10").play_favorite(ALBUM, Route.QUEUE, start)
+    assert seeks(kids) == [("TRACK_NR", 3), ("REL_TIME", "0:12:35")]
+    browse = kids.contentDirectory.calls[-1][1]
+    assert browse["StartingIndex"] == 2
+    assert kids.avTransport.actions()[-1] == "Play"
+
+
+def test_resume_starts_from_the_beginning_if_the_album_changed(kids):
+    from muckebox.sonos.model import StartAt
+
+    zones = household(kids)
+    kids.contentDirectory.responses["Browse"] = queue_item("x-sonos-http:other%3a9.mp4")
+    start = StartAt(track=3, seconds=760, track_uri=TRACK_3)
+    backend_for(zones, seed="192.0.2.10").play_favorite(ALBUM, Route.QUEUE, start)
+    assert seeks(kids) == [("TRACK_NR", 1)]
+
+
+def test_resume_near_the_start_of_a_track_skips_the_second_seek(kids):
+    from muckebox.sonos.model import StartAt
+
+    zones = household(kids)
+    kids.contentDirectory.responses["Browse"] = queue_item(TRACK_3)
+    backend_for(zones, seed="192.0.2.10").play_favorite(
+        ALBUM, Route.QUEUE, StartAt(track=3, seconds=6, track_uri=TRACK_3)
+    )
+    assert seeks(kids) == [("TRACK_NR", 3)]
+
+
+def test_seek_refused_before_play_is_tried_again_when_playing(kids):
+    from muckebox.sonos.model import StartAt
+
+    zones = household(kids)
+    kids.contentDirectory.responses["Browse"] = queue_item(TRACK_3)
+
+    real = kids.avTransport.__getattr__("Seek")
+    attempts = []
+
+    def seek(args, timeout=None):
+        attempts.append(dict(args)["Unit"])
+        if dict(args)["Unit"] == "REL_TIME" and attempts.count("REL_TIME") == 1:
+            raise upnp_error(711)  # still loading
+        return real(args, timeout)
+
+    kids.avTransport.Seek = seek
+    backend_for(zones, seed="192.0.2.10").play_favorite(
+        ALBUM, Route.QUEUE, StartAt(track=3, seconds=760, track_uri=TRACK_3)
+    )
+    assert attempts == ["TRACK_NR", "REL_TIME", "REL_TIME"]
+    assert "GetTransportInfo" in kids.avTransport.actions()
+
+
+def test_a_failed_seek_never_fails_the_start(kids):
+    from muckebox.sonos.model import StartAt
+
+    zones = household(kids)
+    kids.contentDirectory.responses["Browse"] = queue_item(TRACK_3)
+    real = kids.avTransport.__getattr__("Seek")
+
+    def seek(args, timeout=None):
+        if dict(args)["Unit"] == "REL_TIME":
+            raise upnp_error(711)
+        return real(args, timeout)
+
+    kids.avTransport.Seek = seek
+    route = backend_for(zones, seed="192.0.2.10").play_favorite(
+        ALBUM, Route.QUEUE, StartAt(track=3, seconds=760, track_uri=TRACK_3)
+    )
+    assert route is Route.QUEUE
+    assert kids.avTransport.actions().count("Play") == 1
 
 
 # -- volume -------------------------------------------------------------------

@@ -15,7 +15,16 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from .model import Favorite, FavoriteRef, Playback, RoomInfo, Route, ShareLinkRef
+from .model import (
+    Favorite,
+    FavoriteRef,
+    Playback,
+    Position,
+    RoomInfo,
+    Route,
+    ShareLinkRef,
+    StartAt,
+)
 
 TRANSPORT_ACTIONS = ("play", "pause", "next", "previous")
 
@@ -27,11 +36,21 @@ class SonosBackend(Protocol):
 
     def list_favorites(self) -> list[Favorite]: ...
 
-    def play_favorite(self, ref: FavoriteRef, route: Route) -> Route:
-        """Start a favorite; return the route that finally worked."""
+    def play_favorite(self, ref: FavoriteRef, route: Route, start: StartAt | None = None) -> Route:
+        """Start a favorite; return the route that finally worked.
+
+        ``start`` resumes a queue at a saved track and position; it is
+        ignored if that track is not where it was, and never fails the start.
+        """
         ...
 
-    def play_share_link(self, link: ShareLinkRef, title: str) -> None: ...
+    def play_share_link(
+        self, link: ShareLinkRef, title: str, start: StartAt | None = None
+    ) -> None: ...
+
+    def position(self) -> Position | None:
+        """Track and position within the current source, if Sonos knows them."""
+        ...
 
     def transport(self, action: str) -> None:
         """One of :data:`TRANSPORT_ACTIONS`, sent to the group coordinator."""

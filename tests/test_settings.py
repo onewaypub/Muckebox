@@ -54,7 +54,9 @@ def test_generated_pin_is_stable_across_restarts(tmp_path):
 
 def test_generated_pin_is_never_in_repr(tmp_path):
     s = store(tmp_path).current()
-    assert s.pin.generated not in repr(s)
+    # Not the PIN itself: six digits can appear in the hex hash by chance.
+    assert "generated" not in repr(s.pin)
+    assert s.pin.generated not in repr(s).replace(s.pin.salt, "").replace(s.pin.hash, "")
 
 
 def test_pin_is_stored_hashed_and_verified(tmp_path):

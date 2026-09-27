@@ -56,10 +56,12 @@ from .model import (
     Favorite,
     FavoriteRef,
     Playback,
+    Position,
     RoomChoice,
     RoomInfo,
     Route,
     ShareLinkRef,
+    StartAt,
 )
 from .sharelink import plugin_uri
 from .topology import Member, parse_zone_group_state
@@ -67,7 +69,13 @@ from .topology import Member, parse_zone_group_state
 log = logging.getLogger(__name__)
 
 REQUEST_TIMEOUT = 3.0  # normal commands
-SLOW_TIMEOUT = 30.0  # enqueueing a large playlist can take this long
+SLOW_TIMEOUT = 30.0
+#: Resuming starts this many seconds before the saved position ...
+RESUME_REWIND = 5
+#: ... and positions shorter than this start at the beginning of the track.
+RESUME_MIN_SECONDS = 10
+#: How long to wait for playback before seeking a second time.
+SEEK_WAIT = 3.0  # enqueueing a large playlist can take this long
 VOLUME_TIMEOUT = 1.5  # the volume guard must never wait long
 DISCOVERY_TIMEOUT = 3.0
 SCAN_THREADS = 64  # network scan: gentle on small NAS models (about 2 s per /24)
@@ -137,6 +145,19 @@ def translate(exc: BaseException) -> SonosError:
 def _xml_text(text: str) -> str:
     """Escape text for an XML element (&, < and >)."""
     return html.escape(text, quote=False)
+
+
+def _seconds(value: Any) -> int | None:
+    """ "H:MM:SS" -> seconds; None for "NOT_IMPLEMENTED" and the like."""
+    parts = str(value or "").split(":")
+    if len(parts) != 3 or not all(part.isdigit() for part in parts):
+        return None
+    hours, minutes, seconds = (int(part) for part in parts)
+    return hours * 3600 + minutes * 60 + seconds
+
+
+def _without_query(uri: str) -> str:
+    return uri.split("?", 1)[0]
 
 
 def _int_or_none(value: Any) -> int | None:
@@ -405,12 +426,12 @@ class SocoBackend:
 
     # -- playback ---------------------------------------------------------
 
-    def play_favorite(self, ref: FavoriteRef, route: Route) -> Route:
+    def play_favorite(self, ref: FavoriteRef, route: Route, start: StartAt | None = None) -> Route:
         if route is Route.UNSUPPORTED:
             raise NotPlayable("favorite is not playable")
         coordinator, uid = self._coordinator()
         try:
-            self._start(coordinator, uid, ref, route)
+            self._start(coordinator, uid, ref, route, start)
             return route
         except SonosError as exc:
             if exc.upnp_code not in ROUTE_ERRORS:
@@ -420,7 +441,14 @@ class SocoBackend:
             self._start(coordinator, uid, ref, fallback)
             return fallback
 
-    def _start(self, coordinator: Any, uid: str, ref: FavoriteRef, route: Route) -> None:
+    def _start(
+        self,
+        coordinator: Any,
+        uid: str,
+        ref: FavoriteRef,
+        route: Route,
+        start: StartAt | None = None,
+    ) -> None:
         if route is Route.DIRECT:
             meta = ref.res_md or _DIRECT_META.format(title=_xml_text(ref.title))
             self._call(
@@ -445,7 +473,7 @@ class SocoBackend:
                     timeout=SLOW_TIMEOUT,
                 ),
             )
-            self._play_queue(coordinator, uid, first)
+            self._play_queue(coordinator, uid, first, start)
 
     @staticmethod
     def _queue_item(ref: FavoriteRef) -> Any:
@@ -466,7 +494,7 @@ class SocoBackend:
         item.resources = [resource]
         return item
 
-    def play_share_link(self, link: ShareLinkRef, title: str) -> None:
+    def play_share_link(self, link: ShareLinkRef, title: str, start: StartAt | None = None) -> None:
         coordinator, uid = self._coordinator()
         self._clear_queue(coordinator)
         plugin = ShareLinkPlugin(coordinator)
@@ -476,7 +504,7 @@ class SocoBackend:
                 plugin_uri(link), dc_title=_xml_text(title), timeout=SLOW_TIMEOUT
             ),
         )
-        self._play_queue(coordinator, uid, first)
+        self._play_queue(coordinator, uid, first, start)
 
     def _enqueue(self, coordinator: Any, add: Callable[[], Any]) -> int:
         """Run an enqueue call; tolerate a read timeout if items arrived.
@@ -533,7 +561,9 @@ class SocoBackend:
             if exc.upnp_code != UPNP_SERVICE_ERROR_2:
                 raise
 
-    def _play_queue(self, coordinator: Any, uid: str, first_track: int) -> None:
+    def _play_queue(
+        self, coordinator: Any, uid: str, first_track: int, start: StartAt | None = None
+    ) -> None:
         self._call(
             coordinator.avTransport.SetAVTransportURI,
             [
@@ -545,11 +575,60 @@ class SocoBackend:
         # Shuffle and repeat belong to the queue: reset them once the queue
         # is the active source (on a radio stream Sonos would refuse).
         self._normal_play_mode(coordinator)
+        first_track = max(first_track, 1)
+        track, seconds = first_track, 0
+        if start is not None:
+            track, seconds = self._resume_point(coordinator, first_track, start)
         self._call(
             coordinator.avTransport.Seek,
-            [_INSTANCE, ("Unit", "TRACK_NR"), ("Target", max(first_track, 1))],
+            [_INSTANCE, ("Unit", "TRACK_NR"), ("Target", track)],
         )
+        # Seeking within a track only works once the service has it loaded:
+        # try before Play, and else once more when it plays.
+        seek_later = seconds and not self._seek_time(coordinator, seconds)
         self._play(coordinator)
+        if seek_later and self._wait_until_playing(coordinator):
+            self._seek_time(coordinator, seconds)
+
+    def _resume_point(self, coordinator: Any, first_track: int, start: StartAt) -> tuple[int, int]:
+        """Where to resume: the saved track and second, if the queue still has
+        the same track there (streaming services change the query part)."""
+        track = first_track + start.track - 1
+        try:
+            uri, _ = self._queue_item_at(coordinator, track)
+        except SonosError as exc:
+            if exc.connection_problem:
+                raise
+            return first_track, 0
+        if uri is None or _without_query(uri) != _without_query(start.track_uri):
+            log.info("Resume: the album changed; starting from the beginning")
+            return first_track, 0
+        # A few seconds back, so the listener finds the thread again.
+        seconds = start.seconds - RESUME_REWIND if start.seconds >= RESUME_MIN_SECONDS else 0
+        return track, max(seconds, 0)
+
+    def _seek_time(self, coordinator: Any, seconds: int) -> bool:
+        target = f"{seconds // 3600}:{seconds // 60 % 60:02d}:{seconds % 60:02d}"
+        try:
+            self._call(
+                coordinator.avTransport.Seek,
+                [_INSTANCE, ("Unit", "REL_TIME"), ("Target", target)],
+            )
+        except SonosError as exc:
+            if exc.connection_problem:
+                raise
+            log.debug("Seek to %s refused (%s)", target, exc.code)
+            return False
+        return True
+
+    def _wait_until_playing(self, coordinator: Any) -> bool:
+        deadline = time.monotonic() + SEEK_WAIT
+        while time.monotonic() < deadline:
+            info = self._call(coordinator.avTransport.GetTransportInfo, [_INSTANCE])
+            if info.get("CurrentTransportState") == "PLAYING":
+                return True
+            time.sleep(0.3)
+        return False
 
     def _play(self, coordinator: Any) -> None:
         def play() -> None:
@@ -604,39 +683,56 @@ class SocoBackend:
         info = self._call(coordinator.avTransport.GetTransportInfo, [_INSTANCE])
         media = self._call(coordinator.avTransport.GetMediaInfo, [_INSTANCE])
         media_uri = media.get("CurrentURI") or ""
-        first_queue_uri = None
+        first_queue_uri = queue_length = None
         if media_uri.startswith("x-rincon-queue:"):
-            first_queue_uri = self._first_queue_uri(coordinator)
+            first_queue_uri, queue_length = self._queue_item_at(coordinator, 1)
         return Playback(
             state=_STATES.get(info.get("CurrentTransportState", ""), "unknown"),
             media_uri=media_uri,
             first_queue_uri=first_queue_uri,
             actions=frozenset(self._actions(coordinator)),
+            queue_length=queue_length,
+        )
+
+    def position(self) -> Position | None:
+        coordinator, _ = self._coordinator()
+        info = self._call(coordinator.avTransport.GetPositionInfo, [_INSTANCE])
+        track = _int_or_none(info.get("Track"))
+        seconds = _seconds(info.get("RelTime"))
+        if not track or seconds is None:
+            return None  # e.g. "NOT_IMPLEMENTED" for radio
+        return Position(
+            track=track,
+            seconds=seconds,
+            duration=_seconds(info.get("TrackDuration")),
+            track_uri=info.get("TrackURI") or "",
         )
 
     def _actions(self, coordinator: Any) -> set[str]:
         result = self._call(coordinator.avTransport.GetCurrentTransportActions, [_INSTANCE])
         return {action.split("_")[-1] for action in result.get("Actions", "").split(", ") if action}
 
-    def _first_queue_uri(self, coordinator: Any) -> str | None:
+    def _queue_item_at(self, coordinator: Any, track: int) -> tuple[str | None, int | None]:
+        """The URI of queue item ``track`` (1-based) and the queue's length."""
         result = self._call(
             coordinator.contentDirectory.Browse,
             [
                 ("ObjectID", "Q:0"),
                 ("BrowseFlag", "BrowseDirectChildren"),
                 ("Filter", "*"),
-                ("StartingIndex", 0),
+                ("StartingIndex", max(track - 1, 0)),
                 ("RequestedCount", 1),
                 ("SortCriteria", ""),
             ],
         )
+        length = _int_or_none(result.get("TotalMatches"))
         try:
             items = from_didl_string(result.get("Result", ""))
         except (SoCoException, ValueError, SyntaxError):
-            return None
+            return None, length
         if items and items[0].resources:
-            return items[0].resources[0].uri
-        return None
+            return items[0].resources[0].uri, length
+        return None, length
 
     # -- volume -----------------------------------------------------------
 
