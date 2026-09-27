@@ -196,6 +196,7 @@ MESSAGES: dict[str, str] = {
     "error.pin_invalid": (
         "Die PIN darf höchstens 64 Zeichen lang sein und keine Steuerzeichen enthalten."
     ),
+    "error.pin_changed": "Die PIN wurde gerade woanders geändert. Bitte neu anmelden.",
     "error.settings_save_failed": (
         "Die Einstellungen konnten nicht gespeichert werden. Ist der Datenordner beschreibbar?"
     ),

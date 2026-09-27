@@ -127,3 +127,11 @@ def test_watch_volume_reports_corrections():
     diag.cmd_watch_volume(fake, out, args, sleep=lambda s: None)
     assert "corrected to 25" in out.getvalue()
     assert fake.volume == 25
+
+
+def test_unusable_settings_are_explained(env, tmp_path):
+    (tmp_path / "settings.json").write_text('{"schema": 99}')
+    code, out = run(env, "--room", "Kinderzimmer", "status")
+    assert code == 0
+    assert "Note: the saved settings are not used" in out
+    assert "newer Muckebox" in out
