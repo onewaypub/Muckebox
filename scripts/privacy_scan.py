@@ -13,10 +13,15 @@ Checks, all with the rules in .gitleaks.toml:
    the operating system account).
 
 Exit code 0 means nothing was found.
+
+By default all refs are scanned (use this before publishing). CI passes
+``--range BASE..HEAD`` to check only the commits a push or pull request
+adds, so that history already public cannot keep every later run red.
 """
 
 from __future__ import annotations
 
+import argparse
 import os
 import re
 import shutil
@@ -59,9 +64,9 @@ def gitleaks(binary: str, *args: str, stdin: str | None = None, cwd: Path = ROOT
     return result.returncode == 0
 
 
-def scan_history(binary: str) -> bool:
-    print("• git history (all refs)")
-    return gitleaks(binary, "git", "--log-opts=--all", ".")
+def scan_history(binary: str, revs: str) -> bool:
+    print(f"• git history ({revs})")
+    return gitleaks(binary, "git", f"--log-opts={revs}", ".")
 
 
 def scan_working_tree(binary: str) -> bool:
@@ -79,9 +84,9 @@ def scan_working_tree(binary: str) -> bool:
         return gitleaks(binary, "dir", ".", cwd=snapshot)
 
 
-def scan_commit_messages(binary: str) -> bool:
+def scan_commit_messages(binary: str, revs: str) -> bool:
     print("• commit messages")
-    return gitleaks(binary, "stdin", stdin=git("log", "--all", "--format=%B"))
+    return gitleaks(binary, "stdin", stdin=git("log", revs, "--format=%B"))
 
 
 def identity_problem(name: str, email: str) -> str | None:
@@ -99,9 +104,9 @@ def identity_problem(name: str, email: str) -> str | None:
     return None
 
 
-def check_commit_identities() -> bool:
+def check_commit_identities(revs: str) -> bool:
     print("• commit author and committer names and emails")
-    log = git("log", "--all", "--format=%an%x00%ae%n%cn%x00%ce")
+    log = git("log", revs, "--format=%an%x00%ae%n%cn%x00%ce")
     pairs = {tuple(line.split("\0", 1)) for line in log.splitlines() if "\0" in line}
     # Never print the identity itself; it may be the private data.
     problems = sorted({p for name, email in pairs if (p := identity_problem(name, email))})
@@ -110,14 +115,22 @@ def check_commit_identities() -> bool:
     return not problems
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--range",
+        dest="revs",
+        default="--all",
+        help="commits to check, e.g. origin/main..HEAD (default: all refs)",
+    )
+    args = parser.parse_args(argv)
     os.chdir(ROOT)
     binary = find_gitleaks()
     results = [
-        scan_history(binary),
+        scan_history(binary, args.revs),
         scan_working_tree(binary),
-        scan_commit_messages(binary),
-        check_commit_identities(),
+        scan_commit_messages(binary, args.revs),
+        check_commit_identities(args.revs),
     ]
     if all(results):
         print("Privacy scan: no findings.")
