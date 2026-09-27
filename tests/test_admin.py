@@ -845,3 +845,38 @@ def test_tiles_show_and_change_resume(admin, services, fake_sonos):
         == 400
     )
     assert admin.delete("/api/admin/tiles/t-missing/position", headers=POST).status_code == 404
+
+
+# -- games -------------------------------------------------------------------------------
+
+
+def test_parents_enable_games_and_kids_start_them(admin, client, services):
+    tile = add_favorite(admin, 1).get_json()["tile"]
+    body = {
+        "daily_minutes": 20,
+        "dance_tile": tile["id"],
+        "items": {"sound_quiz": {"enabled": True, "level": 1}},
+    }
+    response = admin.put("/api/admin/settings/games", json=body, headers=POST)
+    assert response.get_json()["settings"]["games"]["items"]["sound_quiz"] == {
+        "enabled": True,
+        "level": 1,
+    }
+    started = client.post("/api/games/sound_quiz/start", headers=POST).get_json()["game"]
+    assert (started["id"], started["level"], started["seconds"]) == ("sound_quiz", 1, 180)
+    assert client.post("/api/games/end", headers=POST).get_json()["games"]["active"] is None
+    status = admin.get("/api/admin/status").get_json()["games"]
+    assert status["daily_seconds"] == 1200
+
+
+def test_game_errors(admin, client):
+    assert client.post("/api/games/chess/start", headers=POST).status_code == 404
+    response = client.post("/api/games/sound_quiz/start", headers=POST)
+    assert error_code(response) == (409, "game_unavailable")
+    response = client.post("/api/games/freeze_dance/mute", json={"muted": "yes"}, headers=POST)
+    assert response.status_code == 400
+    response = client.post("/api/games/freeze_dance/mute", json={"muted": True}, headers=POST)
+    assert error_code(response) == (409, "game_unavailable")
+    unknown_tile = {"dance_tile": "t0000000000000000"[:16]}
+    response = admin.put("/api/admin/settings/games", json=unknown_tile, headers=POST)
+    assert error_code(response) == (422, "games_invalid")

@@ -411,7 +411,7 @@ def test_new_sections_have_defaults_and_round_trip(tmp_path):
     st.set_sleep_timer({"enabled": True, "minutes": 45, "wake": "06:30"})
     games = {
         "daily_minutes": 20,
-        "dance_tile": "t0123456789abcde",
+        "dance_tile": "t0123456789abcdef",
         "items": {"sound_quiz": {"enabled": True, "level": 1}},
     }
     st.set_games(games)
@@ -425,7 +425,7 @@ def test_new_sections_have_defaults_and_round_trip(tmp_path):
     stored = games_to_json(reread.games)
     assert stored["items"]["sound_quiz"] == {"enabled": True, "level": 1}
     assert stored["items"]["freeze_dance"] == {"enabled": False, "level": 2}
-    assert reread.games.dance_tile == "t0123456789abcde"
+    assert reread.games.dance_tile == "t0123456789abcdef"
 
 
 def test_a_file_without_the_new_sections_still_loads(tmp_path):

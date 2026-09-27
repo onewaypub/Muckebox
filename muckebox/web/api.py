@@ -11,6 +11,7 @@ from flask import Blueprint, abort, current_app, jsonify, request, send_file
 
 from muckebox import __version__
 from muckebox.library import TileNotFound
+from muckebox.runtime.games import UnknownGame
 from muckebox.runtime.service import Busy, Unavailable
 
 from . import auth
@@ -135,3 +136,44 @@ def start_sleep_timer():
     runtime = _services().runtime
     runtime.keeper.start_sleep_timer()  # Refused -> 409 sleep_timer_off / bedtime
     return jsonify(ok=True, sleep_timer=runtime.keeper.document()["sleep_timer"])
+
+
+@bp.post("/api/games/<game_id>/start")
+def start_game(game_id: str):
+    runtime = _services().runtime
+    try:
+        game = runtime.start_game(game_id)
+    except UnknownGame as exc:
+        raise ApiError(404, "not_found") from exc
+    except Busy as exc:
+        raise ApiError(409, "busy") from exc
+    except Unavailable as exc:
+        raise ApiError(503, exc.code, exc.retry_in) from exc
+    return jsonify(
+        ok=True,
+        game={
+            "id": game.id,
+            "level": game.level,
+            "seconds": int(game.granted),
+            "ends_at": int(game.ends_at),
+        },
+    )
+
+
+@bp.post("/api/games/end")
+def end_game():
+    runtime = _services().runtime
+    runtime.end_game()
+    return jsonify(ok=True, games=runtime.games.document())
+
+
+@bp.post("/api/games/freeze_dance/mute")
+def freeze_dance_mute():
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict) or not isinstance(body.get("muted"), bool):
+        raise ApiError(400, "bad_request")
+    try:
+        _services().runtime.game_mute(body["muted"])
+    except Unavailable as exc:
+        raise ApiError(503, exc.code, exc.retry_in) from exc
+    return jsonify(ok=True), 202

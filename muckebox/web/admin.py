@@ -196,6 +196,20 @@ def set_schedule():
     return _settings_response()
 
 
+@bp.put("/settings/games")
+@auth.require_admin
+def set_games():
+    body = _body()
+    tile = body.get("dance_tile")
+    if tile is not None:
+        try:
+            _services().library.get(tile) if isinstance(tile, str) else None
+        except TileNotFound as exc:
+            raise ApiError(422, "games_invalid") from exc
+    _settings_call(_services().store.set_games, body)
+    return _settings_response()
+
+
 @bp.put("/settings/sleep-timer")
 @auth.require_admin
 def set_sleep_timer():

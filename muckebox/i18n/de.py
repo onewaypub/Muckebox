@@ -117,6 +117,35 @@ MESSAGES: dict[str, str] = {
     ),
     "admin.sleep_running": "Läuft bis {time}.",
     "admin.sleep_cancel": "Timer beenden",
+    "admin.games": "Spiele",
+    "admin.games_status": "Heute gespielt: {used} von {limit} Minuten.",
+    "admin.games_minutes": "Spielzeit pro Tag für alle Spiele (Minuten)",
+    "admin.dance_tile": "Musik für den Stopptanz",
+    "admin.dance_current": "– die Musik, die gerade läuft –",
+    "admin.games_hint": (
+        "Jedes Spiel ist erst nach dem Einschalten für die Kinder sichtbar. Runden sind kurz "
+        "und enden ruhig, ohne Punkte. Die Atemübung zählt nicht zur Spielzeit und geht auch "
+        "zur Schlafenszeit."
+    ),
+    "admin.game_level": "Schwierigkeit",
+    "admin.level_1": "klein (2–3 Jahre)",
+    "admin.level_2": "mittel (4–5 Jahre)",
+    "admin.level_3": "groß (ab 6 Jahren)",
+    "admin.game_about_freeze_dance": (
+        "Musik läuft auf dem Sonos und stoppt immer wieder: alle erstarren. Der Bildschirm "
+        "zeigt nur eine ruhige Farbe."
+    ),
+    "admin.game_about_sound_quiz": (
+        "Das Tablet spielt ein Geräusch, und das Kind tippt auf das passende Bild."
+    ),
+    "admin.game_about_move_like": (
+        "„Beweg dich wie ein Elefant!“: Bild, Stimme und Geräusch, das Kind bewegt sich dazu."
+    ),
+    "admin.game_about_breathing": "Ruhige Atemübung zum Einschlafen; der Bildschirm wird dunkel.",
+    "game.freeze_dance": "Stopptanz",
+    "game.sound_quiz": "Geräusche-Rätsel",
+    "game.move_like": "Beweg dich wie …",
+    "game.breathing": "Atemübung",
     "admin.pin_change": "PIN ändern",
     "admin.pin_current": "Aktuelle PIN",
     "admin.pin_new": "Neue PIN",
@@ -263,6 +292,12 @@ MESSAGES: dict[str, str] = {
         "Die PIN darf höchstens 64 Zeichen lang sein und keine Steuerzeichen enthalten."
     ),
     "error.bedtime": "Jetzt ist Schlafenszeit.",
+    "error.game_unavailable": "Dieses Spiel geht gerade nicht.",
+    "error.game_running": "Es läuft schon ein Spiel.",
+    "error.games_limit_reached": "Die Spielzeit für heute ist vorbei.",
+    "error.dance_music_missing": (
+        "Für den Stopptanz fehlt die Musik: Eltern wählen sie auf der Eltern-Seite."
+    ),
     "error.schedule_off": "Es sind keine Nutzungszeiten eingestellt.",
     "error.sleep_timer_off": "Der Einschlaf-Timer ist ausgeschaltet.",
     "error.schedule_invalid": "Die Nutzungszeiten sind ungültig.",

@@ -43,6 +43,9 @@ changes increase the `api` number reported by `/api/state`.
 | `POST /api/transport/play`, `…/pause`, `…/toggle`, `…/next`, `…/previous` | Transport control on the group coordinator. `play` and `pause` do nothing if the speaker is already in that state. | `200 {"ok": true, "playback": {…}}`, `409 busy`, `503 <code>` |
 | `POST /api/volume/up`, `POST /api/volume/down` | Change the volume of the kids room by the step set on the parents' page, clamped to `0…limit`. One change at a time. | `200 {"ok": true, "volume": {…}}`, `409 busy`, `503 volume_unknown` (the volume could not be read or set) or `503 <code>` |
 | `GET /covers/<hash>.jpg` | Cover image (600×600 JPEG, immutable). | `200`, `404` |
+| `POST /api/games/<id>/start` (`freeze_dance`, `sound_quiz`, `move_like`, `breathing`) | Start a game. The server grants a round: at most what is left of the day's game time and never into the bedtime fade. The freeze dance starts its dance music; the quiz and "move like" pause the speaker (their sounds come from the tablet). The breathing exercise is not counted. | `200 {"ok": true, "game": {"id", "level", "seconds", "ends_at"}}`, `404`, `409 game_unavailable` / `game_running` / `games_limit_reached` / `bedtime` / `dance_music_missing` / `busy`, `503 <code>` |
+| `POST /api/games/end` | End the running game; unused time is given back. The freeze dance unmutes and pauses its music. | `200 {"ok": true, "games": {…}}` |
+| `POST /api/games/freeze_dance/mute` `{"muted": true}` | Freeze (mute the kids room's own speaker) or dance on. A mute lasts 12 s unless renewed; the server also unmutes when the game ends, at bedtime or on a room change. | `202`, `400`, `409 game_unavailable` |
 | `POST /api/sleep-timer/start` | The kids start the sleep timer (the moon button). Starting it again while it runs changes nothing. | `200 {"ok": true, "sleep_timer": {…}}`, `409 sleep_timer_off` / `bedtime` |
 | `POST /api/override` `{"pin": "…", "minutes": 15\|30\|60}` or `{"pin": "…", "until": "morning"}` | Parents allow more time from the kids tablet: 15/30/60 minutes from now (or from the end of an override that is still running), or until the next window starts. Also ends the kids' sleep lock. Creates no session. Failed PINs are counted separately from the parents' page (5 per client, 20 in total, 15 minutes). | `200 {"ok": true, "schedule": {…}}`, `400`, `401 pin_wrong`, `409 schedule_off` (no usage times and no sleep lock), `429 pin_rate_limited` |
 
@@ -75,7 +78,9 @@ code such as `service_unavailable`.
   "last_error": null,
   "schedule": {"phase": "open", "ends_at": 1790013600, "opens_at": null,
                "fade_from": 1790013000, "override_until": null},
-  "sleep_timer": {"enabled": false, "minutes": 30, "ends_at": null}
+  "sleep_timer": {"enabled": false, "minutes": 30, "ends_at": null},
+  "games": {"remaining": 900, "active": null,
+            "items": [{"id": "sound_quiz", "level": 2, "available": true}]}
 }
 ```
 
@@ -94,6 +99,8 @@ code such as `service_unavailable`.
   Unix seconds. While closed, only pause and quieter are allowed; other
   commands get `409 bedtime`. `override_until` is set while the parents
   allow extra time.
+- `games.items` lists the games the parents enabled, with their level and
+  whether they can start now; `remaining` is today's game time in seconds.
 - `sleep_timer.ends_at` is set while the kids' sleep timer runs. When it ends,
   the music fades and pauses, and `schedule.phase` stays `closed` until the
   next morning.
@@ -123,6 +130,7 @@ require a same-origin `Origin` header when the browser sends one
 | `POST /api/admin/pin` `{"current": "…", "new": "…"}` | Change the PIN. Ends all other sessions; this one stays logged in. `403 pin_wrong` (counted like a failed login), `429 pin_rate_limited`, `422 pin_too_short` / `pin_placeholder` / `pin_invalid`, `409 pin_changed` (the PIN was changed elsewhere, e.g. with `reset-pin`, while this request ran). Answers like `GET /api/admin/settings`. |
 | `GET /api/admin/settings` | `{"ok": true, "settings": {"room": "Kids room" \| null, "seed_ip": "192.0.2.10" \| null, "max_volume": 25, "volume_step": 3, "pin_generated": false, "time_zone": null, "schedule": {…}, "sleep_timer": {…}, "games": {…}}, "sonos": {…}}`. Never contains PIN data. `pin_generated` is true while the PIN is still the one Muckebox created and printed in its log. |
 | `PUT /api/admin/settings/schedule` `{"enabled": true, "fade_minutes": 10, "days": {"mon": {"from": "07:00", "to": "19:00"}, "tue": null, …}}` | Usage times: one window per weekday (`to` after `from` on the same day, `"24:00"` = midnight; `null` = no limit that day), fade 0–30 minutes. `422 schedule_invalid` / `schedule_order_invalid`. |
+| `PUT /api/admin/settings/games` `{"daily_minutes": 15, "dance_tile": "t…" \| null, "items": {"sound_quiz": {"enabled": true, "level": 2}, …}}` | Games: each off by default, level 1 (2–3 years), 2 (4–5) or 3 (6+), one daily limit for all counted games (5–60 minutes), the tile that plays the freeze-dance music (null: whatever plays). `422 games_invalid`. The status adds `games {used_today, daily_seconds}`. |
 | `PUT /api/admin/settings/sleep-timer` `{"enabled": true, "minutes": 30, "wake": "07:00"}` | The kids' sleep timer: shown as a moon button when enabled; 5–90 minutes; afterwards the tiles stay locked until the next window, or until `wake` on days without one. `422 sleep_timer_invalid`. |
 | `DELETE /api/admin/sleep-timer` | End a running sleep timer before it runs out. Answers with `schedule` and `sleep_timer`. |
 | `POST /api/admin/override` `{"minutes": 15\|30\|60}` or `{"until": "morning"}`, `DELETE /api/admin/override` | Allow more time now, or end the override (the music fades and pauses again). `{"ok": true, "schedule": {…}}`; `409 schedule_off`. |

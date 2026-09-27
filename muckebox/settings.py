@@ -64,7 +64,7 @@ DEFAULT_SLEEP_MINUTES = 30
 SLEEP_MINUTES = (5, 90)
 DEFAULT_GAME_MINUTES = 15
 GAME_MINUTES = (5, 60)
-_TILE_ID_RE = re.compile(r"^t[0-9a-f]{15}$")
+_TILE_ID_RE = re.compile(r"^t[0-9a-f]{8,32}$")
 
 # RFC 1123 host name: dot-separated labels of letters, digits and hyphens.
 _HOSTNAME_RE = re.compile(
