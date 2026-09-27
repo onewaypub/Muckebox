@@ -22,7 +22,7 @@ export function overlayKind(serverFailures, state) {
   if (serverFailures >= 2) return "offline";
   if (!state) return null;
   const status = state.sonos && state.sonos.status;
-  if (status === "config_error") return "config";
+  if (status === "not_configured") return "config";
   if (SLEEPING.has(status)) return "sleeping";
   return null;
 }

@@ -1,27 +1,21 @@
 # SPDX-FileCopyrightText: 2026 Muckebox contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
+import json
 import threading
 import time
 
 import pytest
 
-from muckebox.config import load_settings
 from muckebox.library import Library, favorite_source, sharelink_source
 from muckebox.runtime.breaker import CircuitBreaker
 from muckebox.runtime.clock import FakeClock
 from muckebox.runtime.lanes import InlineLane, Lane
 from muckebox.runtime.service import Busy, Runtime, Unavailable
 from muckebox.runtime.volume_guard import VolumeGuard
+from muckebox.settings import SettingsError
 from muckebox.sonos.errors import ServiceUnavailable, SonosUnreachable
-from muckebox.sonos.fake import FakeSonos
 from muckebox.sonos.model import Route, ShareLinkRef
-
-
-def settings(tmp_path, **env):
-    return load_settings(
-        {"SONOS_IP": "192.0.2.10", "DATA_DIR": str(tmp_path), "MAX_VOLUME": "25", **env}
-    )
 
 
 @pytest.fixture
@@ -30,8 +24,8 @@ def clock():
 
 
 @pytest.fixture
-def fake():
-    return FakeSonos()
+def fake(fake_sonos):
+    return fake_sonos
 
 
 @pytest.fixture
@@ -47,19 +41,32 @@ def add_favorite(library, fake, index):
     )
 
 
-def make_runtime(tmp_path, fake, library, clock, **env):
-    return Runtime(
-        settings(tmp_path, **env),
-        fake,
-        library,
-        clock=clock,
-        lane_factory=lambda name, idle, interval: InlineLane(name),
-    )
+@pytest.fixture
+def make_runtime(tmp_path, household, library, clock, make_store):
+    """A runtime for ``room`` (None: not set up yet); inline lanes unless ``threaded``."""
+
+    def make(room="Kinderzimmer", *, threaded=False):
+        options = {}
+        if not threaded:
+            options = {
+                "clock": clock,
+                "lane_factory": lambda name, idle, interval: InlineLane(name),
+            }
+        return Runtime(
+            make_store(room),
+            library,
+            tmp_path,
+            backend_factory=household.backend,
+            room_finder=household.find_rooms,
+            **options,
+        )
+
+    return make
 
 
 @pytest.fixture
-def runtime(tmp_path, fake, library, clock):
-    rt = make_runtime(tmp_path, fake, library, clock)
+def runtime(make_runtime):
+    rt = make_runtime()
     rt.poll_transport()
     return rt
 
@@ -219,14 +226,29 @@ def test_reading_state_never_calls_the_speaker(runtime, fake):
     assert fake.calls == []
 
 
-def test_config_error_disables_control(tmp_path, fake, library, clock):
-    rt = make_runtime(tmp_path, fake, library, clock, SONOS_IP="", SONOS_ROOM="")
-    assert rt.state_document()["sonos"]["status"] == "config_error"
-    rt.start()  # does not start the lanes
+def test_without_a_room_nothing_is_controlled(make_runtime, household, library, fake):
+    rt = make_runtime(room=None)
+    assert rt.state_document()["sonos"] == {"status": "not_configured", "room": None}
+    assert not rt.configured
+    rt.start()
+    rt.poll_transport()
+    rt.poll_volume()
+    assert fake.calls == []
     tile = add_favorite(library, fake, 0)
-    with pytest.raises(Unavailable) as info:
-        rt.play_tile(tile.id)
-    assert info.value.code == "config_error"
+    for call in (
+        lambda: rt.play_tile(tile.id),
+        lambda: rt.transport("toggle"),
+        lambda: rt.change_volume("up"),
+        rt.favorites,
+        lambda: rt.fetch_art("fake-art:1"),
+    ):
+        with pytest.raises(Unavailable) as info:
+            call()
+        assert info.value.code == "not_configured"
+    assert rt.cached_favorites() is None
+    status = rt.status()
+    assert status["config_problems"] == ["not_configured", "pin_generated"]
+    assert status["breaker"] == {"transport_retry_in": None, "volume_retry_in": None}
 
 
 # -- runtime: playing tiles -------------------------------------------------------------
@@ -288,10 +310,10 @@ def test_other_content_clears_the_highlight(runtime, fake, library):
     assert runtime.state_document()["playback"]["tile_id"] is None  # stays forgotten
 
 
-def test_highlight_survives_a_restart(tmp_path, fake, library, clock, runtime):
+def test_highlight_survives_a_restart(fake, library, runtime, make_runtime):
     tile = add_favorite(library, fake, 0)
     runtime.play_tile(tile.id)
-    restarted = make_runtime(tmp_path, fake, library, clock)
+    restarted = make_runtime()
     restarted.poll_transport()
     assert restarted.state_document()["playback"]["tile_id"] == tile.id
 
@@ -381,9 +403,9 @@ def test_favorites_are_cached(runtime, fake, clock):
     assert ("list_favorites",) in fake.calls
 
 
-def test_fixed_volume_is_detected_on_first_contact(tmp_path, library, clock):
-    fake = FakeSonos(fixed=True)
-    rt = make_runtime(tmp_path, fake, library, clock)
+def test_fixed_volume_is_detected_on_first_contact(fake, make_runtime):
+    fake.fixed = True
+    rt = make_runtime()
     rt.poll_transport()
     assert rt.status()["volume_guard"]["fixed_volume"] is True
 
@@ -391,17 +413,12 @@ def test_fixed_volume_is_detected_on_first_contact(tmp_path, library, clock):
 # -- runtime with real threads ---------------------------------------------------------
 
 
-def threaded_runtime(tmp_path, fake, library):
-    return Runtime(settings(tmp_path), fake, library)
-
-
-def test_rapid_taps_start_only_once(tmp_path, library):
+def test_rapid_taps_start_only_once(fake, library, make_runtime):
     release = threading.Event()
-    fake = FakeSonos()
     fake.on_call = lambda name: name == "play_favorite" and release.wait(5)
     tile = add_favorite(library, fake, 0)
     other = add_favorite(library, fake, 1)
-    rt = threaded_runtime(tmp_path, fake, library)
+    rt = make_runtime(threaded=True)
     rt.start()
     try:
         assert rt.play_tile(tile.id) == "accepted"
@@ -422,12 +439,11 @@ def test_rapid_taps_start_only_once(tmp_path, library):
         rt.stop()
 
 
-def test_guard_works_while_a_start_is_stuck(tmp_path, library):
+def test_guard_works_while_a_start_is_stuck(fake, library, make_runtime):
     release = threading.Event()
-    fake = FakeSonos()
     fake.on_call = lambda name: name == "play_favorite" and release.wait(10)
     tile = add_favorite(library, fake, 0)
-    rt = threaded_runtime(tmp_path, fake, library)
+    rt = make_runtime(threaded=True)
     rt.start()
     try:
         rt.play_tile(tile.id)
@@ -480,8 +496,8 @@ def test_double_tap_on_pause_does_not_resume(runtime, fake, library):
     assert runtime.transport("play")["state"] == "playing"
 
 
-def test_limit_shown_to_the_kids_follows_max_volume(runtime, monkeypatch):
-    monkeypatch.setattr(runtime, "max_volume", lambda: 12)
+def test_limit_shown_to_the_kids_follows_max_volume(runtime):
+    runtime.store.set_volume(12, 3)
     assert runtime.state_document()["volume"]["max"] == 12
     assert runtime.status()["volume_guard"]["max"] == 12
 
@@ -495,11 +511,11 @@ def test_unreachable_speaker_makes_the_volume_unknown(runtime, fake):
     assert runtime.state_document()["volume"]["value"] is None
 
 
-def test_volume_taps_do_not_pile_up(tmp_path, library):
+def test_volume_taps_do_not_pile_up(fake, make_runtime):
     release = threading.Event()
-    fake = FakeSonos(volume=4)
+    fake.volume = 4
     fake.on_call = lambda name: name == "get_volume" and release.wait(5)
-    rt = threaded_runtime(tmp_path, fake, library)
+    rt = make_runtime(threaded=True)
     rt.volume_lane.start()
     try:
         results = []
@@ -532,7 +548,7 @@ def test_volume_taps_do_not_pile_up(tmp_path, library):
         rt.volume_lane.stop()
 
 
-def test_stop_waits_at_most_the_timeout_for_busy_lanes(tmp_path, library):
+def test_stop_waits_at_most_the_timeout_for_busy_lanes(fake, make_runtime):
     """Both lanes stuck on the network: the deadline is shared, not per lane."""
     release = threading.Event()
     busy = {"resolve": threading.Event(), "get_volume": threading.Event()}
@@ -542,9 +558,8 @@ def test_stop_waits_at_most_the_timeout_for_busy_lanes(tmp_path, library):
             busy[name].set()
             release.wait(10)
 
-    fake = FakeSonos()
     fake.on_call = on_call
-    rt = threaded_runtime(tmp_path, fake, library)
+    rt = make_runtime(threaded=True)
     rt.start()
     try:
         assert all(event.wait(2) for event in busy.values())
@@ -553,3 +568,202 @@ def test_stop_waits_at_most_the_timeout_for_busy_lanes(tmp_path, library):
         assert time.monotonic() - started < 0.9
     finally:
         release.set()
+
+
+# -- choosing the room -------------------------------------------------------------------
+
+
+def wait_until(condition, timeout=5.0):
+    deadline = time.monotonic() + timeout
+    while not condition():
+        assert time.monotonic() < deadline, "timed out"
+        time.sleep(0.01)
+
+
+def test_room_search_is_cached_briefly(make_runtime, household, clock):
+    rt = make_runtime(room=None)
+    rooms = rt.search_rooms(None)
+    assert [r.name for r in rooms] == ["Kinderzimmer", "Wohnzimmer"]
+    assert rt.search_rooms(None) == rooms
+    assert rt.search_rooms(None, refresh=True) == rooms  # "search again" right away: cached
+    assert household.searches == [None]
+    clock.advance(5)
+    rt.search_rooms(None, refresh=True)
+    assert household.searches == [None, None]
+    clock.advance(15)
+    rt.search_rooms(None)
+    rt.search_rooms("192.0.2.10")  # another seed is another search
+    assert household.searches == [None, None, None, "192.0.2.10"]
+
+
+def test_room_search_failure(make_runtime, household):
+    household.reachable = False
+    with pytest.raises(Unavailable) as info:
+        make_runtime(room=None).search_rooms(None)
+    assert info.value.code == "sonos_unreachable"
+
+
+def test_choosing_a_room_tests_saves_and_starts_control(make_runtime, household, library):
+    rt = make_runtime(room=None)
+    rt.search_rooms(None)
+    info = rt.choose_room(" Wohnzimmer ", " 192.0.2.11 ")
+    assert info.name == "Wohnzimmer"
+    stored = rt.store.current()
+    assert (stored.room, stored.room_uid, stored.seed_ip) == (
+        "Wohnzimmer",
+        household.uid("Wohnzimmer"),
+        "192.0.2.11",
+    )
+    assert rt.state_document()["sonos"] == {"status": "ok", "room": "Wohnzimmer", "grouped": False}
+    living = household.speaker("Wohnzimmer")
+    tile = add_favorite(library, living, 0)
+    assert rt.play_tile(tile.id) == "accepted"
+    assert [c[0] for c in living.calls].count("play_favorite") == 1
+    assert not household.speaker("Kinderzimmer").calls
+
+
+@pytest.mark.parametrize(("room", "seed_ip"), [("", None), ("x" * 101, None), ("A", "no url")])
+def test_invalid_room_choice_changes_nothing(make_runtime, household, room, seed_ip):
+    rt = make_runtime(room=None)
+    with pytest.raises(SettingsError):
+        rt.choose_room(room, seed_ip)
+    assert not rt.store.current().configured
+    assert not household.speakers
+
+
+def test_unknown_or_unreachable_room_is_not_saved(runtime, household):
+    with pytest.raises(Unavailable) as info:
+        runtime.choose_room("Keller", None)
+    assert info.value.code == "room_not_found"
+    household.speaker("Wohnzimmer").reachable = False
+    with pytest.raises(Unavailable) as info:
+        runtime.choose_room("Wohnzimmer", None)
+    assert info.value.code == "sonos_unreachable"
+    assert runtime.store.current().room == "Kinderzimmer"
+    assert runtime.state_document()["sonos"]["room"] == "Kinderzimmer"
+
+
+def test_another_room_starts_fresh(runtime, fake, household, library, clock):
+    tile = add_favorite(library, fake, 0)
+    runtime.play_tile(tile.id)
+    fake.reachable = False
+    runtime.poll_transport()  # the old room's breaker opens
+    runtime.choose_room("Wohnzimmer", None)
+    doc = runtime.state_document()
+    assert doc["sonos"]["status"] == "ok"
+    assert doc["playback"]["tile_id"] is None
+    assert not (runtime.data_dir / "state.json").exists()
+    assert runtime.play_tile(tile.id) == "accepted"  # no breaker carried over
+
+
+def test_same_room_with_a_new_seed_keeps_the_highlight(runtime, fake, library):
+    tile = add_favorite(library, fake, 0)
+    runtime.play_tile(tile.id)
+    runtime.choose_room("Kinderzimmer", "192.0.2.10")
+    runtime.poll_transport()
+    assert runtime.state_document()["playback"]["tile_id"] == tile.id
+
+
+def test_highlight_file_belongs_to_its_room(runtime, fake, library, make_runtime, household):
+    tile = add_favorite(library, fake, 0)
+    runtime.play_tile(tile.id)
+    data = json.loads((runtime.data_dir / "state.json").read_text())
+    assert data["room_uid"] == household.uid("Kinderzimmer")
+    assert data["now_playing"]["tile_id"] == tile.id
+    # Another Muckebox setup with the same data folder but another room.
+    other = make_runtime(room="Wohnzimmer")
+    other.poll_transport()
+    assert other.state_document()["playback"]["tile_id"] is None
+
+
+def test_the_limit_applies_to_the_new_room_at_once(runtime, household):
+    living = household.speaker("Wohnzimmer")
+    living.volume = 70
+    runtime.choose_room("Wohnzimmer", None)
+    runtime.poll_volume()
+    assert living.volume == 25
+
+
+def test_new_limit_and_step_apply_at_once(runtime, fake):
+    fake.volume = 20
+    runtime.store.set_volume(15, 5)
+    runtime.poll_volume()
+    assert fake.volume == 15
+    assert runtime.change_volume("down")["value"] == 10
+
+
+def test_renamed_room_is_remembered(runtime, fake, household, clock):
+    household.rooms[0] = fake.room_name = "Kinderzimmer oben"  # renamed in the Sonos app
+    clock.advance(61)
+    runtime.poll_transport()
+    assert runtime.store.current().room == "Kinderzimmer oben"
+    assert runtime.state_document()["sonos"]["room"] == "Kinderzimmer oben"
+
+
+def test_rename_that_cannot_be_saved_is_only_logged(runtime, fake, household, clock, caplog):
+    household.rooms[0] = fake.room_name = "x" * 101  # longer than a stored room name may be
+    clock.advance(61)
+    runtime.poll_transport()
+    assert runtime.state_document()["sonos"]["status"] == "ok"
+    assert "Could not save the new room name" in caplog.text
+
+
+def test_fixed_volume_of_a_chosen_room_is_reported(runtime, household):
+    household.speaker("Wohnzimmer").fixed = True
+    runtime.choose_room("Wohnzimmer", None)
+    assert runtime.status()["volume_guard"]["fixed_volume"] is True
+
+
+def test_room_switch_while_a_start_is_stuck(fake, household, library, make_runtime):
+    """The parents switch rooms while the old room hangs in a start."""
+    release, starting = threading.Event(), threading.Event()
+
+    def on_call(name):
+        if name == "play_favorite":
+            starting.set()
+            release.wait(10)
+
+    fake.on_call = on_call
+    living = household.speaker("Wohnzimmer")
+    living.volume = 20  # below the limit: nothing may raise or lower it
+    tile = add_favorite(library, fake, 0)
+    rt = make_runtime(threaded=True)
+    rt.start()
+    try:
+        assert rt.play_tile(tile.id) == "accepted"
+        assert starting.wait(5)
+        rt.choose_room("Wohnzimmer", None)  # runs on the setup lane: not blocked
+        assert rt.state_document()["sonos"]["room"] == "Wohnzimmer"
+        release.set()
+        wait_until(lambda: rt.state_document()["pending"] is None)
+        wait_until(lambda: any(c[0] == "get_volume" for c in living.calls))
+        doc = rt.state_document()
+        assert doc["sonos"] == {"status": "ok", "room": "Wohnzimmer", "grouped": False}
+        assert doc["playback"]["tile_id"] is None  # the old room's start is not shown
+        assert not (rt.data_dir / "state.json").exists()
+        assert living.volume == 20
+        assert not [c for c in living.calls if c[0] == "set_volume"]
+    finally:
+        release.set()
+        rt.stop()
+
+
+def test_only_one_room_search_at_a_time(household, make_runtime):
+    release = threading.Event()
+    household.on_search = lambda seed: release.wait(10)
+    rt = make_runtime(room=None, threaded=True)
+    rt.start()
+    try:
+        first = threading.Thread(target=rt.search_rooms, args=(None,))
+        first.start()
+        wait_until(lambda: rt.setup_lane.busy)
+        with pytest.raises(Busy):
+            rt.search_rooms("192.0.2.10")
+        with pytest.raises(Busy):
+            rt.choose_room("Kinderzimmer", None)
+        release.set()
+        first.join(5)
+        assert household.searches == [None]
+    finally:
+        release.set()
+        rt.stop()

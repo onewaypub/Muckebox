@@ -28,7 +28,8 @@ from muckebox.config import (
 )
 from muckebox.covers import CoverStore
 from muckebox.library import Library
-from muckebox.runtime.service import Runtime
+from muckebox.runtime.service import BackendFactory, RoomFinder, Runtime
+from muckebox.settings import SettingsFileError, SettingsStore
 from muckebox.sonos.backend import SonosBackend
 from muckebox.web import create_app
 from muckebox.web.app import Services
@@ -71,7 +72,11 @@ def main(
         level = logging.ERROR if problem.severity == "error" else logging.WARNING
         log.log(level, "Configuration: %s", problem.detail)
 
-    services = build_services(settings, fake_sonos=environ.get("MUCKEBOX_FAKE_SONOS") == "1")
+    try:
+        services = build_services(settings, fake_sonos=environ.get("MUCKEBOX_FAKE_SONOS") == "1")
+    except SettingsFileError as exc:
+        log.error("%s", exc)
+        return EXIT_CONFIG
     app = create_app(services)
     services.runtime.start()
     reach = {LISTEN_ALL: "the whole network", LISTEN_LOCALHOST: "this computer only"}
@@ -107,27 +112,38 @@ def main(
 
 
 def build_services(settings: Settings, *, fake_sonos: bool = False) -> Services:
-    backend: SonosBackend
-    if not settings.sonos_config_ok and not fake_sonos:
-        from muckebox.sonos.backend import UnconfiguredBackend
+    """Wire the application together (raises SettingsFileError)."""
+    store = SettingsStore(settings.data_dir)
+    backend_factory: BackendFactory
+    room_finder: RoomFinder
+    if fake_sonos:
+        from muckebox.sonos.fake import FakeHousehold
 
-        backend = UnconfiguredBackend()  # type: ignore[assignment]
-    elif fake_sonos:
-        from muckebox.sonos.fake import FakeSonos
-
-        log.warning("MUCKEBOX_FAKE_SONOS=1: using a simulated speaker (demo mode)")
-        backend = FakeSonos()
+        log.warning("MUCKEBOX_FAKE_SONOS=1: using simulated speakers (demo mode)")
+        household = FakeHousehold()
+        backend_factory, room_finder = household.backend, household.find_rooms
     else:
-        from muckebox.sonos.soco_backend import SocoBackend, configure_soco
+        from muckebox.sonos.soco_backend import SocoBackend, configure_soco, find_rooms
 
         configure_soco()
-        backend = SocoBackend(room=settings.sonos_room, seed_ip=settings.sonos_ip)
+
+        def backend_factory(room: str, room_uid: str | None, seed_ip: str | None) -> SonosBackend:
+            return SocoBackend(room=room, room_uid=room_uid, seed_ip=seed_ip)
+
+        room_finder = find_rooms
     library = Library(settings.data_dir / "library.json")
     covers = CoverStore(settings.data_dir / "covers")
     covers.delete_unused(library.covers_in_use())
+    runtime = Runtime(
+        store,
+        library,
+        settings.data_dir,
+        backend_factory=backend_factory,
+        room_finder=room_finder,
+    )
     return Services(
         settings=settings,
-        runtime=Runtime(settings, backend, library),
+        runtime=runtime,
         library=library,
         covers=covers,
         secret_key=load_secret_key(settings.data_dir / "secret_key"),

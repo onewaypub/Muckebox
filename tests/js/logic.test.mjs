@@ -31,7 +31,7 @@ test("overlay: offline wins, then config, then sleeping speaker", () => {
   assert.equal(overlayKind(2, state("ok")), "offline");
   assert.equal(overlayKind(1, state("ok")), null);
   assert.equal(overlayKind(0, null), null);
-  assert.equal(overlayKind(0, state("config_error")), "config");
+  assert.equal(overlayKind(0, state("not_configured")), "config");
   for (const status of ["sonos_unreachable", "upnp_disabled", "room_not_found"]) {
     assert.equal(overlayKind(0, state(status)), "sleeping");
   }

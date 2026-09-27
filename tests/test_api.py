@@ -15,7 +15,9 @@ POST = {"X-Muckebox": "1"}
 
 
 def add_tile(services, index=0, cover=None):
-    favorite = services.runtime.backend.favorites[index]
+    from muckebox.sonos.fake import demo_favorites
+
+    favorite = demo_favorites()[index]
     return services.library.add(
         favorite.title,
         favorite_source(favorite.item_id, favorite.ref, favorite.route, favorite.description),
@@ -105,15 +107,15 @@ def test_unreachable_speaker(client, connected, fake_sonos):
     assert client.get("/api/state").get_json()["sonos"]["status"] == "sonos_unreachable"
 
 
-def test_config_error(make_services, client):
+def test_not_configured(make_services):
     from muckebox.web import create_app
 
-    services = make_services(SONOS_IP="", SONOS_ROOM="")
+    services = make_services(room=None)
     client = create_app(services).test_client()
-    assert client.get("/api/state").get_json()["sonos"]["status"] == "config_error"
+    assert client.get("/api/state").get_json()["sonos"]["status"] == "not_configured"
     tile = add_tile(services)
     response = client.post(f"/api/tiles/{tile.id}/play", headers=POST)
-    assert (response.status_code, response.get_json()["error"]["code"]) == (503, "config_error")
+    assert (response.status_code, response.get_json()["error"]["code"]) == (503, "not_configured")
 
 
 def test_transport(client, connected):

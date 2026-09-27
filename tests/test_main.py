@@ -195,3 +195,14 @@ def test_second_interrupt_during_shutdown_exits_quietly(env, monkeypatch, caplog
     monkeypatch.setattr(Runtime, "stop", interrupted)
     assert main(env, serve=lambda app, port, host: None) == EXIT_OK
     assert "without waiting" in caplog.text
+
+
+def test_settings_from_a_newer_version_stop_the_start(env, tmp_path, caplog):
+    data = tmp_path / "data"
+    data.mkdir()
+    (data / "settings.json").write_text('{"schema": 99}')
+    served = []
+    assert main(env, serve=lambda *a: served.append(a)) == EXIT_CONFIG
+    assert not served
+    assert "newer" in caplog.text
+    assert (data / "settings.json").read_text() == '{"schema": 99}'
