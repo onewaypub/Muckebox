@@ -154,3 +154,7 @@ def test_settings_are_immutable():
     s = load_settings(BASE)
     with pytest.raises(AttributeError):
         s.max_volume = 100
+
+
+def test_repr_hides_the_pin():
+    assert "2468" not in repr(load_settings({**BASE, "ADMIN_PIN": "2468"}))

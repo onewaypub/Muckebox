@@ -13,7 +13,7 @@ from __future__ import annotations
 import ipaddress
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
@@ -64,7 +64,7 @@ class Settings:
     sonos_ip: str | None
     max_volume: int
     volume_step: int
-    admin_pin: str | None
+    admin_pin: str | None = field(repr=False)  # never print the PIN
     data_dir: Path
     port: int
     problems: tuple[ConfigProblem, ...] = ()
