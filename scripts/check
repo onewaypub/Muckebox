@@ -29,6 +29,13 @@ ruff format --check .
 step "pytest (with coverage)"
 MUCKEBOX_REQUIRE_GITLEAKS=1 pytest --cov --cov-report=term
 
+if command -v node >/dev/null; then
+  step "node --test (browser logic)"
+  node --test tests/js/*.test.mjs
+else
+  printf '\n== node not installed: skipping the browser logic tests\n'
+fi
+
 step "bandit (static security analysis)"
 bandit -q -c pyproject.toml -r muckebox
 
