@@ -182,6 +182,9 @@ class LinkMeta:
 # -- parsing (no network) ------------------------------------------------------
 
 
+_STOREFRONT_RE = re.compile(r"[a-z]{2}")
+
+
 def parse(text: str) -> ParsedLink:
     """Recognise the first share link in ``text``; raise :class:`LinkError`.
 
@@ -210,6 +213,11 @@ def _parse_link(link: str) -> ParsedLink:
     if parts.scheme.lower() not in ("http", "https"):
         raise LinkError(UNSUPPORTED, "not a web link")
     segments = [segment for segment in parts.path.split("/") if segment]
+    if host == "geo.music.apple.com" and segments and _STOREFRONT_RE.fullmatch(segments[0]):
+        # Apple's badge links name the storefront. Following their redirect
+        # would let Apple pick a storefront from the server's IP address and
+        # swap in that storefront's catalogue IDs, so parse them directly.
+        return _parse_apple(segments, parts.query)
     if host in SHORT_LINK_HOSTS:
         raise ShortLinkError(urlunsplit(("https", host, parts.path, parts.query, "")))
     if host in _SPOTIFY_HOSTS:
@@ -371,12 +379,19 @@ def _target(url: str) -> ParsedLink | LinkError | None:
 
 
 def _deezer_dest(url: str) -> str | None:
-    """link.deezer.com carries the target in its ``dest`` parameter."""
+    """link.deezer.com/?dest=https://www.deezer.com/... (Deezer's own redirect form).
+
+    Deezer follows ``dest`` only on the root path and only to www.deezer.com;
+    on /s/<code> links it ignores ``dest``, so Muckebox must too.
+    """
     parts = urlsplit(url)
-    if parts.hostname != "link.deezer.com":
+    if parts.hostname != "link.deezer.com" or parts.path.strip("/"):
         return None
     dest = parse_qs(parts.query).get("dest", [""])[0]
-    return dest if dest.lower().startswith(("https://", "http://")) else None
+    target = urlsplit(dest)
+    if target.scheme.lower() != "https" or target.hostname != "www.deezer.com":
+        return None
+    return dest
 
 
 def _outcome(found: ParsedLink | LinkError) -> ParsedLink:
@@ -424,12 +439,43 @@ def metadata(link: ParsedLink, fetcher: Fetcher) -> LinkMeta:
     return strategy(link, fetcher)
 
 
+# Spotify image IDs start with a size prefix; these map 300 px to 640 px.
+_SPOTIFY_LARGE = {
+    "ab67706f00000002": "ab67706f00000003",  # editorial playlist cover
+    "ab67706c0000da84": "ab67706c0000bebb",  # user playlist cover
+    "ab67616d00001e02": "ab67616d0000b273",  # album art
+}
+_SPOTIFY_IMAGE_ID_RE = re.compile(r"/image/([0-9a-f]{16})([0-9a-f]{24})$")
+
+
+def _spotify_large(url: str) -> str | None:
+    parts = urlsplit(url)
+    if not host_allowed(parts.hostname or "", IMAGE_HOSTS["spotify"]):
+        return None
+    match = _SPOTIFY_IMAGE_ID_RE.search(parts.path)
+    if not match or match[1] not in _SPOTIFY_LARGE:
+        return None
+    path = parts.path[: match.start()] + "/image/" + _SPOTIFY_LARGE[match[1]] + match[2]
+    return urlunsplit(parts._replace(path=path))
+
+
 def fetch_image(url: str, fetcher: Fetcher) -> bytes:
     """Download a cover image from one of the :data:`IMAGE_HOSTS`.
 
-    Raises :class:`~muckebox.netfetch.FetchError` (``bad_status`` for a
-    response other than 200).
+    For Spotify's 300 px images the 640 px variant is tried first. Raises
+    :class:`~muckebox.netfetch.FetchError` (``bad_status`` for a response
+    other than 200).
     """
+    large = _spotify_large(url)
+    if large is not None:
+        try:
+            return _get_image(large, fetcher)
+        except FetchError:
+            pass
+    return _get_image(url, fetcher)
+
+
+def _get_image(url: str, fetcher: Fetcher) -> bytes:
     result = fetcher.get(
         url, max_bytes=IMAGE_MAX, accept="image/jpeg,image/png,image/*;q=0.8", allow=ALL_IMAGE_HOSTS
     )
