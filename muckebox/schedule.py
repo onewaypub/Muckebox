@@ -36,6 +36,10 @@ _TIME_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
 _INF = math.inf
 
 
+class WindowOrderError(ValueError):
+    """A window whose end is not after its start (e.g. across midnight)."""
+
+
 @dataclass(frozen=True)
 class Window:
     start: time
@@ -121,7 +125,7 @@ def parse_schedule(data: object) -> Schedule:
         start = parse_time(entry.get("from"))
         end = parse_time(entry.get("to"), end=True)
         if start is None or (end is not None and end <= start):
-            raise ValueError(f"{name}: 'to' must be after 'from' on the same day")
+            raise WindowOrderError(f"{name}: 'to' must be after 'from' on the same day")
         windows.append(Window(start, end))
     return Schedule(enabled, fade, tuple(windows))
 

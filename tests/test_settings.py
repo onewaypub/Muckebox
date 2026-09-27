@@ -377,3 +377,90 @@ def test_unknown_stored_zone_is_ignored(tmp_path):
     st = store(tmp_path)
     assert st.load_problem is None
     assert st.current().time_zone is None
+
+
+# -- usage times, sleep timer, games ----------------------------------------------------
+
+SCHEDULE = {
+    "enabled": True,
+    "fade_minutes": 10,
+    "days": {
+        "mon": {"from": "07:00", "to": "19:00"},
+        "tue": {"from": "07:00", "to": "19:00"},
+        "wed": None,
+        "thu": None,
+        "fri": None,
+        "sat": {"from": "08:00", "to": "20:00"},
+        "sun": None,
+    },
+}
+
+
+def test_new_sections_have_defaults_and_round_trip(tmp_path):
+    from muckebox.schedule import schedule_to_json
+    from muckebox.settings import games_to_json, sleep_timer_to_json
+
+    st = store(tmp_path)
+    current = st.current()
+    assert not current.schedule.enabled
+    assert (current.sleep_timer.enabled, current.sleep_timer.minutes) == (False, 30)
+    assert not any(current.games.enabled(game) for game in ("sound_quiz", "breathing"))
+    st.set_schedule(SCHEDULE)
+    st.set_sleep_timer({"enabled": True, "minutes": 45, "wake": "06:30"})
+    games = {
+        "daily_minutes": 20,
+        "dance_tile": "t0123456789abcde",
+        "items": {"sound_quiz": {"enabled": True, "level": 1}},
+    }
+    st.set_games(games)
+    reread = SettingsStore(tmp_path, scrypt=CHEAP).current()
+    assert schedule_to_json(reread.schedule) == SCHEDULE
+    assert sleep_timer_to_json(reread.sleep_timer) == {
+        "enabled": True,
+        "minutes": 45,
+        "wake": "06:30",
+    }
+    stored = games_to_json(reread.games)
+    assert stored["items"]["sound_quiz"] == {"enabled": True, "level": 1}
+    assert stored["items"]["freeze_dance"] == {"enabled": False, "level": 2}
+    assert reread.games.dance_tile == "t0123456789abcde"
+
+
+def test_a_file_without_the_new_sections_still_loads(tmp_path):
+    store(tmp_path).set_volume(20, 2)
+    edit(tmp_path, lambda d: [d.pop(key) for key in ("schedule", "sleep_timer", "games", "time")])
+    st = store(tmp_path)
+    assert st.load_problem is None
+    assert st.current().max_volume == 20
+
+
+def test_reset_pin_keeps_the_new_sections(tmp_path):
+    st = store(tmp_path)
+    st.set_schedule(SCHEDULE)
+    SettingsStore(tmp_path, scrypt=CHEAP).reset_pin()
+    assert SettingsStore(tmp_path, scrypt=CHEAP).current().schedule.enabled
+
+
+@pytest.mark.parametrize(
+    ("setter", "data", "code"),
+    [
+        (
+            "set_schedule",
+            {"days": {"mon": {"from": "20:00", "to": "07:00"}}},
+            "schedule_order_invalid",
+        ),
+        ("set_schedule", {"fade_minutes": 99}, "schedule_invalid"),
+        ("set_schedule", "always", "schedule_invalid"),
+        ("set_sleep_timer", {"enabled": True, "minutes": 4}, "sleep_timer_invalid"),
+        ("set_sleep_timer", {"minutes": 30, "wake": "7"}, "sleep_timer_invalid"),
+        ("set_sleep_timer", [], "sleep_timer_invalid"),
+        ("set_games", {"daily_minutes": 90}, "games_invalid"),
+        ("set_games", {"dance_tile": "../x"}, "games_invalid"),
+        ("set_games", {"items": {"chess": {"enabled": True}}}, "games_invalid"),
+        ("set_games", {"items": {"sound_quiz": {"enabled": True, "level": 4}}}, "games_invalid"),
+    ],
+)
+def test_invalid_new_settings(tmp_path, setter, data, code):
+    with pytest.raises(SettingsError) as info:
+        getattr(store(tmp_path), setter)(data)
+    assert info.value.code == code
