@@ -128,8 +128,7 @@ function renderTiles(data) {
   data.tiles.forEach((tile, index) => {
     const row = template.content.firstElementChild.cloneNode(true);
     translatePage(row);
-    const thumb = row.querySelector(".thumb");
-    if (tile.cover) thumb.src = tile.cover;
+    setThumb(row.querySelector(".thumb"), tile.cover);
     const input = row.querySelector("input[name=title]");
     input.value = tile.title;
     const source = tile.source;
@@ -188,9 +187,10 @@ function renderFavorites(favorites) {
   list.replaceChildren();
   for (const favorite of favorites) {
     const row = template.content.firstElementChild.cloneNode(true);
-    if (favorite.has_art) {
-      row.querySelector(".thumb").src = `/api/admin/favorite-art?item_id=${encodeURIComponent(favorite.item_id)}`;
-    }
+    setThumb(
+      row.querySelector(".thumb"),
+      favorite.has_art ? `/api/admin/favorite-art?item_id=${encodeURIComponent(favorite.item_id)}` : null,
+    );
     row.querySelector("strong").textContent = favorite.title;
     const small = row.querySelector("small");
     const button = row.querySelector(".add");
@@ -219,6 +219,22 @@ function renderFavorites(favorites) {
     }
     list.append(row);
   }
+}
+
+// A picture, or a neutral placeholder if there is none or it fails to load.
+function setThumb(img, src) {
+  const placeholder = () => {
+    const box = document.createElement("span");
+    box.className = "thumb placeholder";
+    box.textContent = "♪";
+    img.replaceWith(box);
+  };
+  if (!src) {
+    placeholder();
+    return;
+  }
+  img.addEventListener("error", placeholder, { once: true });
+  img.src = src;
 }
 
 function showWarnings(warnings) {
