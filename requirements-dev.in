@@ -1,0 +1,12 @@
+# SPDX-FileCopyrightText: 2026 Muckebox contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Development and CI tools. Regenerate requirements-dev.txt with scripts/lock.
+-c requirements.txt
+-r requirements.in
+bandit
+pip-audit
+pip-tools
+pytest
+pytest-cov
+ruff

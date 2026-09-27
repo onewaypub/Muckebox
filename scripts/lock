@@ -1,0 +1,21 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: 2026 Muckebox contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Regenerate the hash-pinned lock files inside the same Python image that the
+# Docker build uses, so that the pins match the production platform.
+# Works with docker or podman.
+set -eu
+
+cd "$(dirname "$0")/.."
+IMAGE="python:3.13-slim-trixie"
+ENGINE="${CONTAINER_ENGINE:-$(command -v docker || command -v podman)}"
+
+"$ENGINE" run --rm -v "$PWD:/src:Z" -w /src "$IMAGE" sh -euc '
+  pip install --quiet --root-user-action=ignore --disable-pip-version-check pip-tools
+  export CUSTOM_COMPILE_COMMAND="scripts/lock"
+  pip-compile --quiet --generate-hashes --allow-unsafe --strip-extras \
+    --output-file requirements.txt requirements.in "$@"
+  pip-compile --quiet --generate-hashes --allow-unsafe --strip-extras \
+    --output-file requirements-dev.txt requirements-dev.in "$@"
+' sh "$@"
