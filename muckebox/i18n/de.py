@@ -163,7 +163,6 @@ MESSAGES: dict[str, str] = {
         "„Beweg dich wie ein Elefant!“: Bild, Stimme und Geräusch, das Kind bewegt sich dazu."
     ),
     "admin.game_about_breathing": "Ruhige Atemübung zum Einschlafen; der Bildschirm wird dunkel.",
-    "sound.cow": "die Kuh",
     "sound.dog": "der Hund",
     "sound.cat": "die Katze",
     "sound.rooster": "der Hahn",
@@ -172,7 +171,6 @@ MESSAGES: dict[str, str] = {
     "sound.elephant": "der Elefant",
     "sound.lion": "der Löwe",
     "sound.donkey": "der Esel",
-    "sound.frog": "der Frosch",
     "sound.doorbell": "die Türklingel",
     "sound.car_horn": "die Autohupe",
     "sound.train": "der Zug",

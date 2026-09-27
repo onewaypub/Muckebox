@@ -17,78 +17,87 @@ SPDX-FileCopyrightText = "2026 Muckebox contributors"
 SPDX-License-Identifier = "AGPL-3.0-or-later"
 
 # Sounds for the games: excerpts of recordings from Wikimedia Commons.
+
 [[annotations]]
 path = "muckebox/static/sounds/cat.mp3"
 SPDX-FileCopyrightText = "freemaster2 (Wikimedia Commons: https://commons.wikimedia.org/wiki/File:Meow_of_a_Siamese_cat_-_freemaster2.wav)"
 SPDX-License-Identifier = "CC0-1.0"
+
 [[annotations]]
 path = "muckebox/static/sounds/rooster.mp3"
 SPDX-FileCopyrightText = "alys (Wikimedia Commons: https://commons.wikimedia.org/wiki/File:Small_rooster_crowing.ogg)"
 SPDX-License-Identifier = "LicenseRef-Public-Domain"
+
 [[annotations]]
 path = "muckebox/static/sounds/sheep.mp3"
 SPDX-FileCopyrightText = "earthcalling (Wikimedia Commons: https://commons.wikimedia.org/wiki/File:Sheep_bleating.ogg)"
 SPDX-License-Identifier = "LicenseRef-Public-Domain"
+
 [[annotations]]
 path = "muckebox/static/sounds/horse.mp3"
 SPDX-FileCopyrightText = "Hü. (Wikimedia Commons: https://commons.wikimedia.org/wiki/File:Wiehern.ogg)"
 SPDX-License-Identifier = "LicenseRef-Public-Domain"
+
 [[annotations]]
 path = "muckebox/static/sounds/elephant.mp3"
 SPDX-FileCopyrightText = "தகவலுழவன் (Wikimedia Commons: https://commons.wikimedia.org/wiki/File:Elephant_voice_-_trumpeting.ogg)"
 SPDX-License-Identifier = "CC0-1.0"
+
 [[annotations]]
 path = "muckebox/static/sounds/lion.mp3"
 SPDX-FileCopyrightText = "த*உழவன் (Wikimedia Commons: https://commons.wikimedia.org/wiki/File:Lion_raring-sound1TamilNadu178.ogg)"
 SPDX-License-Identifier = "LicenseRef-Public-Domain"
+
 [[annotations]]
 path = "muckebox/static/sounds/donkey.mp3"
 SPDX-FileCopyrightText = "felix-blume (Wikimedia Commons: https://commons.wikimedia.org/wiki/File:157763_felix-blume_a-donkey-is-braying-in-his-enclosure-in-south-of-france.wav)"
 SPDX-License-Identifier = "CC0-1.0"
-[[annotations]]
-path = "muckebox/static/sounds/cow.mp3"
-SPDX-FileCopyrightText = "MichaeltheFox8621 (Wikimedia Commons: https://commons.wikimedia.org/wiki/File:Single_Cow_Moo.ogg)"
-SPDX-License-Identifier = "CC-BY-SA-4.0"
+
 [[annotations]]
 path = "muckebox/static/sounds/dog.mp3"
 SPDX-FileCopyrightText = "Amada44 (Wikimedia Commons: https://commons.wikimedia.org/wiki/File:Barking_of_a_dog_2.ogg)"
 SPDX-License-Identifier = "CC-BY-SA-3.0"
-[[annotations]]
-path = "muckebox/static/sounds/frog.mp3"
-SPDX-FileCopyrightText = "MichaeltheFox8621 (Wikimedia Commons: https://commons.wikimedia.org/wiki/File:Single_Frog_Croak.oga)"
-SPDX-License-Identifier = "CC-BY-SA-4.0"
+
 [[annotations]]
 path = "muckebox/static/sounds/doorbell.mp3"
 SPDX-FileCopyrightText = "Amada44 (Wikimedia Commons: https://commons.wikimedia.org/wiki/File:Sound_Effect_-_Door_Bell.ogg)"
 SPDX-License-Identifier = "CC0-1.0"
+
 [[annotations]]
 path = "muckebox/static/sounds/car_horn.mp3"
 SPDX-FileCopyrightText = "15HPanska_Ruttner_Jan (Wikimedia Commons: https://commons.wikimedia.org/wiki/File:Car_Horn.wav)"
 SPDX-License-Identifier = "CC0-1.0"
+
 [[annotations]]
 path = "muckebox/static/sounds/train.mp3"
 SPDX-FileCopyrightText = "Alex Alex Lep (Wikimedia Commons: https://commons.wikimedia.org/wiki/File:Parovoz_sound.ogg)"
 SPDX-License-Identifier = "LicenseRef-Public-Domain"
+
 [[annotations]]
 path = "muckebox/static/sounds/clock.mp3"
 SPDX-FileCopyrightText = "natalie (Wikimedia Commons: https://commons.wikimedia.org/wiki/File:Clock_ticking.ogg)"
 SPDX-License-Identifier = "LicenseRef-Public-Domain"
+
 [[annotations]]
 path = "muckebox/static/sounds/water.mp3"
 SPDX-FileCopyrightText = "stephan (Wikimedia Commons: https://commons.wikimedia.org/wiki/File:Faucet_water_into_sink.ogg)"
 SPDX-License-Identifier = "LicenseRef-Public-Domain"
+
 [[annotations]]
 path = "muckebox/static/sounds/bicycle_bell.mp3"
 SPDX-FileCopyrightText = "Soundscape_Leuphana (Wikimedia Commons: https://commons.wikimedia.org/wiki/File:Bicycle-bell-1.wav)"
 SPDX-License-Identifier = "CC0-1.0"
+
 [[annotations]]
 path = "muckebox/static/sounds/church_bells.mp3"
 SPDX-FileCopyrightText = "Nicor (Wikimedia Commons: https://commons.wikimedia.org/wiki/File:Glocken_St._Josef_Eschelbronn.ogg)"
 SPDX-License-Identifier = "CC0-1.0"
+
 [[annotations]]
 path = "muckebox/static/sounds/rain.mp3"
 SPDX-FileCopyrightText = "ezwa (Wikimedia Commons: https://commons.wikimedia.org/wiki/File:Rain_(1).ogg)"
 SPDX-License-Identifier = "LicenseRef-Public-Domain"
+
 [[annotations]]
 path = "muckebox/static/sounds/silence.mp3"
 SPDX-FileCopyrightText = "2026 Muckebox contributors"

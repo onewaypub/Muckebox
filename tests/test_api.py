@@ -230,8 +230,8 @@ def test_volume_while_a_tap_is_running(client, connected, monkeypatch):
 
 def test_credits_of_the_game_assets(client):
     data = client.get("/api/credits").get_json()
-    assert any(item["license"] == "CC BY-SA 4.0" for item in data["credits"])
-    for path in ("/static/sounds/cow.mp3", "/static/pictures/cow.svg"):
+    assert any(item["license"] == "CC BY-SA 3.0" for item in data["credits"])
+    for path in ("/static/sounds/dog.mp3", "/static/pictures/dog.svg"):
         response = client.get(path)
         assert response.status_code == 200
         response.close()  # static files are streamed from an open file

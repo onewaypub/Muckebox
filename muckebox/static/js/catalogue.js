@@ -5,7 +5,7 @@
 // Sources and licences: muckebox/assets.py (and REUSE.toml).
 
 /** Animal sounds (all levels). */
-export const ANIMALS = ["cow", "dog", "cat", "rooster", "sheep", "horse", "elephant", "lion", "donkey", "frog"];
+export const ANIMALS = ["dog", "cat", "rooster", "sheep", "horse", "elephant", "lion", "donkey"];
 
 /** Everyday sounds (only for the big kids). */
 export const EVERYDAY = ["doorbell", "car_horn", "train", "clock", "water", "bicycle_bell", "church_bells", "rain"];
@@ -14,7 +14,7 @@ export const EVERYDAY = ["doorbell", "car_horn", "train", "clock", "water", "bic
 export const MOVES = [
   { id: "elephant", sound: "elephant" },
   { id: "cat", sound: "cat" },
-  { id: "frog", sound: "frog" },
+  { id: "frog" },
   { id: "horse", sound: "horse" },
   { id: "lion", sound: "lion" },
   { id: "rooster", sound: "rooster" },
