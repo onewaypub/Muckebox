@@ -31,7 +31,16 @@ Muckebox is designed for a trusted home network:
 - The kids view has no login: anybody on the home network can start music and
   change the volume within the configured limit.
 - The parents' page is protected by a PIN, rate limiting and same-origin
-  checks.
+  checks. The PIN is stored as a salted scrypt hash. A copy of
+  `settings.json` still lets an attacker try PINs offline, which is quick for
+  a short numeric PIN: use a longer PIN if backups of the data folder leave
+  your home.
+- Whoever can run commands in the container or write to the data folder can
+  set a new PIN (`python -m muckebox.admin reset-pin`) and read or change the
+  settings. Access to the Docker host is the trust boundary.
+- Until the parents set their own PIN, the PIN Muckebox generated is written
+  to the container log on every start. Anybody who can read that log can log
+  in with it.
 - Muckebox accepts any host name in requests. A malicious web page opened on
   a device in the home network could use DNS rebinding to reach the kids
   view's functions (start music, change the volume within the limit). The

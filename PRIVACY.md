@@ -31,8 +31,11 @@ Everything lives in the data folder (`DATA_DIR`):
 | `library.json.bak` | The previous version of `library.json`, kept as a safety copy. It is replaced on every change, so a renamed or removed title remains there until the next change. | Only what parents type in as titles. |
 | `library.json.corrupt-…` | Only if `library.json` could not be read: the unreadable file, moved aside for inspection. Delete it once you no longer need it. | Only what parents type in as titles. |
 | `covers/` | Cover pictures: album art and pictures uploaded by parents. Uploaded photos are re-encoded; their metadata (EXIF, e.g. location) is removed. | Only if parents upload photos of people. |
+| `settings.json` | The settings from the parents' page: name and speaker ID of the chosen room, the speaker address if one was entered, volume limit and step, and the PIN as a salted scrypt hash. While the PIN is still the one Muckebox generated, that PIN is also stored in plain text, so that it can be shown in the log; setting your own PIN removes it. Readable only by the Muckebox user (mode 0600). | The room name, if it contains a name (e.g. "Emma's room"). |
+| `settings.lock` | An empty file that keeps Muckebox and `reset-pin` from writing the settings at the same time. | No |
+| `settings.json.corrupt-…` | Only if `settings.json` could not be read: the unreadable file, moved aside. Delete it once you no longer need it. | As `settings.json`. |
 | `secret_key` | A random key that signs the parents' login cookie. | No |
-| `state.json` | Which tile Muckebox started last. | No |
+| `state.json` | Which tile Muckebox started last, and the speaker ID of its room. | No |
 
 Muckebox stores **nothing about the children**: no usage history, no
 listening statistics, no names.
@@ -46,10 +49,14 @@ To delete everything, stop the container and delete the data folder.
   for the login, expires after 12 hours and is deleted on logout.
 - **Rate limiting:** failed PIN attempts are counted per client IP address in
   memory only. Entries older than 15 minutes are discarded at the next login
-  attempt, and all of them on restart. They are never written to disk.
+  attempt, and all of them when the PIN changes or Muckebox restarts. They
+  are never written to disk.
 - **Logs:** the container log contains technical messages (for example the
-  Sonos room name, speaker addresses, errors). It contains no PINs and no
-  request logs with client addresses.
+  Sonos room name, speaker addresses, errors) and no request logs with client
+  addresses. It contains a PIN only while the PIN is the one Muckebox
+  generated (on the first start or after `reset-pin`), so that parents can
+  log in; a PIN you set yourself is never logged. Earlier log lines stay in
+  the container log until Docker rotates it or the container is removed.
 
 ## Connections
 
