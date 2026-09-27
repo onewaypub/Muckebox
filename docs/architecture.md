@@ -13,7 +13,8 @@ reference for contributors; user-facing documentation lives in the
 
 Muckebox is a touch web UI that lets small children operate one Sonos
 speaker on their own: big cover tiles, tap to play, play/pause, previous/next,
-louder/quieter. Parents manage the tiles on a PIN-protected admin page.
+louder/quieter. Parents choose the room, set the volume limit and manage the
+tiles on a PIN-protected admin page.
 
 Goals:
 
@@ -48,12 +49,14 @@ Later: ESP32 client ─┘                     │
    - resolve room, find group coordinator            - Get/SetVolume on the kids
    - list favorites, start playback jobs               room's own player
    - transport commands                              - VolumeGuard: poll every 1 s,
-   - state poll every 2 s                              clamp to MAX_VOLUME
+   - state poll every 2 s                              clamp to the limit
               │                                      - kids louder/quieter
               └──────────────► CircuitBreaker ◄──────────────┘
                                      │
                                      ▼
                      SoCo (local UPnP/SOAP, TCP 1400)
+                     (a third "setup" lane searches rooms and tests a
+                      newly chosen room, see "Choosing the room")
                                      │
                                      ▼
                               Sonos speaker(s)
@@ -63,11 +66,13 @@ Later: ESP32 client ─┘                     │
 
 | Component | Responsibility |
 |---|---|
-| `muckebox.config` | Parses and validates environment variables into an immutable `Settings` object. |
+| `muckebox.config` | Parses the start-up variables `LISTEN`, `PORT` and `DATA_DIR` into an immutable `Settings` object. |
+| `muckebox.settings` | The parents' settings in `settings.json`: room (name and speaker ID), speaker address, volume limit and step, PIN hash. Hands out immutable snapshots and notices changes by other processes. |
+| `muckebox.admin` | Command line: `reset-pin` for a forgotten PIN. |
 | `muckebox.web` | Flask app factory, kids and admin endpoints, JSON error envelope, security headers. `create_app()` starts no threads. |
 | `muckebox.i18n` | One message catalogue (German in v1, English keys) used by Python and served to the browser. |
-| `muckebox.sonos` | The only package that imports `soco`. Room resolution, favorites, playback routing, share-link playback, error classification, a `FakeSonos` for tests. |
-| `muckebox.runtime` | Worker lanes, circuit breaker, state cache, volume guard, command policy. |
+| `muckebox.sonos` | The only package that imports `soco`. Room search and resolution, favorites, playback routing, share-link playback, error classification, `FakeSonos` and `FakeHousehold` for tests and demo mode. |
+| `muckebox.runtime` | Worker lanes, room sessions, circuit breaker, state cache, volume guard, command policy. |
 | `muckebox.library` | Tile model and the JSON store in `DATA_DIR`. |
 | `muckebox.covers` | Downloads or accepts cover images, normalises them with Pillow, stores them content-addressed. |
 | `muckebox.linkmeta` | Parses share links and fetches title/cover without API keys. |
@@ -107,21 +112,46 @@ Android) are not used.
 
 ### Finding the speaker
 
-SSDP multicast discovery does not cross VLAN boundaries. Therefore:
+The room is chosen on the parents' page; nothing about it is configured at
+start. SSDP multicast discovery does not cross VLAN boundaries, so the room
+search (`find_rooms()`) works in two ways:
 
-- `SONOS_IP` is a **seed**: the IP of any Sonos speaker in the household
-  (best the kids room's own). From it Muckebox reads the zone group
-  topology, which lists every room, with one request and a fixed timeout.
-  Other rooms are never contacted.
-- `SONOS_ROOM` is a **selector**: the room name, matched trimmed and
-  case-insensitively against the topology.
-- Both can be combined. With only `SONOS_ROOM`, Muckebox uses SSDP discovery
-  (works only in the same network segment). With only `SONOS_IP`, the room
-  that owns that IP is used.
+- With a **speaker address** entered by the parents (the IP of any Sonos
+  speaker in the household, best the kids room's own), Muckebox reads the
+  zone group topology from it: one request with a fixed timeout lists every
+  room. Other rooms are never contacted.
+- Without one, it uses SSDP discovery and, if that finds nothing, a scan of
+  the local network (at most 64 parallel probes). Only the first household
+  that answers is shown; the speaker address selects another one.
+
+The chosen room is saved with its **name and speaker ID** (UID). On later
+lookups the room is found by its ID first and by its name only as a
+fallback, so a room renamed in the Sonos app keeps working and its new name
+is saved and logged.
+
 - A stereo pair or home-theater satellite is mapped to its visible room.
 - Once found, the kids room's own speaker is asked first on later lookups,
-  and the seed only as a fallback. A failed lookup keeps the last known room,
-  so the volume guard keeps working while the seed speaker is switched off.
+  and the speaker address only as a fallback. A failed lookup keeps the last
+  known room, so the volume guard keeps working while that speaker is
+  switched off.
+
+### Choosing the room
+
+Everything that belongs to the controlled room lives in a `RoomSession`:
+its backend, its own volume guard, its circuit breakers, the connection
+status and the favorites cache. Without a chosen room there is no session:
+the lanes run but do nothing, the state says `not_configured`, and commands
+are refused with that code.
+
+Choosing a room is "test, then save": a new backend resolves the room on a
+separate **setup lane** (which also runs room searches, one at a time), so a
+slow test never blocks the kids. Only if the room answers are its name, ID and
+the speaker address saved; then the session is swapped under a lock. Every
+job holds on to the session it started with, and results of a replaced
+session are dropped. So the old room's guard can never touch the new room,
+and no breaker, error or highlighted tile carries over. `state.json` is tagged
+with the room's speaker ID; choosing the same room again (e.g. with a new
+speaker address) keeps the highlight.
 
 ### Groups
 
@@ -198,8 +228,8 @@ be read or set through the local API. Muckebox therefore enforces its own
 limit:
 
 - The `VolumeGuard` polls the kids room player every second. If the volume is
-  above `MAX_VOLUME`, it sets it back to `MAX_VOLUME`. Worst-case exposure is
-  about two seconds.
+  above the limit, it sets it back to the limit. Worst-case exposure is about
+  two seconds. A new limit applies at the next poll.
 - Kids "louder/quieter" set an absolute, clamped value; they never overshoot.
   If the current volume cannot be read, nothing is changed.
 - Repeated corrections within a short time are reported as a "fight" (for
@@ -207,7 +237,7 @@ limit:
   continues.
 - The README recommends also setting the native Sonos volume limit as defence
   in depth. Note that it scales rather than clamps: the effective maximum is
-  `MAX_VOLUME × native limit / 100`.
+  `Muckebox limit × native limit / 100`.
 
 UPnP event subscriptions are not used in v1: they need an extra firewall
 rule from the speakers to the NAS and have known reliability issues. The guard
@@ -221,8 +251,10 @@ Everything lives in `DATA_DIR` (a bind mount in Docker):
 |---|---|
 | `library.json` | Tiles: schema version, revision counter, tile list. Written atomically (temp file, fsync, rename) with a `.bak` copy; a failed write leaves the library unchanged. A corrupt file is moved aside and reported, never silently discarded. |
 | `covers/<hash>.jpg` | Normalised cover images, content-addressed. |
+| `settings.json` | The parents' settings (schema version, room name and ID, speaker address, limit, step, scrypt PIN hash with its parameters; the generated PIN in plain text only until the parents set their own). Mode 0600, written atomically without a `.bak` copy (so no old PIN lingers), under a file lock shared with `reset-pin`. Every change re-reads the file under the lock first; the server re-reads it at most once a second when it changed. A corrupt file is moved aside and reported; a file from a newer Muckebox stops the start instead of being overwritten. |
+| `settings.lock` | The lock file for `settings.json`. |
 | `secret_key` | Random key for signing the admin session (mode 0600). |
-| `state.json` | The last started tile, so the "now playing" highlight survives a restart. |
+| `state.json` | The last started tile and the speaker ID of its room, so the "now playing" highlight survives a restart. |
 
 No personal data about the children is stored. See
 [PRIVACY.md](../PRIVACY.md) for the full privacy statement.
@@ -232,11 +264,16 @@ No personal data about the children is stored. See
 - The kids view is reachable by anyone on the home network without login.
   Mutating requests require the header `X-Muckebox: 1`, which a cross-site
   form cannot send without a CORS preflight.
-- The admin area is locked unless `ADMIN_PIN` is set (at least 4
-  characters). PIN comparison is constant-time; failed logins are rate
-  limited per client and globally. The session cookie is `HttpOnly`,
-  `SameSite=Strict`, expires after 12 hours and is bound to the current PIN,
-  so changing the PIN ends all sessions. Admin mutations also check `Origin`.
+- The admin area needs the PIN (at least 4 characters; `change-me`, `1234`
+  and `0000` are refused). On the first start Muckebox generates a random
+  6-digit PIN and logs it on every start until the parents set their own.
+  The PIN is stored as a salted scrypt hash (at most two hashes are computed
+  at a time); failed logins are rate limited per client and globally, and a
+  new PIN clears the counters. The session cookie is `HttpOnly`,
+  `SameSite=Strict`, expires after 12 hours and is bound to the PIN hash, so
+  every PIN change (on the parents' page or with `reset-pin`) ends all
+  sessions. Admin mutations also check `Origin`. Shell access to the
+  container is trusted: it can reset the PIN.
 - Outbound internet requests (share-link lookups, metadata and covers,
   favorite artwork that is not served by a speaker) go through one fetcher:
   public addresses only, redirects checked on every hop, size limits and
@@ -255,7 +292,8 @@ No personal data about the children is stored. See
 ## Testing strategy
 
 - **Unit and API tests** (pytest) run without a speaker: `FakeSonos`
-  implements the backend interface, an injected clock makes timing
+  implements the backend interface and `FakeHousehold` simulates several
+  rooms, an injected clock makes timing
   deterministic, and outbound HTTP is mocked. Real network access is blocked
   in tests. Backend coverage must stay at or above 90 %.
 - **Frontend logic** in plain ES modules is tested with `node --test`.
@@ -274,7 +312,7 @@ No personal data about the children is stored. See
 |---|---|
 | Sleep timer, bedtime lock | `CommandPolicy.check(command)` sits between the API and the lanes and allows everything in v1. |
 | Night mode with a lower limit | The volume guard, the kids' volume bar and the parents' status all read the limit from `Runtime.max_volume()`. |
-| Several rooms or profiles | One `Runtime` per room, created in `__main__`; `library.json` carries a schema version for migrations. |
+| Several rooms or profiles | Everything per room already lives in a `RoomSession`; `settings.json` and `library.json` carry schema versions for migrations. |
 | ESP32 battery client | `/api/state` carries `state_rev` and an `ETag`, so a client can poll cheaply with `If-None-Match`. Covers are baseline JPEGs. |
 | Another Sonos backend | The Sonos backend is an interface; only `muckebox.sonos` knows SoCo. |
 | Push events | `VolumeGuard.on_volume_observed()` and `StateCache.update()` accept observations from any source. |
