@@ -271,3 +271,26 @@ def test_a_failed_room_search_leaves_a_hint(page, server):
     expect(page.locator("#rooms")).to_contain_text("nicht erreichbar")
     page.wait_for_timeout(5500)  # longer than a flash message stays
     expect(page.locator("#rooms")).to_contain_text("nicht erreichbar")
+
+
+def test_parents_set_usage_times_and_allow_more(page, server):
+    log_in(page, server)
+    page.locator("#schedule-enabled").check()
+    monday = page.locator(".day-row").first
+    monday.locator(".from").fill("06:30")
+    monday.locator(".to").fill("00:00")  # until midnight
+    page.locator("#copy-monday").tap()
+    page.locator(".day-row").nth(6).locator(".free").check()  # Sunday is free
+    page.locator("#fade-minutes").fill("5")
+    page.locator("#schedule button[type=submit]").tap()
+    expect(page.locator("#flash")).to_have_text("Gespeichert")
+    schedule = server.store.current().schedule
+    assert schedule.enabled and schedule.fade_minutes == 5
+    assert schedule.days[1].start.strftime("%H:%M") == "06:30"
+    assert schedule.days[1].end is None  # 24:00
+    assert schedule.days[6] is None
+    expect(page.locator("#override-buttons")).to_be_visible()
+    page.locator("[data-override='30']").tap()
+    expect(page.locator("#schedule-status")).to_contain_text("Freigabe bis")
+    page.locator("#override-end").tap()
+    expect(page.locator("#override-end")).to_be_hidden()

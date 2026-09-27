@@ -59,6 +59,38 @@ MESSAGES: dict[str, str] = {
         "Das Limit gilt sofort (1 bis 100). Stelle zusätzlich in der Sonos-App ein "
         "Lautstärke-Limit für den Raum ein."
     ),
+    "admin.schedule": "Nutzungszeiten",
+    "admin.schedule_enabled": "Nutzungszeiten einschalten",
+    "admin.day_mon": "Montag",
+    "admin.day_tue": "Dienstag",
+    "admin.day_wed": "Mittwoch",
+    "admin.day_thu": "Donnerstag",
+    "admin.day_fri": "Freitag",
+    "admin.day_sat": "Samstag",
+    "admin.day_sun": "Sonntag",
+    "admin.from": "Von",
+    "admin.to": "Bis",
+    "admin.day_free": "ganzer Tag frei",
+    "admin.copy_monday": "Zeiten vom Montag für alle Tage übernehmen",
+    "admin.fade_minutes": "Vor dem Ende leiser werden (Minuten)",
+    "admin.schedule_hint": (
+        "Außerhalb der Zeiten sind die Kacheln gesperrt; Pause und Leiser gehen weiter. "
+        "Am Ende pausiert die Musik einmal, danach bleibt die Sonos-App frei. "
+        "Ein Tag ohne Zeitfenster ist frei; „Bis 00:00“ heißt bis Mitternacht. "
+        "Für einen langen Abend gibt es die Freigabe."
+    ),
+    "admin.phase_off": "Keine Nutzungszeiten eingestellt: Muckebox ist immer erlaubt.",
+    "admin.phase_open": "Jetzt erlaubt bis {time}.",
+    "admin.phase_open_free": "Jetzt erlaubt.",
+    "admin.phase_fading": "Klingt gerade aus, Ende um {time}.",
+    "admin.phase_closed": "Schlafenszeit bis {time}.",
+    "admin.phase_closed_open_end": "Schlafenszeit.",
+    "admin.override_until": "Freigabe bis {time}.",
+    "admin.override_15": "+15 Min.",
+    "admin.override_30": "+30 Min.",
+    "admin.override_60": "+1 Std.",
+    "admin.override_morning": "Bis morgen früh",
+    "admin.override_end": "Freigabe beenden",
     "admin.pin_change": "PIN ändern",
     "admin.pin_current": "Aktuelle PIN",
     "admin.pin_new": "Neue PIN",
