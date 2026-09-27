@@ -65,6 +65,17 @@ class RoomInfo:
     coordinator_ip: str
     coordinator_uid: str
     grouped: bool = False
+    player_uid: str = ""
+
+
+@dataclass(frozen=True)
+class RoomChoice:
+    """A room found in the household, offered on the parents' page."""
+
+    name: str
+    uid: str
+    ip: str
+    grouped: bool = False
 
 
 @dataclass(frozen=True)
