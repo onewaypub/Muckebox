@@ -27,13 +27,15 @@ from __future__ import annotations
 
 import http.cookiejar
 import ipaddress
+import re
 import socket
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from urllib.parse import urljoin, urlsplit
 
 import requests
+from urllib3 import exceptions as urllib3_exceptions
 from urllib3.exceptions import ReadTimeoutError
 
 from . import __version__
@@ -97,9 +99,19 @@ def system_resolver(host: str, port: int) -> list[str]:
     return [str(info[4][0]) for info in infos]
 
 
+_HOST_NAME_RE = re.compile(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*")
+
+
 def host_allowed(host: str, allow: Iterable[str]) -> bool:
-    """True if ``host`` is one of the ``allow`` domains or a subdomain of one."""
+    """True if ``host`` is one of the ``allow`` domains or a subdomain of one.
+
+    Only plain names of letters, digits, dots and hyphens qualify: other
+    characters (e.g. a backslash) are read differently by different URL
+    parsers and could smuggle in another host.
+    """
     host = host.lower().rstrip(".")
+    if not _HOST_NAME_RE.fullmatch(host):
+        return False
     for domain in allow:
         domain = domain.lower().strip(".")
         if domain and (host == domain or host.endswith("." + domain)):
@@ -196,7 +208,10 @@ class Fetcher:
             try:
                 location = response.headers.get("location")
                 if response.status_code in _REDIRECTS and location:
-                    target = urljoin(url, location.strip())
+                    try:
+                        target = urljoin(url, location.strip())
+                    except ValueError as exc:
+                        raise FetchError("bad_url", f"invalid redirect: {exc}") from exc
                     if stop_redirect is not None and stop_redirect(target):
                         return self._result(url, response, b"", location=target)
                     redirects += 1
@@ -225,6 +240,8 @@ class Fetcher:
         if parts.scheme.lower() != "https":
             raise FetchError("not_https", f"only https is allowed: {parts.scheme!r}")
         host = (parts.hostname or "").rstrip(".")
+        if "\\" in parts.netloc:
+            raise FetchError("bad_url", "backslash in host")
         if not host or parts.username is not None or parts.password is not None:
             raise FetchError("bad_url", "missing host or user info in URL")
         if port not in (None, 443):
@@ -268,6 +285,8 @@ class Fetcher:
             raise FetchError("timeout", str(exc)) from exc
         except requests.RequestException as exc:
             raise FetchError("connection_failed", str(exc)) from exc
+        except ValueError as exc:  # e.g. a malformed Location parsed inside requests
+            raise FetchError("bad_url", str(exc)) from exc
 
     def _read(
         self,
@@ -286,7 +305,7 @@ class Fetcher:
         marker = stop_at.lower() if stop_at else b""
         data = bytearray()
         try:
-            for chunk in response.iter_content(_CHUNK):
+            for chunk in self._chunks(response):
                 start = max(0, len(data) - len(marker) + 1)
                 data += chunk
                 end = None
@@ -308,6 +327,27 @@ class Fetcher:
             timed_out = isinstance(exc, requests.Timeout) or isinstance(cause, ReadTimeoutError)
             raise FetchError("timeout" if timed_out else "connection_failed", str(exc)) from exc
         return bytes(data)
+
+    @staticmethod
+    def _chunks(response: requests.Response) -> Iterator[bytes]:
+        """Yield the body as it arrives.
+
+        ``read1`` returns after a single receive, so a server that sends a
+        byte now and then cannot hold a read past the deadline (checked
+        between chunks); ``iter_content`` would wait for a full chunk.
+        """
+        raw = getattr(response, "raw", None)
+        read1 = getattr(raw, "read1", None)
+        if read1 is None:
+            yield from response.iter_content(_CHUNK)
+            return
+        try:
+            while chunk := read1(_CHUNK, decode_content=True):
+                yield chunk
+        except (ReadTimeoutError, TimeoutError) as exc:
+            raise requests.exceptions.ReadTimeout(str(exc)) from exc
+        except (urllib3_exceptions.HTTPError, OSError) as exc:
+            raise requests.exceptions.ConnectionError(str(exc)) from exc
 
     @staticmethod
     def _result(
