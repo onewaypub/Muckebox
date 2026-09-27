@@ -116,3 +116,11 @@ def test_client_side_error_codes_have_texts():
     # api.js creates these codes itself (network failure, timeout, bare 413).
     for code in ("offline", "timeout", "request_too_large", "library_corrupt"):
         assert f"error.{code}" in CATALOGUE
+
+
+def test_no_text_mentions_the_old_environment_variables():
+    from muckebox.config import LEGACY_VARIABLES
+
+    for key, text in CATALOGUE.items():
+        for name in LEGACY_VARIABLES:
+            assert name not in text, key
