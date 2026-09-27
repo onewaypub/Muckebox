@@ -36,6 +36,10 @@ class LibraryError(Exception):
     code = "library_error"
 
 
+class LibraryFileError(Exception):
+    """library.json was written by a newer Muckebox; it is left untouched."""
+
+
 class TileNotFound(LibraryError):
     code = "tile_not_found"
 
@@ -206,11 +210,22 @@ class Library:
             return
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
-            if data.get("schema") != SCHEMA:
-                raise ValueError(f"unsupported schema {data.get('schema')!r}")
-            tiles = [Tile(**tile) for tile in data["tiles"]]
+            schema = data.get("schema") if isinstance(data, dict) else None
+            if type(schema) is int and schema > SCHEMA:
+                raise LibraryFileError(
+                    f"{self.path} was written by a newer Muckebox (schema {schema}); "
+                    "update Muckebox or restore a backup"
+                )
+            if schema != SCHEMA:
+                raise ValueError(f"unsupported schema {schema!r}")
+            # Fields added by later versions are ignored instead of making the
+            # whole library unreadable.
+            tiles = [
+                Tile(**{key: value for key, value in tile.items() if key in _TILE_FIELDS})
+                for tile in data["tiles"]
+            ]
             rev = int(data["rev"])
-        except (OSError, ValueError, KeyError, TypeError) as exc:
+        except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
             broken = self.path.with_name(f"{self.path.name}.corrupt-{int(time.time())}")
             shutil.move(self.path, broken)
             self.load_problem = {"code": "library_corrupt", "file": broken.name}
@@ -242,6 +257,9 @@ class Library:
         except BaseException:
             undo()
             raise
+
+
+_TILE_FIELDS = frozenset(Tile.__dataclass_fields__)
 
 
 def favorite_source(item_id: str, ref: FavoriteRef, route: Route, description: str) -> dict:

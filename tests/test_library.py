@@ -124,7 +124,7 @@ def test_corrupt_file_is_moved_aside(tmp_path):
 
 def test_unknown_schema_is_not_loaded(tmp_path):
     path = tmp_path / "library.json"
-    path.write_text(json.dumps({"schema": 99, "rev": 3, "tiles": []}))
+    path.write_text(json.dumps({"schema": "one", "rev": 3, "tiles": []}))
     assert Library(path).load_problem
 
 
@@ -167,3 +167,25 @@ def test_a_failed_write_changes_nothing(library, monkeypatch, change):
     monkeypatch.undo()
     library.rename(tile.id, "Works again")
     assert library.rev == rev + 1
+
+
+def test_fields_of_a_newer_version_are_ignored(tmp_path):
+    path = tmp_path / "library.json"
+    Library(path).add("Radio", {"type": "favorite", "uri": "x-sonosapi-stream:s1"})
+    data = json.loads(path.read_text())
+    data["tiles"][0]["colour"] = "red"  # a field some later version might add
+    path.write_text(json.dumps(data))
+    library = Library(path)
+    assert library.load_problem is None
+    assert [tile.title for tile in library.tiles()] == ["Radio"]
+
+
+def test_a_library_from_a_newer_version_is_left_alone(tmp_path):
+    from muckebox.library import LibraryFileError
+
+    path = tmp_path / "library.json"
+    path.write_text(json.dumps({"schema": 2, "rev": 1, "tiles": []}))
+    with pytest.raises(LibraryFileError, match="newer"):
+        Library(path)
+    assert json.loads(path.read_text())["schema"] == 2
+    assert not list(tmp_path.glob("library.json.corrupt-*"))
