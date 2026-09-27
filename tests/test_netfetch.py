@@ -236,7 +236,7 @@ def test_empty_allowlist_refuses_everything(http):
         ["::1"],
         ["169.254.169.254"],
         ["fe80::1%eth0"],
-        ["0.0.0.0"],  # noqa: S104
+        ["0.0.0.0"],
         ["192.0.2.10"],
         [CGNAT_V4],
         ["224.0.0.251"],

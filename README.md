@@ -130,9 +130,10 @@ Muckebox is configured with environment variables.
 | `ADMIN_PIN` | – | PIN for the parents' page, at least 4 characters. Without a valid PIN the parents' page stays locked. |
 | `DATA_DIR` | `/data` | Directory for the tile library and cover images. |
 | `PORT` | `8484` | HTTP port (1024–65535). Ports 1400–1499 (Sonos), the Synology DSM ports 5000, 5001 and 5357, and ports that browsers block are rejected. |
+| `LISTEN` | `all` | Where Muckebox can be reached: `all` (the whole network, needed for tablets), `localhost` (this computer only, e.g. for trying it out) or one IPv4 address of the host. |
 
 If the Sonos or volume settings are invalid, Muckebox still starts and shows
-the problem instead of playing music. If `PORT` is invalid or already in use,
+the problem instead of playing music. If `PORT` or `LISTEN` is invalid, the port is already in use,
 or `DATA_DIR` is not writable, Muckebox cannot start: it writes the reason to
 the log and exits. Docker then restarts it again and again, so Container
 Manager shows the container as restarting and the log repeats the message

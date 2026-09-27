@@ -27,7 +27,7 @@ from muckebox import __version__
 from muckebox.config import Settings
 from muckebox.library import Library, Tile
 from muckebox.sonos.backend import TRANSPORT_ACTIONS, SonosBackend
-from muckebox.sonos.errors import ActionNotAvailable, SonosError
+from muckebox.sonos.errors import ActionNotAvailable, RoomNotFound, SonosError
 from muckebox.sonos.model import Favorite, Playback, Route
 
 from .breaker import CircuitBreaker
@@ -47,6 +47,9 @@ COMMAND_WAIT = 3.5
 VOLUME_WAIT = 2.5
 FAVORITES_WAIT = 15.0
 FAVORITES_TTL = 60.0
+# Seconds to wait for running Sonos calls when shutting down (after the web
+# server has let running requests finish, which takes up to 5 s itself).
+STOP_TIMEOUT = 2.0
 
 
 class Unavailable(Exception):
@@ -142,9 +145,13 @@ class Runtime:
         self.transport_lane.start()
         self.volume_lane.start()
 
-    def stop(self) -> None:
-        self.transport_lane.stop()
-        self.volume_lane.stop()
+    def stop(self, timeout: float = STOP_TIMEOUT) -> None:
+        """Stop both lanes, waiting at most ``timeout`` seconds in total."""
+        for lane in (self.transport_lane, self.volume_lane):
+            lane.request_stop()
+        deadline = self.clock.monotonic() + timeout
+        for lane in (self.transport_lane, self.volume_lane):
+            lane.join(deadline - self.clock.monotonic())
 
     def max_volume(self) -> int:
         return self.settings.max_volume
@@ -473,9 +480,11 @@ class Runtime:
                 playback={"state": "unknown", "tile_id": None},
                 actions=[],
             )
+            detail = f": {exc}" if isinstance(exc, RoomNotFound) else ""
             log.warning(
-                "Sonos not reachable (%s); retrying in %ss",
+                "Sonos not reachable (%s%s); retrying in %ss",
                 exc.code,
+                detail,
                 self.transport_breaker.retry_in(),
             )
         else:

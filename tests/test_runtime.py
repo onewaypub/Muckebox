@@ -530,3 +530,26 @@ def test_volume_taps_do_not_pile_up(tmp_path, library):
     finally:
         release.set()
         rt.volume_lane.stop()
+
+
+def test_stop_waits_at_most_the_timeout_for_busy_lanes(tmp_path, library):
+    """Both lanes stuck on the network: the deadline is shared, not per lane."""
+    release = threading.Event()
+    busy = {"resolve": threading.Event(), "get_volume": threading.Event()}
+
+    def on_call(name):
+        if name in busy:
+            busy[name].set()
+            release.wait(10)
+
+    fake = FakeSonos()
+    fake.on_call = on_call
+    rt = threaded_runtime(tmp_path, fake, library)
+    rt.start()
+    try:
+        assert all(event.wait(2) for event in busy.values())
+        started = time.monotonic()
+        rt.stop(timeout=0.5)
+        assert time.monotonic() - started < 0.9
+    finally:
+        release.set()

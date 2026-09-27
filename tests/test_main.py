@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 import errno
+import logging
 import os
 import signal
 
@@ -17,6 +18,7 @@ from muckebox.__main__ import (
     ensure_data_dir,
     main,
 )
+from muckebox.config import LISTEN_ALL
 
 
 @pytest.fixture
@@ -31,30 +33,33 @@ def env(tmp_path):
 
 def test_main_serves_app_on_configured_port(env):
     served = []
-    assert main({**env, "PORT": "9123"}, serve=lambda app, port: served.append(port)) == EXIT_OK
-    assert served == [9123]
+    assert (
+        main({**env, "PORT": "9123"}, serve=lambda app, port, host: served.append((port, host)))
+        == EXIT_OK
+    )
+    assert served == [(9123, LISTEN_ALL)]
 
 
 def test_main_creates_data_dir(env, tmp_path):
-    main(env, serve=lambda app, port: None)
+    main(env, serve=lambda app, port, host: None)
     assert (tmp_path / "data").is_dir()
     assert not list((tmp_path / "data").glob(".write-test-*"))  # write test leaves nothing
 
 
 def test_secret_key_is_created_once_and_private(env, tmp_path):
-    main(env, serve=lambda app, port: None)
+    main(env, serve=lambda app, port, host: None)
     key_file = tmp_path / "data" / "secret_key"
     key = key_file.read_bytes()
     assert len(key) == 32
     assert key_file.stat().st_mode & 0o077 == 0
-    main(env, serve=lambda app, port: None)
+    main(env, serve=lambda app, port, host: None)
     assert key_file.read_bytes() == key
 
 
 def test_invalid_sonos_settings_still_serve(env):
     served = []
     code = main(
-        {**env, "SONOS_IP": "", "MUCKEBOX_FAKE_SONOS": ""}, serve=lambda a, p: served.append(a)
+        {**env, "SONOS_IP": "", "MUCKEBOX_FAKE_SONOS": ""}, serve=lambda a, p, h: served.append(a)
     )
     assert code == EXIT_OK
     assert served
@@ -85,19 +90,19 @@ def test_ensure_data_dir_reports_os_errors(tmp_path):
 
 
 def test_port_in_use_exits_with_clear_message(env, caplog):
-    def busy(app, port):
+    def busy(app, port, host):
         raise OSError(errno.EADDRINUSE, "Address already in use")
 
     assert main(env, serve=busy) == EXIT_PORT_IN_USE
     assert "already in use" in caplog.text
 
 
-def test_other_os_errors_propagate(env):
-    def broken(app, port):
+def test_other_bind_errors_are_reported_cleanly(env, caplog):
+    def broken(app, port, host):
         raise OSError(errno.EACCES, "Permission denied")
 
-    with pytest.raises(OSError):
-        main(env, serve=broken)
+    assert main(env, serve=broken) == EXIT_CONFIG
+    assert "Permission denied" in caplog.text
 
 
 def test_config_problems_are_logged_without_secrets(env, caplog):
@@ -129,16 +134,19 @@ def test_serve_closes_server_on_shutdown(monkeypatch, exc, tmp_path):
         return server
 
     monkeypatch.setattr(entry, "create_server", fake_create_server)
-    previous = signal.getsignal(signal.SIGTERM)
-    try:
-        settings = entry.load_settings({"SONOS_IP": "192.0.2.10", "DATA_DIR": str(tmp_path)})
-        app = entry.create_app(entry.build_services(settings, fake_sonos=True))
-        entry._serve(app, 9123)
-        assert signal.getsignal(signal.SIGTERM) is entry._raise_shutdown
-    finally:
-        signal.signal(signal.SIGTERM, previous)
+    installed = {}
+
+    def fake_signal(signum, handler):
+        installed[signum] = handler
+
+    monkeypatch.setattr(entry.signal, "signal", fake_signal)
+    settings = entry.load_settings({"SONOS_IP": "192.0.2.10", "DATA_DIR": str(tmp_path)})
+    app = entry.create_app(entry.build_services(settings, fake_sonos=True))
+    entry._serve(app, 9123, "127.0.0.1")
+    # After the first signal, a second Ctrl+C or SIGTERM ends the process at once.
+    assert installed == {signal.SIGTERM: signal.SIG_DFL, signal.SIGINT: signal.SIG_DFL}
     assert server.closed
-    assert options["port"] == 9123
+    assert (options["port"], options["host"]) == (9123, "127.0.0.1")
     assert options["max_request_body_size"] > app.config["MAX_CONTENT_LENGTH"]
 
 
@@ -158,3 +166,32 @@ def test_shutdown_is_a_system_exit():
     # waitress only drains its worker threads (and re-raises from channel
     # handlers) for SystemExit and KeyboardInterrupt.
     assert issubclass(entry._Shutdown, SystemExit)
+
+
+def test_listen_address_is_logged_and_used(env, caplog):
+    caplog.set_level(logging.INFO)
+    served = []
+    main({**env, "LISTEN": "localhost"}, serve=lambda app, port, host: served.append(host))
+    assert served == ["127.0.0.1"]
+    assert "this computer only" in caplog.text
+
+
+def test_foreign_listen_address_is_a_config_error(env, caplog):
+    def not_here(app, port, host):
+        raise OSError(errno.EADDRNOTAVAIL, "Cannot assign requested address")
+
+    assert main({**env, "LISTEN": "192.0.2.99"}, serve=not_here) == EXIT_CONFIG
+    assert "Cannot listen on 192.0.2.99" in caplog.text
+
+
+def test_second_interrupt_during_shutdown_exits_quietly(env, monkeypatch, caplog):
+    from muckebox.runtime.service import Runtime
+
+    caplog.set_level(logging.INFO)
+
+    def interrupted(self, timeout=2.0):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(Runtime, "stop", interrupted)
+    assert main(env, serve=lambda app, port, host: None) == EXIT_OK
+    assert "without waiting" in caplog.text
