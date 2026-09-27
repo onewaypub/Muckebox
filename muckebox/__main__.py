@@ -85,7 +85,7 @@ def main(
     services.runtime.start()
     reach = {LISTEN_ALL: "the whole network", LISTEN_LOCALHOST: "this computer only"}
     log.info(
-        "Muckebox %s listening on %s port %d (%s)",
+        "Starting Muckebox %s on %s port %d (%s)",
         __version__,
         settings.listen,
         settings.port,
