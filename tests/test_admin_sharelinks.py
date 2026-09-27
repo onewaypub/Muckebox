@@ -49,7 +49,7 @@ def add_link(admin, url):
     return admin.post("/api/admin/tiles", json={"source": "sharelink", "url": url}, headers=POST)
 
 
-def test_apple_music_album_with_title_and_cover(admin, services, web):
+def test_apple_music_album_with_title_and_cover(admin, services, web, fake_sonos):
     web.get(
         re.compile(r"https://music\.apple\.com/api/oembed\?url=.*"),
         json={
@@ -76,7 +76,7 @@ def test_apple_music_album_with_title_and_cover(admin, services, web):
     kids_tile = services.library.get(tile["id"])
     admin.post(f"/api/tiles/{tile['id']}/play", headers=POST)
     link = ShareLinkRef("apple_music", "album", "1440000001")
-    assert ("play_share_link", link, kids_tile.title) in services.runtime.backend.calls
+    assert ("play_share_link", link, kids_tile.title) in fake_sonos.calls
 
 
 def test_link_without_metadata_still_becomes_a_tile(admin, web):
