@@ -97,6 +97,7 @@ function renderStatus(status) {
     ["admin.connection", connection],
     ["admin.max_volume", String(status.volume_guard.max)],
     ["admin.corrections", String(status.volume_guard.corrections)],
+    ["admin.clock", `${status.time.now.slice(11, 16)} (${status.time.zone})`],
   ];
   list.replaceChildren(
     ...rows.flatMap(([key, value]) => {
@@ -122,8 +123,28 @@ function renderStatus(status) {
       return item;
     }),
   );
+  renderZoneHint(status.time.zone);
   $("version").textContent = `${t("admin.version")} ${status.version}`;
   $("source").href = status.source_url;
+}
+
+// Usage times follow the Muckebox's zone; offer this device's zone if it differs.
+function renderZoneHint(server) {
+  const browser = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const differs = Boolean(browser) && browser !== server;
+  $("zone-hint").hidden = !differs;
+  if (!differs) return;
+  $("zone-text").textContent = t("admin.zone_differs", { server, browser });
+  $("zone-adopt").textContent = t("admin.zone_adopt", { browser });
+  $("zone-adopt").onclick = async (event) => {
+    const result = await busy(
+      event.target,
+      guarded(() => request("PUT", "/api/admin/settings/time-zone", { body: { zone: browser } }), {
+        success: t("admin.saved"),
+      }),
+    );
+    if (result) loadStatus();
+  };
 }
 
 function renderTiles(data) {

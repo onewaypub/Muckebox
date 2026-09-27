@@ -155,6 +155,7 @@ is set with environment variables:
 | `PORT` | `8484` | HTTP port (1024–65535). Ports 1400–1499 (Sonos), the Synology DSM ports 5000, 5001 and 5357, and ports that browsers block are rejected. |
 | `LISTEN` | `all` | Where Muckebox can be reached: `all` (the whole network, needed for tablets), `localhost` (this computer only, e.g. for trying it out) or one IPv4 address of the host. |
 | `DATA_DIR` | `/data` | Directory for the settings, the tile library and cover images. |
+| `TZ` | system | Time zone for the usage times, e.g. `Europe/Berlin`. The parents' page shows the clock and can take over the zone of the parent's browser instead. |
 
 Earlier versions read `SONOS_ROOM`, `SONOS_IP`, `MAX_VOLUME`, `VOLUME_STEP`
 and `ADMIN_PIN` from the environment. They are ignored now (the log says so)
@@ -289,6 +290,7 @@ into the Docker image (kept in sync with `requirements.txt` by a test).
 | [xmltodict](https://github.com/martinblech/xmltodict) | MIT |
 | [ifaddr](https://github.com/ifaddr/ifaddr) | MIT |
 | [appdirs](https://github.com/ActiveState/appdirs) | MIT |
+| [tzdata](https://github.com/python/tzdata) | Apache-2.0 (the time zone data itself is public domain) |
 
 The Docker image is based on the official `python:3.13-slim-trixie` image
 (Debian; Python under the PSF License).

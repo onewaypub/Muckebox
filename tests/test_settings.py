@@ -357,3 +357,23 @@ def test_sections_of_a_newer_version_are_kept(tmp_path):
     SettingsStore(tmp_path, scrypt=CHEAP).set_volume(20, 2)
     assert json.loads((tmp_path / "settings.json").read_text())["future"] == {"x": 1}
     assert st  # the first store is still usable
+
+
+def test_time_zone(tmp_path):
+    st = store(tmp_path)
+    assert st.current().time_zone is None
+    st.set_time_zone("Europe/Berlin")
+    assert SettingsStore(tmp_path, scrypt=CHEAP).current().time_zone == "Europe/Berlin"
+    with pytest.raises(SettingsError) as info:
+        st.set_time_zone("Mars/Olympus")
+    assert info.value.code == "time_zone_invalid"
+    st.set_time_zone("")
+    assert st.current().time_zone is None
+
+
+def test_unknown_stored_zone_is_ignored(tmp_path):
+    store(tmp_path)
+    edit(tmp_path, lambda d: d.update(time={"zone": "Mars/Olympus"}))
+    st = store(tmp_path)
+    assert st.load_problem is None
+    assert st.current().time_zone is None

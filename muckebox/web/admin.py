@@ -159,6 +159,7 @@ def _settings_response():
             "max_volume": current.max_volume,
             "volume_step": current.volume_step,
             "pin_generated": current.pin_generated,
+            "time_zone": current.time_zone,
         },
         sonos=services.runtime.state.get("sonos"),
     )
@@ -175,6 +176,14 @@ def settings():
 def set_volume():
     body = _body()
     _settings_call(_services().store.set_volume, body.get("max_volume"), body.get("volume_step"))
+    return _settings_response()
+
+
+@bp.put("/settings/time-zone")
+@auth.require_admin
+def set_time_zone():
+    """Use this zone for the usage times (e.g. the zone of the parent's browser)."""
+    _settings_call(_services().store.set_time_zone, _body().get("zone"))
     return _settings_response()
 
 

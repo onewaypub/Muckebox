@@ -82,6 +82,13 @@ def main(
         return EXIT_CONFIG
     app = create_app(services)
     log_setup_hints(services.store)
+    zone = services.runtime.zone()
+    log.info(
+        "Local time %s (%s, from %s)",
+        services.runtime.local_now().strftime("%H:%M"),
+        zone.name,
+        zone.source,
+    )
     services.runtime.start()
     reach = {LISTEN_ALL: "the whole network", LISTEN_LOCALHOST: "this computer only"}
     log.info(

@@ -31,6 +31,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+from muckebox.localtime import load_zone
 from muckebox.storage import atomic_write
 
 log = logging.getLogger(__name__)
@@ -95,6 +96,8 @@ class StoredSettings:
     max_volume: int
     volume_step: int
     pin: PinRecord
+    #: IANA name chosen on the parents' page, or None (then TZ or the system).
+    time_zone: str | None = None
 
     @property
     def configured(self) -> bool:
@@ -145,6 +148,14 @@ def validate_room(name: object) -> str:
     if not 1 <= len(name) <= 100:
         raise SettingsError("room_invalid")
     return name
+
+
+def validate_time_zone(name: object) -> str | None:
+    if name is None or name == "":
+        return None
+    if load_zone(name) is None:
+        raise SettingsError("time_zone_invalid")
+    return str(name)
 
 
 def validate_volume(max_volume: object, step: object) -> tuple[int, int]:
@@ -207,7 +218,7 @@ def generate_pin() -> str:
 
 # -- reading the file ---------------------------------------------------------------
 
-_KNOWN_SECTIONS = frozenset({"schema", "sonos", "volume", "admin"})
+_KNOWN_SECTIONS = frozenset({"schema", "sonos", "volume", "admin", "time"})
 
 
 def _parse(data: dict[str, Any]) -> StoredSettings:
@@ -242,7 +253,17 @@ def _parse(data: dict[str, Any]) -> StoredSettings:
     except (KeyError, SettingsError) as exc:
         raise ValueError(f"invalid settings ({exc})") from None
     _check_record(record)
-    return StoredSettings(room, room_uid, seed_ip, max_volume, step, record)
+    return StoredSettings(
+        room, room_uid, seed_ip, max_volume, step, record, time_zone=_parse_time_zone(data)
+    )
+
+
+def _parse_time_zone(data: dict[str, Any]) -> str | None:
+    section = data.get("time")
+    zone = section.get("zone") if isinstance(section, dict) else None
+    # A zone this system does not know (e.g. from a newer database) is not a
+    # reason to reject the whole file: TZ or the system zone apply instead.
+    return zone if isinstance(zone, str) and load_zone(zone) is not None else None
 
 
 def _check_record(record: PinRecord) -> None:
@@ -328,6 +349,10 @@ class SettingsStore:
         room = validate_room(room)
         seed_ip = validate_seed_ip(seed_ip)
         return self._update(lambda s: replace(s, room=room, room_uid=room_uid, seed_ip=seed_ip))
+
+    def set_time_zone(self, name: object) -> StoredSettings:
+        zone = validate_time_zone(name)
+        return self._update(lambda s: replace(s, time_zone=zone))
 
     def set_volume(self, max_volume: object, step: object) -> StoredSettings:
         max_volume, step = validate_volume(max_volume, step)
@@ -439,6 +464,7 @@ class SettingsStore:
                 "pin": {"salt": pin.salt, "hash": pin.hash, "n": pin.n, "r": pin.r, "p": pin.p},
                 "generated_pin": pin.generated,
             },
+            "time": {"zone": settings.time_zone},
         }
         owner = self._owner()
         payload = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")

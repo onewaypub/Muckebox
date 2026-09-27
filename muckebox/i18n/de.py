@@ -96,6 +96,12 @@ MESSAGES: dict[str, str] = {
     "admin.connection": "Verbindung",
     "admin.max_volume": "Lautstärke-Limit",
     "admin.corrections": "Lautstärke-Korrekturen",
+    "admin.clock": "Uhrzeit der Muckebox",
+    "admin.zone_differs": (
+        "Die Muckebox rechnet mit der Zeitzone {server}, dieses Gerät mit {browser}. "
+        "Nutzungszeiten richten sich nach der Muckebox."
+    ),
+    "admin.zone_adopt": "Zeitzone {browser} übernehmen",
     "admin.version": "Version",
     "admin.source": "Quellcode (AGPL-3.0)",
     "admin.saved": "Gespeichert",
@@ -198,6 +204,7 @@ MESSAGES: dict[str, str] = {
     "error.pin_invalid": (
         "Die PIN darf höchstens 64 Zeichen lang sein und keine Steuerzeichen enthalten."
     ),
+    "error.time_zone_invalid": "Diese Zeitzone kennt die Muckebox nicht.",
     "error.pin_changed": "Die PIN wurde gerade woanders geändert. Bitte neu anmelden.",
     "error.settings_save_failed": (
         "Die Einstellungen konnten nicht gespeichert werden. Ist der Datenordner beschreibbar?"
