@@ -1,0 +1,12 @@
+# SPDX-FileCopyrightText: 2026 Muckebox contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# License information for files that cannot carry an SPDX header themselves
+# (generated files, JSON, images). Follows https://reuse.software/spec/.
+# tests/test_repository.py checks that every other file has a header.
+version = 1
+
+[[annotations]]
+path = ["requirements.txt", "requirements-dev.txt"]
+SPDX-FileCopyrightText = "2026 Muckebox contributors"
+SPDX-License-Identifier = "AGPL-3.0-or-later"
