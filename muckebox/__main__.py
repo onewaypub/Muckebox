@@ -27,7 +27,7 @@ from muckebox.config import (
     load_settings,
 )
 from muckebox.covers import CoverStore
-from muckebox.library import Library
+from muckebox.library import Library, LibraryFileError
 from muckebox.runtime.service import BackendFactory, RoomFinder, Runtime
 from muckebox.settings import SettingsFileError, SettingsStore
 from muckebox.sonos.backend import SonosBackend
@@ -77,7 +77,7 @@ def main(
 
     try:
         services = build_services(settings, fake_sonos=environ.get("MUCKEBOX_FAKE_SONOS") == "1")
-    except SettingsFileError as exc:
+    except (SettingsFileError, LibraryFileError) as exc:
         log.error("%s", exc)
         return EXIT_CONFIG
     app = create_app(services)
@@ -116,7 +116,7 @@ def main(
 
 
 def build_services(settings: Settings, *, fake_sonos: bool = False) -> Services:
-    """Wire the application together (raises SettingsFileError)."""
+    """Wire the application together (raises SettingsFileError, LibraryFileError)."""
     store = SettingsStore(settings.data_dir)
     backend_factory: BackendFactory
     room_finder: RoomFinder

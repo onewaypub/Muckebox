@@ -210,3 +210,11 @@ def test_settings_from_a_newer_version_stop_the_start(env, tmp_path, caplog):
     assert not served
     assert "newer" in caplog.text
     assert (data / "settings.json").read_text() == '{"schema": 99}'
+
+
+def test_a_library_from_a_newer_version_stops_the_start(env, tmp_path, caplog):
+    data = tmp_path / "data"
+    data.mkdir()
+    (data / "library.json").write_text('{"schema": 7, "rev": 1, "tiles": []}')
+    assert main(env, serve=lambda *a: None) == EXIT_CONFIG
+    assert "newer Muckebox" in caplog.text

@@ -349,3 +349,11 @@ def test_pin_change_is_refused_if_the_pin_changed_meanwhile(tmp_path):
         st.change_pin("9753", expected_version=checked)
     assert info.value.code == "pin_changed"
     assert not st.verify_pin("9753")
+
+
+def test_sections_of_a_newer_version_are_kept(tmp_path):
+    st = store(tmp_path)
+    edit(tmp_path, lambda d: d.update(future={"x": 1}))
+    SettingsStore(tmp_path, scrypt=CHEAP).set_volume(20, 2)
+    assert json.loads((tmp_path / "settings.json").read_text())["future"] == {"x": 1}
+    assert st  # the first store is still usable

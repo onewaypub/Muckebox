@@ -207,6 +207,8 @@ def generate_pin() -> str:
 
 # -- reading the file ---------------------------------------------------------------
 
+_KNOWN_SECTIONS = frozenset({"schema", "sonos", "volume", "admin"})
+
 
 def _parse(data: dict[str, Any]) -> StoredSettings:
     """Check every value, so a hand-edited file can never loosen the limit."""
@@ -276,6 +278,9 @@ class SettingsStore:
         self._mutex = threading.RLock()
         self._signature: tuple[int, int, int] | None = None
         self._failed_signature: tuple[int, int, int] | None = None
+        # Sections this version does not know (written by a newer Muckebox):
+        # kept as they are, so that going back and forth loses nothing.
+        self._unknown_sections: dict[str, Any] = {}
         self._checked_at = 0.0
         #: Set when the file could not be read at startup and was moved aside.
         self.load_problem: str | None = None
@@ -409,6 +414,7 @@ class SettingsStore:
         if schema != SCHEMA:
             raise ValueError(f"unsupported schema {schema!r}")
         settings = _parse(data)
+        self._unknown_sections = {k: v for k, v in data.items() if k not in _KNOWN_SECTIONS}
         self._signature = signature
         return settings
 
@@ -421,6 +427,7 @@ class SettingsStore:
     def _write(self, settings: StoredSettings) -> None:
         pin = settings.pin
         data: dict[str, Any] = {
+            **self._unknown_sections,
             "schema": SCHEMA,
             "sonos": {
                 "room": settings.room,
