@@ -52,7 +52,15 @@ from .errors import (
     SonosUnreachable,
     UpnpDisabled,
 )
-from .model import Favorite, FavoriteRef, Playback, RoomInfo, Route, ShareLinkRef
+from .model import (
+    Favorite,
+    FavoriteRef,
+    Playback,
+    RoomChoice,
+    RoomInfo,
+    Route,
+    ShareLinkRef,
+)
 from .sharelink import plugin_uri
 from .topology import Member, parse_zone_group_state
 
@@ -62,6 +70,7 @@ REQUEST_TIMEOUT = 3.0  # normal commands
 SLOW_TIMEOUT = 30.0  # enqueueing a large playlist can take this long
 VOLUME_TIMEOUT = 1.5  # the volume guard must never wait long
 DISCOVERY_TIMEOUT = 3.0
+SCAN_THREADS = 64  # network scan: gentle on small NAS models (about 2 s per /24)
 TOPOLOGY_TTL = 5.0  # seconds a group coordinator lookup stays valid
 ART_DEADLINE = 10.0  # seconds for one album art download
 RETRY_PAUSE = 0.5  # seconds before repeating a step after a transient UPnP error
@@ -151,14 +160,102 @@ def _same_room(a: str, b: str) -> bool:
     return a.strip().casefold() == b.strip().casefold()
 
 
+class Household:
+    """Reads the household's topology: from a known speaker, the seed or discovery."""
+
+    def __init__(
+        self,
+        seed_ip: str | None,
+        *,
+        soco_factory: Callable[[str], Any] = soco.SoCo,
+        discover: Callable[..., Iterable[Any] | None] = soco.discover,
+        resolve_host: Callable[[str], str] = socket.gethostbyname,
+    ) -> None:
+        self.seed_ip = seed_ip
+        self._soco_factory = soco_factory
+        self._discover = discover
+        self._resolve_host = resolve_host
+
+    def read(self, known_ip: str | None = None) -> list[Member]:
+        """Ask ``known_ip`` first, then the seed (or discovery)."""
+        sources = [known_ip] if known_ip else []
+        if self.seed_ip:
+            try:
+                sources.append(self._resolve_host(self.seed_ip))
+            except OSError as exc:
+                if not sources:
+                    raise SonosUnreachable(f"cannot resolve {self.seed_ip}: {exc}") from exc
+        elif not sources:
+            # Multicast discovery first; if nothing answers (e.g. a firewall
+            # drops the replies), probe the local networks on TCP 1400.
+            zones = (
+                self._discover(
+                    timeout=DISCOVERY_TIMEOUT, allow_network_scan=True, max_threads=SCAN_THREADS
+                )
+                or set()
+            )
+            sources = sorted(zone.ip_address for zone in zones)
+            if not sources:
+                raise RoomNotFound("no Sonos speaker found on this network")
+        error: SonosError | None = None
+        for ip in dict.fromkeys(sources):
+            try:
+                return self._topology_from(ip)
+            except SonosError as exc:
+                if not exc.connection_problem:
+                    raise
+                error = exc
+        raise error or SonosUnreachable("no speaker to ask")
+
+    def _topology_from(self, ip: str) -> list[Member]:
+        speaker = self._soco_factory(ip)
+        try:
+            # An explicit (empty) argument list keeps SoCo from downloading
+            # the service description first, which has its own long timeout.
+            result = speaker.zoneGroupTopology.GetZoneGroupState([], timeout=REQUEST_TIMEOUT)
+        except Exception as exc:
+            raise translate(exc) from exc
+        try:
+            return parse_zone_group_state(result["ZoneGroupState"])
+        except (KeyError, SyntaxError, ValueError) as exc:
+            raise CommandRejected(f"unreadable zone group state: {exc}") from exc
+
+
+def find_rooms(seed_ip: str | None = None, **household: Any) -> list[RoomChoice]:
+    """The household's rooms (for the parents' page), without choosing one."""
+    try:
+        members = Household(seed_ip, **household).read()
+    except SonosError:
+        raise
+    except Exception as exc:
+        raise translate(exc) from exc
+    groups: dict[str, int] = {}
+    for member in members:
+        if member.visible:
+            groups[member.coordinator_uid] = groups.get(member.coordinator_uid, 0) + 1
+    rooms: dict[str, RoomChoice] = {}
+    for member in sorted((m for m in members if m.visible), key=lambda m: m.ip):
+        rooms.setdefault(
+            member.name,
+            RoomChoice(
+                name=member.name,
+                uid=member.uid,
+                ip=member.ip,
+                grouped=groups.get(member.coordinator_uid, 0) > 1,
+            ),
+        )
+    return sorted(rooms.values(), key=lambda room: room.name.casefold())
+
+
 class SocoBackend:
     """Controls one room of a Sonos household through SoCo."""
 
     def __init__(
         self,
         *,
-        room: str | None,
-        seed_ip: str | None,
+        room: str,
+        room_uid: str | None = None,
+        seed_ip: str | None = None,
         soco_factory: Callable[[str], Any] = soco.SoCo,
         discover: Callable[..., Iterable[Any] | None] = soco.discover,
         resolve_host: Callable[[str], str] = socket.gethostbyname,
@@ -166,13 +263,14 @@ class SocoBackend:
         fetcher_factory: Callable[[], Fetcher] = Fetcher,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
-        if not room and not seed_ip:
-            raise ValueError("room or seed_ip is required")
+        if not room:
+            raise ValueError("a room is required")
         self._room_name = room
-        self._seed_ip = seed_ip
+        self._room_uid = room_uid
+        self._household = Household(
+            seed_ip, soco_factory=soco_factory, discover=discover, resolve_host=resolve_host
+        )
         self._soco_factory = soco_factory
-        self._discover = discover
-        self._resolve_host = resolve_host
         self._http_get = http_get
         self._fetcher_factory = fetcher_factory
         self._clock = clock
@@ -207,57 +305,30 @@ class SocoBackend:
                 coordinator_ip=coordinator.ip,
                 coordinator_uid=coordinator.uid,
                 grouped=group_size > 1,
+                player_uid=room.uid,
             )
 
     def _read_topology(self) -> list[Member]:
-        """Ask the known room first, then the seed (or discovery) for the topology."""
-        sources = [self._room.ip] if self._room else []
-        if self._seed_ip:
-            try:
-                sources.append(self._resolve_host(self._seed_ip))
-            except OSError as exc:
-                if not sources:
-                    raise SonosUnreachable(f"cannot resolve {self._seed_ip}: {exc}") from exc
-        elif not sources:
-            # Multicast discovery first; if nothing answers (e.g. a firewall
-            # drops the replies), probe the local networks on TCP 1400.
-            zones = self._discover(timeout=DISCOVERY_TIMEOUT, allow_network_scan=True) or set()
-            sources = sorted(zone.ip_address for zone in zones)
-            if not sources:
-                raise RoomNotFound("no Sonos speaker found on this network")
-        error: SonosError | None = None
-        for ip in dict.fromkeys(sources):
-            try:
-                return self._topology_from(ip)
-            except SonosError as exc:
-                if not exc.connection_problem:
-                    raise
-                error = exc
-        raise error or SonosUnreachable("no speaker to ask")
-
-    def _topology_from(self, ip: str) -> list[Member]:
-        speaker = self._soco_factory(ip)
-        # An explicit (empty) argument list keeps SoCo from downloading the
-        # service description first, which has its own long timeout.
-        result = self._call(speaker.zoneGroupTopology.GetZoneGroupState, [])
-        try:
-            return parse_zone_group_state(result["ZoneGroupState"])
-        except (KeyError, SyntaxError, ValueError) as exc:
-            raise CommandRejected(f"unreadable zone group state: {exc}") from exc
+        return self._household.read(known_ip=self._room.ip if self._room else None)
 
     def _select(self, members: list[Member]) -> tuple[Member, Member]:
-        wanted = self._room_name
-        if not wanted:
-            seed_ip = self._room.ip if self._room else self._resolve_host(self._seed_ip or "")
-            wanted = next((m.name for m in members if m.ip == seed_ip), "")
-        rooms = sorted(
-            (m for m in members if m.visible and _same_room(m.name, wanted)),
-            key=lambda m: m.ip,
-        )
-        if not rooms:
-            names = sorted({m.name for m in members if m.visible})
-            raise RoomNotFound(f"room {wanted!r} not found; rooms: {', '.join(names) or 'none'}")
-        room = rooms[0]
+        """Find the room by its speaker ID first, then by name."""
+        visible = [m for m in members if m.visible]
+        room = next((m for m in visible if self._room_uid and m.uid == self._room_uid), None)
+        if room is None:
+            by_name = sorted(
+                (m for m in visible if _same_room(m.name, self._room_name)), key=lambda m: m.ip
+            )
+            room = by_name[0] if by_name else None
+        if room is None:
+            names = sorted({m.name for m in visible})
+            raise RoomNotFound(
+                f"room {self._room_name!r} not found; rooms: {', '.join(names) or 'none'}"
+            )
+        if room.name != self._room_name:
+            log.info("Room %r is now called %r in the Sonos app", self._room_name, room.name)
+            self._room_name = room.name
+        self._room_uid = room.uid
         coordinator = next((m for m in members if m.uid == room.coordinator_uid), None)
         if coordinator is None:
             raise GroupProblem("the room has no group coordinator")
