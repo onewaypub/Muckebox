@@ -31,17 +31,33 @@ all welcome.
 - Only copy code from projects whose license is compatible with
   AGPL-3.0-or-later, and keep their notices.
 - The browser baseline is **iOS/iPadOS 16.4+ and Chrome/WebView 111+**,
-  without a build step. Lint checks enforce it.
+  without a build step. ESLint (`eslint-plugin-compat`) and Stylelint
+  (`stylelint-no-unsupported-browser-features`) check the browser code
+  against it (`npm ci` once, then `npm run lint`). `touch-action` is
+  exempt: iOS Safari supports it; only desktop Safari lacks it, where it
+  does not matter.
 
 ## Development setup
 
-Requires Python 3.13+ (and Node.js for the frontend checks once they exist).
+Requires Python 3.13+ and Node.js 24+ (only for the frontend checks).
 
 ```sh
 python3 -m venv .venv
 . .venv/bin/activate
-pip install -r requirements-dev.txt
+pip install --require-hashes -r requirements-dev.txt
+npm ci                                         # browser linters (dev only)
+python -m playwright install webkit chromium   # optional: browser tests
 ```
+
+Run Muckebox without a speaker (a simulated one with demo favorites):
+
+```sh
+MUCKEBOX_FAKE_SONOS=1 SONOS_IP=192.0.2.10 DATA_DIR=./data ADMIN_PIN=... python -m muckebox
+```
+
+Replace `...` with a PIN of your choice (at least 4 characters). Then open
+<http://localhost:8484/> (kids view) and <http://localhost:8484/admin>
+(parents' page).
 
 ## Checks
 

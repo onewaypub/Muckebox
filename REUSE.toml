@@ -10,3 +10,8 @@ version = 1
 path = ["requirements.txt", "requirements-dev.txt"]
 SPDX-FileCopyrightText = "2026 Muckebox contributors"
 SPDX-License-Identifier = "AGPL-3.0-or-later"
+
+[[annotations]]
+path = ["package.json", "package-lock.json", ".stylelintrc.json"]
+SPDX-FileCopyrightText = "2026 Muckebox contributors"
+SPDX-License-Identifier = "AGPL-3.0-or-later"
