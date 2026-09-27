@@ -85,17 +85,27 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Build the image
         run: docker build -t muckebox:ci .
-      - name: Start it with a simulated speaker and check that it answers
+      - name: Start it with simulated speakers and set it up like a parent
         run: |
-          docker run -d --name muckebox -p 8484:8484 \
-            -e MUCKEBOX_FAKE_SONOS=1 -e SONOS_IP=192.0.2.10 \
-            muckebox:ci
-          for attempt in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:8484/api/health; then break; fi
+          docker run -d --name muckebox -p 8484:8484 -e MUCKEBOX_FAKE_SONOS=1 muckebox:ci
+          url=http://127.0.0.1:8484
+          for _ in $(seq 1 30); do
+            if curl -fsS $url/api/health; then break; fi
             sleep 1
           done
-          curl -fsS http://127.0.0.1:8484/api/state | grep -q '"status":"ok"'
-          curl -fsS http://127.0.0.1:8484/ | grep -q 'manifest.webmanifest'
+          curl -fsS $url/api/state | grep -q '"status":"not_configured"'
+          curl -fsS $url/ | grep -q 'manifest.webmanifest'
+          # The first PIN is in the log (a throwaway PIN of this test container).
+          pin=$(docker logs muckebox 2>&1 | grep -oE 'PIN: [0-9]{6}' | head -1 | cut -d' ' -f2)
+          test -n "$pin"
+          api() { curl -fsS -b jar -c jar -H 'X-Muckebox: 1' -H 'Content-Type: application/json' "$@"; }
+          api -d "{\"pin\": \"$pin\"}" $url/api/admin/login
+          api -X PUT -d '{"room": "Kinderzimmer"}' $url/api/admin/settings/room
+          curl -fsS $url/api/state | grep -q '"status":"ok"'
+          # A forgotten PIN: reset it inside the container; the session ends.
+          docker exec muckebox python -m muckebox.admin reset-pin | grep -q "PIN for the parents' page"
+          sleep 2
+          test "$(curl -s -o /dev/null -w '%{http_code}' -b jar $url/api/admin/settings)" = 401
       - name: Stop it cleanly
         run: |
           docker stop -t 10 muckebox
