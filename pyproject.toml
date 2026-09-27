@@ -29,6 +29,9 @@ select = [
   "RUF",      # ruff-specific
 ]
 
+# Typographic characters used on purpose in texts and comments.
+allowed-confusables = ["×", "–", "‘", "’"]
+
 [tool.ruff.lint.per-file-ignores]
 # Developer scripts and tests run fixed git/tool commands.
 "scripts/**" = ["S603", "S607"]
