@@ -34,7 +34,8 @@ Muckebox is designed for a trusted home network:
   checks. The PIN is stored as a salted scrypt hash. A copy of
   `settings.json` still lets an attacker try PINs offline, which is quick for
   a short numeric PIN: use a longer PIN if backups of the data folder leave
-  your home.
+  your home. Until the parents set their own PIN, `settings.json` also holds
+  the PIN Muckebox generated in plain text.
 - Whoever can run commands in the container or write to the data folder can
   set a new PIN (`python -m muckebox.admin reset-pin`) and read or change the
   settings. Access to the Docker host is the trust boundary.
