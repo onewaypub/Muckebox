@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 import json
+import os
 import stat
 
 import pytest
@@ -232,3 +233,119 @@ def test_root_hands_the_file_back_to_its_owner(tmp_path, monkeypatch):
     monkeypatch.setattr(settings_module.os, "chown", lambda path, uid, gid: chowned.append(path))
     SettingsStore(tmp_path, scrypt=CHEAP).reset_pin()
     assert tmp_path / "settings.json" in chowned
+
+
+# -- files that were edited or damaged by hand ------------------------------------------
+
+
+def edit(tmp_path, change):
+    path = tmp_path / "settings.json"
+    data = json.loads(path.read_text())
+    change(data)
+    path.write_text(json.dumps(data))
+
+
+BROKEN = {
+    "sections missing": lambda d: d.clear() or d.update({"schema": 1, "sonos": None}),
+    "sonos is null": lambda d: d.update(sonos=None),
+    "limit too high": lambda d: d["volume"].update(max=150),
+    "limit is a float": lambda d: d["volume"].update(max=1e300),
+    "limit is true": lambda d: d["volume"].update(max=True),
+    "room with a newline": lambda d: d["sonos"].update(room="a\nb"),
+    "seed is a URL": lambda d: d["sonos"].update(seed_ip="http://x"),
+    "hash is not hex": lambda d: d["admin"]["pin"].update(hash="zz"),
+    "huge scrypt cost": lambda d: d["admin"]["pin"].update(n=2**30),
+    "odd scrypt cost": lambda d: d["admin"]["pin"].update(n=1000),
+    "generated pin is a number": lambda d: d["admin"].update(generated_pin=123456),
+}
+
+
+@pytest.mark.parametrize("change", BROKEN.values(), ids=BROKEN.keys())
+def test_broken_file_at_runtime_keeps_the_last_settings(tmp_path, clock, caplog, change):
+    server = store(tmp_path, clock)
+    server.set_volume(20, 2)
+    edit(tmp_path, change)
+    for _ in range(5):
+        clock.now += 1.5
+        assert server.current().max_volume == 20
+    assert caplog.text.count("keeping the last settings") == 1  # not once a second
+
+
+@pytest.mark.parametrize("change", BROKEN.values(), ids=BROKEN.keys())
+def test_broken_file_at_startup_is_moved_aside(tmp_path, change):
+    store(tmp_path).set_volume(20, 2)
+    edit(tmp_path, change)
+    st = store(tmp_path)
+    assert st.load_problem == "settings_corrupt"
+    assert st.current().max_volume == DEFAULT_MAX_VOLUME
+    assert list(tmp_path.glob("settings.json.corrupt-*"))
+
+
+def test_newer_file_at_runtime_keeps_the_last_settings(tmp_path, clock):
+    server = store(tmp_path, clock)
+    server.set_volume(20, 2)
+    edit(tmp_path, lambda d: d.update(schema=2))
+    clock.now += 1.5
+    assert server.current().max_volume == 20
+
+
+def test_a_change_repairs_a_broken_file(tmp_path, clock):
+    server = store(tmp_path, clock)
+    server.set_room("Kinderzimmer", None, None)
+    (tmp_path / "settings.json").write_text("{broken")
+    server.set_volume(18, 2)
+    fresh = SettingsStore(tmp_path, scrypt=CHEAP)
+    assert (fresh.current().room, fresh.current().max_volume) == ("Kinderzimmer", 18)
+    assert list(tmp_path.glob("settings.json.corrupt-*"))
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root can read anything")
+def test_unreadable_file_at_startup_is_kept_and_stops_the_start(tmp_path):
+    store(tmp_path).set_volume(20, 2)
+    path = tmp_path / "settings.json"
+    path.chmod(0)
+    try:
+        with pytest.raises(SettingsFileError, match="belongs to the user"):
+            store(tmp_path)
+        assert not list(tmp_path.glob("settings.json.corrupt-*"))
+    finally:
+        path.chmod(0o600)
+    assert store(tmp_path).current().max_volume == 20
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root can write anything")
+def test_read_only_use_needs_no_write_access(tmp_path):
+    store(tmp_path).set_volume(20, 2)
+    (tmp_path / "settings.lock").chmod(0o400)
+    tmp_path.chmod(0o500)
+    try:
+        assert store(tmp_path, create=False).current().max_volume == 20
+    finally:
+        tmp_path.chmod(0o700)
+
+
+def test_pins_that_cannot_be_encoded(tmp_path):
+    st = store(tmp_path)
+    with pytest.raises(SettingsError) as info:
+        st.change_pin("12\ud80034")
+    assert info.value.code == "pin_invalid"
+    assert st.check("\ud800") is None
+
+
+def test_check_returns_the_version_it_matched(tmp_path):
+    st = store(tmp_path)
+    st.change_pin("2468")
+    assert st.check("2468") == st.current().pin.version
+    assert st.check("1357") is None
+    assert st.check(None) is None
+
+
+def test_pin_change_is_refused_if_the_pin_changed_meanwhile(tmp_path):
+    st = store(tmp_path)
+    st.change_pin("2468")
+    checked = st.check("2468")
+    store(tmp_path).reset_pin()  # e.g. reset-pin from the command line
+    with pytest.raises(SettingsError) as info:
+        st.change_pin("9753", expected_version=checked)
+    assert info.value.code == "pin_changed"
+    assert not st.verify_pin("9753")
