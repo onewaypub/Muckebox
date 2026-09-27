@@ -30,7 +30,9 @@ select = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# Tests may assert and run fixed git/tool commands.
+# Developer scripts and tests run fixed git/tool commands.
+"scripts/**" = ["S603", "S607"]
+# Tests may also assert.
 "tests/**" = ["S101", "S603", "S607"]
 
 [tool.pytest.ini_options]
