@@ -3,7 +3,7 @@
 """The kids API, pages, manifest and icons."""
 
 import io
-import re
+from html.parser import HTMLParser
 
 import pytest
 from PIL import Image
@@ -157,6 +157,23 @@ def test_unknown_or_invalid_cover(client, services, path):
 # -- pages ------------------------------------------------------------------------------
 
 
+class _ScriptTags(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.inline = []
+
+    def handle_starttag(self, tag, attrs):
+        attributes = dict(attrs)
+        if tag == "script" and "src" not in attributes:
+            self.inline.append(attributes)
+
+
+def inline_scripts(html):
+    parser = _ScriptTags()
+    parser.feed(html)
+    return parser.inline
+
+
 def test_kids_page(client):
     response = client.get("/")
     html = response.get_data(as_text=True)
@@ -166,8 +183,7 @@ def test_kids_page(client):
     assert 'name="apple-mobile-web-app-capable" content="yes"' in html
     assert '<html lang="de">' in html
     # The only inline script is the (non-executable) message catalogue.
-    inline = re.findall(r"<script(?![^>]*\bsrc=)([^>]*)>", html)
-    assert inline == [' id="i18n" type="application/json"']
+    assert inline_scripts(html) == [{"id": "i18n", "type": "application/json"}]
     assert "Keine Verbindung zur Muckebox" in html
 
 
