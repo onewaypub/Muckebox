@@ -91,13 +91,20 @@ extract the new version over `docker/muckebox` and set `user:` (and `PORT` or
 `LISTEN`, if you changed them) in the new `docker-compose.yml` again. With
 git: `git stash && git pull && git stash pop`. Then build and start the
 project again.
+**Updating from a version without settings on the parents' page** (where
+`docker-compose.yml` still has `SONOS_ROOM` and `ADMIN_PIN`): the old and new
+`docker-compose.yml` conflict. With git, run `git stash && git pull && git
+stash drop` instead; with a ZIP, use the new file. Set `user:` again, start
+Muckebox, log in with the PIN from the log and choose the room, the volume
+limit and your PIN on the parents' page.
 **Forgotten PIN:** Container Manager → *Container* → `muckebox` →
 *Terminal* → *Create* → `bash`, then run
 `python -m muckebox.admin reset-pin` (or on other hosts:
 `docker exec muckebox python -m muckebox.admin reset-pin`). It prints a new
 PIN and logs out all devices; Muckebox uses it right away, without a restart.
 **Backup:** back up the `data` folder. It holds your tiles, covers and
-settings (the PIN only as a hash).
+settings. Your own PIN is stored only as a hash; the PIN Muckebox generated
+is stored in plain text until you set your own.
 **Logs:** Container Manager → *Container* → `muckebox` → *Log*.
 
 ### Other Docker hosts
@@ -120,7 +127,7 @@ Muckebox needs these connections:
 |---|---|---|---|
 | Tablets, parents' phone | Muckebox host | TCP 8484 (`PORT`) | The web UI |
 | Muckebox host | Sonos speakers | TCP 1400 | Controlling the speakers |
-| Muckebox host | Sonos speakers | UDP 1900 multicast | Only for the room search when no speaker address is entered |
+| Muckebox host | Sonos speakers | UDP 1900 multicast | Only without a speaker address on the parents' page: for the room search and to find the chosen room again after each start |
 | Muckebox host | Internet | TCP 443, some cover art TCP 80, and DNS | When the parents' page shows favorites (thumbnails) and when parents add favorites or share links. Share-link lookups use HTTPS only. |
 
 **Speakers in another VLAN** (for example an IoT network in UniFi): the
