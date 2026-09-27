@@ -113,3 +113,17 @@ def test_dns_is_blocked_in_tests():
 
 def test_loopback_stays_available_in_tests():
     assert socket.getaddrinfo("localhost", 80)
+
+
+def test_import_rules():
+    """soco only inside muckebox.sonos; muckebox.sonos never imports Flask."""
+    import_re = re.compile(r"^\s*(?:from|import)\s+([a-z_][\w.]*)", re.MULTILINE)
+    offenders = []
+    for path in (ROOT / "muckebox").rglob("*.py"):
+        relative = path.relative_to(ROOT).as_posix()
+        in_sonos = relative.startswith("muckebox/sonos/")
+        for module in import_re.findall(path.read_text(encoding="utf-8")):
+            top = module.split(".")[0]
+            if (top == "soco" and not in_sonos) or (top in ("flask", "werkzeug") and in_sonos):
+                offenders.append(f"{relative}: {module}")
+    assert not offenders
