@@ -45,6 +45,7 @@ MESSAGES: dict[str, str] = {
     ),
     "admin.room_grouped": "gruppiert",
     "admin.choose": "Wählen",
+    "admin.apply": "Übernehmen",
     "admin.chosen": "Gewählt",
     "admin.room_saved": "Die Muckebox steuert jetzt „{room}“.",
     "admin.room_hint": (
@@ -157,8 +158,9 @@ MESSAGES: dict[str, str] = {
         "Sicherheit → Verbindungssicherheit „UPnP“ einschalten."
     ),
     "error.room_not_found": (
-        "Der Raum wurde nicht gefunden. SONOS_ROOM prüfen oder SONOS_IP setzen "
-        "(nötig, wenn Sonos in einem anderen Netzwerk/VLAN ist)."
+        "Der Raum wurde nicht gefunden. Ist der Lautsprecher an? Wenn Sonos in einem anderen "
+        "Netz (VLAN) ist: auf der Eltern-Seite unter „Einrichtung“ die IP-Adresse eines "
+        "Lautsprechers eintragen und neu suchen."
     ),
     "error.sonos_timeout": "Der Lautsprecher hat zu lange nicht geantwortet.",
     "error.group_problem": "Mit der Gruppierung der Räume stimmt etwas nicht.",

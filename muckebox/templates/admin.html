@@ -28,7 +28,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
   <form id="login" class="card login" hidden>
     <label for="pin" data-i18n="admin.pin"></label>
-    <input id="pin" name="pin" type="password" inputmode="numeric" autocomplete="current-password" required>
+    <input id="pin" name="pin" type="password" autocomplete="current-password" required>
     <button type="submit" data-i18n="admin.login"></button>
     <p class="hint"><span data-i18n="admin.login_hint"></span>
       <code class="command">python -m muckebox.admin reset-pin</code></p>
@@ -53,7 +53,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
         <label for="seed-ip" data-i18n="admin.seed_ip"></label>
         <p class="hint" data-i18n="admin.seed_ip_hint"></p>
         <div class="inline">
-          <input id="seed-ip" name="seed_ip" inputmode="decimal" autocomplete="off" spellcheck="false" data-i18n-placeholder="admin.seed_ip_placeholder">
+          <input id="seed-ip" name="seed_ip" inputmode="url" autocapitalize="off" autocomplete="off" spellcheck="false" data-i18n-placeholder="admin.seed_ip_placeholder">
           <button type="submit" class="secondary" data-i18n="admin.search_rooms"></button>
         </div>
       </form>
