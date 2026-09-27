@@ -249,3 +249,72 @@ footer {
   color: var(--muted);
   font-size: 1.8rem;
 }
+
+.banner {
+  background: #fff4e5;
+  border-left: 6px solid #f4a261;
+}
+
+.banner a {
+  margin-left: 8px;
+  white-space: nowrap;
+}
+
+.inline {
+  display: flex;
+  gap: 8px;
+}
+
+.inline input {
+  flex: 1;
+}
+
+.room-search label,
+.fields label {
+  font-weight: 600;
+}
+
+.room-search .hint {
+  margin: 4px 0 8px;
+}
+
+.rooms {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+}
+
+.room-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 0;
+  border-top: 1px solid #eaecf0;
+}
+
+.room-row .name {
+  display: grid;
+}
+
+.fields {
+  display: grid;
+  gap: 8px;
+  max-width: 360px;
+}
+
+.fields .hint {
+  margin: 0;
+}
+
+.fields button {
+  justify-self: start;
+}
+
+.command {
+  display: block;
+  margin-top: 4px;
+  overflow-x: auto;
+  white-space: nowrap;
+  color: var(--text);
+}
