@@ -18,10 +18,6 @@ MESSAGES: dict[str, str] = {
     "kids.error": "Das hat gerade nicht geklappt",
     # -- parents' page -----------------------------------------------------------
     "admin.title": "Muckebox – Eltern",
-    "admin.locked": (
-        "Die Eltern-Seite ist gesperrt. Setze die Umgebungsvariable ADMIN_PIN "
-        "(mindestens 4 Zeichen) und starte die Muckebox neu."
-    ),
     "admin.pin": "PIN",
     "admin.login": "Anmelden",
     "admin.logout": "Abmelden",
@@ -101,7 +97,6 @@ MESSAGES: dict[str, str] = {
         "Favorit und füge ihn hier als Favorit hinzu."
     ),
     "error.sharelink_unresolvable": "Der Link konnte nicht geöffnet werden.",
-    "error.admin_locked": "Die Eltern-Seite ist gesperrt (keine ADMIN_PIN gesetzt).",
     "error.login_required": "Bitte zuerst anmelden.",
     "error.pin_wrong": "Die PIN ist falsch.",
     "error.pin_rate_limited": "Zu viele Versuche. Bitte in {retry_in} Sekunden erneut versuchen.",
@@ -139,21 +134,22 @@ MESSAGES: dict[str, str] = {
         "Die gespeicherten Einstellungen waren beschädigt und wurden beiseitegelegt. "
         "Bitte Raum, Lautstärke und PIN neu festlegen."
     ),
-    "error.sonos_not_configured": (
-        "Es ist kein Sonos-Lautsprecher eingestellt. Bitte SONOS_ROOM oder SONOS_IP setzen."
+    # Settings on the parents' page
+    "error.room_invalid": "Bitte einen Raum wählen (höchstens 100 Zeichen).",
+    "error.seed_ip_invalid": (
+        "Die Lautsprecher-Adresse ist ungültig. Erlaubt sind eine IPv4-Adresse oder ein Hostname "
+        "(ohne Port und ohne http://)."
     ),
-    "error.sonos_ip_invalid": (
-        "SONOS_IP ist ungültig. Erlaubt sind eine IPv4-Adresse oder ein Hostname."
+    "error.max_volume_invalid": "Das Lautstärke-Limit muss eine ganze Zahl von 1 bis 100 sein.",
+    "error.volume_step_invalid": (
+        "Die Schrittweite muss eine ganze Zahl von 1 bis zum Lautstärke-Limit sein."
     ),
-    "error.max_volume_invalid": "MAX_VOLUME muss eine ganze Zahl von 1 bis 100 sein.",
-    "error.volume_step_invalid": "VOLUME_STEP muss eine ganze Zahl von 1 bis MAX_VOLUME sein.",
-    "error.admin_pin_missing": "Es ist keine ADMIN_PIN gesetzt. Die Eltern-Seite bleibt gesperrt.",
-    "error.admin_pin_placeholder": (
-        "Die ADMIN_PIN ist noch ein Beispielwert. Bitte eine eigene PIN setzen; "
-        "bis dahin bleibt die Eltern-Seite gesperrt."
+    "error.pin_too_short": "Die PIN muss mindestens 4 Zeichen lang sein.",
+    "error.pin_placeholder": "Diese PIN ist zu leicht zu erraten. Bitte eine andere wählen.",
+    "error.pin_invalid": (
+        "Die PIN darf höchstens 64 Zeichen lang sein und keine Steuerzeichen enthalten."
     ),
-    "error.admin_pin_too_short": (
-        "Die ADMIN_PIN muss mindestens {min_length} Zeichen lang sein. "
-        "Die Eltern-Seite bleibt gesperrt."
+    "error.settings_save_failed": (
+        "Die Einstellungen konnten nicht gespeichert werden. Ist der Datenordner beschreibbar?"
     ),
 }

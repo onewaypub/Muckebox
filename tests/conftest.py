@@ -100,10 +100,12 @@ def make_store(tmp_path, household):
     """A settings store in tmp_path; ``room`` is chosen unless it is None."""
     from muckebox.settings import SettingsStore
 
-    def make(room="Kinderzimmer", seed_ip=None, **kwargs):
+    def make(room="Kinderzimmer", seed_ip=None, pin=None, **kwargs):
         store = SettingsStore(tmp_path, scrypt=TEST_SCRYPT, **kwargs)
         if room is not None:
             store.set_room(room, household.uid(room), seed_ip)
+        if pin is not None:
+            store.change_pin(pin)
         return store
 
     return make
@@ -120,11 +122,12 @@ def make_services(tmp_path, household, make_store):
     from muckebox.runtime.service import Runtime
     from muckebox.web.app import Services
 
-    def make(room="Kinderzimmer", **env):
-        settings = load_settings({"DATA_DIR": str(tmp_path), "ADMIN_PIN": "2468", **env})
+    def make(room="Kinderzimmer", pin="2468", **env):
+        settings = load_settings({"DATA_DIR": str(tmp_path), **env})
+        store = make_store(room, pin=pin)
         library = Library(tmp_path / "library.json")
         runtime = Runtime(
-            make_store(room),
+            store,
             library,
             tmp_path,
             backend_factory=household.backend,
@@ -134,6 +137,7 @@ def make_services(tmp_path, household, make_store):
         )
         return Services(
             settings=settings,
+            store=store,
             runtime=runtime,
             library=library,
             covers=CoverStore(tmp_path / "covers"),

@@ -40,9 +40,10 @@ class Server:
     def __init__(self, tmp_path):
         household = FakeHousehold()
         self.fake = household.speaker("Kinderzimmer")
-        settings = load_settings({"DATA_DIR": str(tmp_path), "ADMIN_PIN": "2468"})
+        settings = load_settings({"DATA_DIR": str(tmp_path)})
         store = SettingsStore(tmp_path, scrypt={"n": 2**4, "r": 8, "p": 1})
         store.set_room("Kinderzimmer", household.uid("Kinderzimmer"), None)
+        store.change_pin("2468")
         self.library = Library(tmp_path / "library.json")
         self.runtime = Runtime(
             store,
@@ -52,7 +53,12 @@ class Server:
             room_finder=household.find_rooms,
         )
         services = Services(
-            settings, self.runtime, self.library, CoverStore(tmp_path / "c"), b"k" * 32
+            settings=settings,
+            store=store,
+            runtime=self.runtime,
+            library=self.library,
+            covers=CoverStore(tmp_path / "c"),
+            secret_key=b"k" * 32,
         )
         self.server = create_server(create_app(services), host="127.0.0.1", port=0, threads=4)
         self.url = f"http://127.0.0.1:{self.server.effective_port}"
