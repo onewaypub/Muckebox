@@ -35,13 +35,18 @@ MAX_FAILURES_GLOBAL = 20
 
 
 class RateLimiter:
-    """Counts failed logins in memory; entries older than the window are dropped."""
+    """Counts failed logins in memory; entries older than the window are dropped.
+
+    An attempt is reserved before the (slow) PIN check starts, so parallel
+    requests cannot get more guesses than the limits allow.
+    """
 
     def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
         self._clock = clock
         self._lock = threading.Lock()
         self._per_client: dict[str, deque[float]] = {}
         self._global: deque[float] = deque()
+        self._running: dict[str, int] = {}  # checks in progress per client
         self._pin_version: str | None = None
 
     def follow_pin(self, version: str) -> None:
@@ -52,28 +57,36 @@ class RateLimiter:
                 self._per_client.clear()
                 self._global.clear()
 
-    def retry_in(self, client: str) -> int | None:
-        """Seconds until ``client`` may try again, or None if it may now."""
+    def begin(self, client: str) -> int | None:
+        """Reserve one attempt. Returns the seconds to wait if ``client`` may not try now."""
         with self._lock:
             now = self._clock()
             self._prune(now)
+            running = self._running.get(client, 0)
             waits = [
-                self._wait(self._per_client.get(client, deque()), MAX_FAILURES_PER_CLIENT, now),
-                self._wait(self._global, MAX_FAILURES_GLOBAL, now),
+                self._wait(
+                    self._per_client.get(client, deque()), running, MAX_FAILURES_PER_CLIENT, now
+                ),
+                self._wait(self._global, sum(self._running.values()), MAX_FAILURES_GLOBAL, now),
             ]
-        known = [wait for wait in waits if wait is not None]
-        return max(known) if known else None
+            known = [wait for wait in waits if wait is not None]
+            if known:
+                return max(known)
+            self._running[client] = running + 1
+            return None
 
-    def failure(self, client: str) -> None:
+    def finish(self, client: str, ok: bool) -> None:
+        """End an attempt reserved with :meth:`begin`."""
         with self._lock:
-            now = self._clock()
-            self._prune(now)
-            self._per_client.setdefault(client, deque()).append(now)
-            self._global.append(now)
-
-    def success(self, client: str) -> None:
-        with self._lock:
-            self._per_client.pop(client, None)
+            self._running[client] -= 1
+            if not self._running[client]:
+                del self._running[client]
+            if ok:
+                self._per_client.pop(client, None)
+            else:
+                now = self._clock()
+                self._per_client.setdefault(client, deque()).append(now)
+                self._global.append(now)
 
     def _prune(self, now: float) -> None:
         for queue in (*self._per_client.values(), self._global):
@@ -83,10 +96,12 @@ class RateLimiter:
             del self._per_client[client]
 
     @staticmethod
-    def _wait(failures: deque[float], limit: int, now: float) -> int | None:
-        if len(failures) < limit:
-            return None
-        return int(FAILURE_WINDOW - (now - failures[0])) + 1
+    def _wait(failures: deque[float], running: int, limit: int, now: float) -> int | None:
+        if len(failures) >= limit:
+            return int(FAILURE_WINDOW - (now - failures[0])) + 1
+        if len(failures) + running >= limit:
+            return 1  # the checks still running may use up the remaining attempts
+        return None
 
 
 def _store() -> SettingsStore:
@@ -108,32 +123,39 @@ def is_logged_in() -> bool:
     )
 
 
-def check_pin(given: object, limiter: RateLimiter) -> None:
-    """Raise unless ``given`` is the current PIN (rate limited)."""
+def check_pin(given: object, limiter: RateLimiter) -> str:
+    """Return the version of the PIN that ``given`` matched; raise otherwise (rate limited)."""
     store = _store()
     limiter.follow_pin(store.current().pin.version)
     client = request.remote_addr or "unknown"
-    wait = limiter.retry_in(client)
+    wait = limiter.begin(client)
     if wait is not None:
         raise ApiError(429, "pin_rate_limited", wait)
-    valid = isinstance(given, str) and len(given) <= MAX_PIN_LENGTH and store.verify_pin(given)
-    if not valid:
-        limiter.failure(client)
+    version = None
+    try:
+        if isinstance(given, str) and len(given) <= MAX_PIN_LENGTH:
+            version = store.check(given)
+    finally:
+        limiter.finish(client, ok=version is not None)
+    if version is None:
         raise ApiError(401, "pin_wrong")
-    limiter.success(client)
+    return version
 
 
-def start_session() -> None:
-    """Log this browser in with the current PIN (ends nothing else)."""
+def start_session(pin_version: str) -> None:
+    """Log this browser in, bound to ``pin_version`` (ends nothing else).
+
+    Binding to the PIN that was actually checked matters: if the PIN changed
+    while the check ran, this session must be invalid right away.
+    """
     session.clear()
     session.permanent = True
-    session["auth"] = _token(_store().current().pin.version)
+    session["auth"] = _token(pin_version)
     session["exp"] = time.time() + SESSION_LIFETIME.total_seconds()
 
 
 def login(given: object, limiter: RateLimiter) -> None:
-    check_pin(given, limiter)
-    start_session()
+    start_session(check_pin(given, limiter))
 
 
 def logout() -> None:
