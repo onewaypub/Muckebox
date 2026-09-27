@@ -40,8 +40,14 @@ def normalise(data: bytes) -> bytes:
                 image.load()
                 image = ImageOps.exif_transpose(image)
                 image = _to_rgb(image)
-        except (UnidentifiedImageError, OSError, SyntaxError, ValueError,
-                Image.DecompressionBombError, Image.DecompressionBombWarning) as exc:  # fmt: skip
+        except (
+            UnidentifiedImageError,
+            OSError,
+            SyntaxError,
+            ValueError,
+            Image.DecompressionBombError,
+            Image.DecompressionBombWarning,
+        ) as exc:
             raise CoverError(f"not a usable image: {exc}") from exc
 
     ratio = image.width / image.height

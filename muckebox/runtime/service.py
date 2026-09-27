@@ -398,8 +398,9 @@ class Runtime:
             raise Unavailable("config_error")
         sonos = self.state.get("sonos")
         if self.transport_breaker.is_open:
-            raise Unavailable(sonos.get("status") or "sonos_unreachable",
-                              self.transport_breaker.retry_in())  # fmt: skip
+            raise Unavailable(
+                sonos.get("status") or "sonos_unreachable", self.transport_breaker.retry_in()
+            )
         self.policy.check(command)
 
     def _submit_exclusive(self, job: Callable[[], Any], pending: dict | None) -> Future:
@@ -428,8 +429,11 @@ class Runtime:
                 playback={"state": "unknown", "tile_id": None},
                 actions=[],
             )
-            log.warning("Sonos not reachable (%s); retrying in %ss", exc.code,
-                        self.transport_breaker.retry_in())  # fmt: skip
+            log.warning(
+                "Sonos not reachable (%s); retrying in %ss",
+                exc.code,
+                self.transport_breaker.retry_in(),
+            )
         else:
             log.info("Sonos command failed: %s (%s)", exc.code, exc)
 

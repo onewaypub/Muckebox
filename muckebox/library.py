@@ -124,12 +124,18 @@ class Library:
 
     # -- changing -----------------------------------------------------------
 
-    def add(self, title: str, source: dict[str, Any], cover: str | None = None,
-            expected_rev: int | None = None) -> Tile:  # fmt: skip
+    def add(
+        self,
+        title: str,
+        source: dict[str, Any],
+        cover: str | None = None,
+        expected_rev: int | None = None,
+    ) -> Tile:
         with self._lock:
             self._check_rev(expected_rev)
-            tile = Tile(id="t" + secrets.token_hex(8), title=clean_title(title), source=source,
-                        cover=cover)  # fmt: skip
+            tile = Tile(
+                id="t" + secrets.token_hex(8), title=clean_title(title), source=source, cover=cover
+            )
             self._tiles.append(tile)
             self._save()
             return Tile(**asdict(tile))
