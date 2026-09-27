@@ -1,0 +1,234 @@
+# SPDX-FileCopyrightText: 2026 Muckebox contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+import json
+import stat
+
+import pytest
+
+from muckebox import settings as settings_module
+from muckebox.settings import (
+    DEFAULT_MAX_VOLUME,
+    DEFAULT_VOLUME_STEP,
+    SettingsError,
+    SettingsFileError,
+    SettingsStore,
+    validate_seed_ip,
+)
+
+CHEAP = {"n": 2**4, "r": 8, "p": 1}  # fast scrypt for tests
+
+
+class Clock:
+    def __init__(self):
+        self.now = 0.0
+
+    def __call__(self):
+        return self.now
+
+
+@pytest.fixture
+def clock():
+    return Clock()
+
+
+def store(tmp_path, clock=None, **kwargs):
+    return SettingsStore(tmp_path, scrypt=CHEAP, clock=clock or Clock(), **kwargs)
+
+
+def test_first_start_creates_defaults_and_a_generated_pin(tmp_path):
+    s = store(tmp_path).current()
+    assert (s.room, s.room_uid, s.seed_ip) == (None, None, None)
+    assert (s.max_volume, s.volume_step) == (DEFAULT_MAX_VOLUME, DEFAULT_VOLUME_STEP)
+    assert not s.configured
+    assert s.pin_generated
+    assert len(s.pin.generated) == 6 and s.pin.generated.isdigit()
+    assert stat.S_IMODE((tmp_path / "settings.json").stat().st_mode) == 0o600
+
+
+def test_generated_pin_is_stable_across_restarts(tmp_path):
+    first = store(tmp_path).current().pin.generated
+    assert store(tmp_path).current().pin.generated == first
+
+
+def test_generated_pin_is_never_in_repr(tmp_path):
+    s = store(tmp_path).current()
+    assert s.pin.generated not in repr(s)
+
+
+def test_pin_is_stored_hashed_and_verified(tmp_path):
+    st = store(tmp_path)
+    st.change_pin("  my pin 42 ")
+    raw = (tmp_path / "settings.json").read_text()
+    assert "my pin 42" not in raw
+    assert json.loads(raw)["admin"]["generated_pin"] is None
+    assert st.verify_pin("my pin 42")
+    assert st.verify_pin(" my pin 42")
+    assert not st.verify_pin("my pin 43")
+    assert not st.verify_pin(None)
+    assert not st.current().pin_generated
+
+
+@pytest.mark.parametrize(
+    ("pin", "code"),
+    [
+        ("123", "pin_too_short"),
+        ("   ", "pin_too_short"),
+        ("1234", "pin_placeholder"),
+        ("CHANGE-ME", "pin_placeholder"),
+        ("x" * 65, "pin_invalid"),
+        ("ab\x00cd", "pin_invalid"),
+        (1234, "pin_invalid"),
+    ],
+)
+def test_pin_rules(tmp_path, pin, code):
+    with pytest.raises(SettingsError) as info:
+        store(tmp_path).change_pin(pin)
+    assert info.value.code == code
+
+
+def test_pin_change_changes_the_version(tmp_path):
+    st = store(tmp_path)
+    before = st.current().pin.version
+    st.change_pin("2468")
+    assert st.current().pin.version != before
+
+
+def test_reset_pin_generates_a_new_logged_pin(tmp_path):
+    st = store(tmp_path)
+    st.change_pin("2468")
+    new = st.reset_pin()
+    assert st.current().pin.generated == new
+    assert st.verify_pin(new)
+    assert not st.verify_pin("2468")
+
+
+def test_room_and_volume(tmp_path):
+    st = store(tmp_path)
+    st.set_room(" Kinderzimmer ", "RINCON_000000000000001400", " 192.0.2.10 ")
+    st.set_volume(30, 5)
+    s = SettingsStore(tmp_path, scrypt=CHEAP).current()
+    assert (s.room, s.room_uid, s.seed_ip) == (
+        "Kinderzimmer",
+        "RINCON_000000000000001400",
+        "192.0.2.10",
+    )
+    assert (s.max_volume, s.volume_step) == (30, 5)
+    assert s.configured
+
+
+@pytest.mark.parametrize(
+    ("max_volume", "step", "code"),
+    [
+        (0, 3, "max_volume_invalid"),
+        (101, 3, "max_volume_invalid"),
+        (25.0, 3, "max_volume_invalid"),
+        (True, 1, "max_volume_invalid"),
+        ("25", 3, "max_volume_invalid"),
+        (25, 0, "volume_step_invalid"),
+        (10, 11, "volume_step_invalid"),
+        (25, 2.5, "volume_step_invalid"),
+    ],
+)
+def test_volume_rules(tmp_path, max_volume, step, code):
+    with pytest.raises(SettingsError) as info:
+        store(tmp_path).set_volume(max_volume, step)
+    assert info.value.code == code
+
+
+@pytest.mark.parametrize("room", ["", "   ", "x" * 101, "a\nb", None, 5])
+def test_room_rules(tmp_path, room):
+    with pytest.raises(SettingsError) as info:
+        store(tmp_path).set_room(room, None, None)
+    assert info.value.code == "room_invalid"
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (None, None),
+        ("", None),
+        ("  ", None),
+        ("192.0.2.10", "192.0.2.10"),
+        ("speaker.example", "speaker.example"),
+        ("kids-speaker", "kids-speaker"),
+    ],
+)
+def test_valid_seed_ips(value, expected):
+    assert validate_seed_ip(value) == expected
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "192.0.2.300",
+        "192.0.2",
+        "2001:db8::1",
+        "http://192.0.2.10",
+        "192.0.2.10:1400",
+        "bad host",
+        "-x",
+        5,
+    ],
+)
+def test_invalid_seed_ips(value):
+    with pytest.raises(SettingsError):
+        validate_seed_ip(value)
+
+
+def test_changes_by_another_process_are_picked_up(tmp_path, clock):
+    server = store(tmp_path, clock)
+    other = store(tmp_path)
+    new_pin = other.reset_pin()
+    assert not server.verify_pin(new_pin)  # not re-read yet (checked at most once a second)
+    clock.now += 1.5
+    assert server.verify_pin(new_pin)
+
+
+def test_updates_start_from_the_file_so_a_reset_is_never_lost(tmp_path, clock):
+    server = store(tmp_path, clock)
+    server.change_pin("2468")
+    new_pin = store(tmp_path).reset_pin()  # e.g. from the command line
+    server.set_volume(20, 2)  # the server has not noticed the reset yet
+    assert SettingsStore(tmp_path, scrypt=CHEAP).verify_pin(new_pin)
+
+
+def test_unreadable_file_at_runtime_keeps_the_last_settings(tmp_path, clock):
+    server = store(tmp_path, clock)
+    server.set_volume(20, 2)
+    (tmp_path / "settings.json").write_text("{broken")
+    clock.now += 2
+    assert server.current().max_volume == 20
+
+
+def test_corrupt_file_at_startup_is_moved_aside(tmp_path):
+    (tmp_path / "settings.json").write_text("{broken")
+    st = store(tmp_path)
+    assert st.load_problem == "settings_corrupt"
+    assert list(tmp_path.glob("settings.json.corrupt-*"))
+    assert st.current().pin_generated
+
+
+def test_file_from_a_newer_version_is_left_alone(tmp_path):
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps({"schema": 99}))
+    with pytest.raises(SettingsFileError, match="newer"):
+        store(tmp_path)
+    assert json.loads(path.read_text()) == {"schema": 99}
+
+
+def test_read_only_mode_creates_nothing(tmp_path):
+    with pytest.raises(SettingsFileError):
+        store(tmp_path, create=False)
+    assert list(tmp_path.iterdir()) == []
+    store(tmp_path)
+    assert store(tmp_path, create=False).current().pin_generated
+
+
+def test_root_hands_the_file_back_to_its_owner(tmp_path, monkeypatch):
+    store(tmp_path)
+    chowned = []
+    monkeypatch.setattr(settings_module.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(settings_module.os, "chown", lambda path, uid, gid: chowned.append(path))
+    SettingsStore(tmp_path, scrypt=CHEAP).reset_pin()
+    assert tmp_path / "settings.json" in chowned
