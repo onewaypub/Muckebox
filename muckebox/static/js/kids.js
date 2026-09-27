@@ -4,10 +4,13 @@
 // Kids view: shows the tiles, polls the state, sends taps to the server.
 
 import { ApiError, get, post } from "./api.js";
+import { initBedtime, padIsOpen, renderBedtime } from "./bedtime.js";
 import { loadMessages, t, translatePage } from "./i18n.js";
 import {
   initial,
+  isBedtime,
   isPlaying,
+  limitSegments,
   nextDelay,
   overlayKind,
   overlayTextKey,
@@ -39,6 +42,7 @@ const model = {
   state: null,
   etag: null,
   libraryRev: null,
+  tileCount: 0,
   failures: 0,
   localPending: null,
   shownErrorAt: null,
@@ -64,7 +68,7 @@ function renderTiles(tiles) {
     node.addEventListener("click", () => playTile(tile.id));
     view.tiles.append(node);
   }
-  view.empty.hidden = tiles.length > 0;
+  model.tileCount = tiles.length;
   renderState();
 }
 
@@ -121,12 +125,15 @@ function renderState() {
   view.toggle.disabled = !playback || (!playback.can_toggle && !playing);
   view.prev.disabled = !playback || !playback.can_prev;
   view.next.disabled = !playback || !playback.can_next;
-  renderVolume(state ? state.volume : null);
+  const bedtime = renderBedtime(state);
+  view.tiles.hidden = bedtime;
+  view.empty.hidden = bedtime || model.tileCount > 0;
+  renderVolume(state ? state.volume : null, bedtime);
   renderOverlay();
   renderError(state);
 }
 
-function renderVolume(volume) {
+function renderVolume(volume, bedtime = isBedtime(model.state)) {
   if (view.volume.children.length !== VOLUME_SEGMENTS) {
     view.volume.replaceChildren(
       ...Array.from({ length: VOLUME_SEGMENTS }, (_, i) => {
@@ -137,13 +144,17 @@ function renderVolume(volume) {
     );
   }
   const lit = volume ? volumeSegments(volume.value, volume.max, VOLUME_SEGMENTS) : 0;
-  [...view.volume.children].forEach((segment, index) => segment.classList.toggle("on", index < lit));
+  const allowed = volume ? limitSegments(volume.limit, volume.max, VOLUME_SEGMENTS) : VOLUME_SEGMENTS;
+  [...view.volume.children].forEach((segment, index) => {
+    segment.classList.toggle("on", index < lit);
+    segment.classList.toggle("over", index >= allowed); // above the limit while fading
+  });
   if (volume) {
     view.volume.setAttribute("aria-valuemax", String(volume.max));
     view.volume.setAttribute("aria-valuenow", String(volume.value ?? 0));
   }
   const known = Boolean(volume && volume.value !== null);
-  view.louder.disabled = !known || volume.value >= volume.max;
+  view.louder.disabled = !known || bedtime || volume.value >= (volume.limit ?? volume.max);
   view.quieter.disabled = !known || volume.value <= 0;
 }
 
@@ -206,8 +217,9 @@ async function poll() {
 const PAGE_ASSETS = document.body.dataset.assetVersion;
 
 function applyState(state) {
-  if (state.assets && PAGE_ASSETS && state.assets !== PAGE_ASSETS) {
-    // Muckebox was updated: load the new page (only after a successful answer).
+  if (state.assets && PAGE_ASSETS && state.assets !== PAGE_ASSETS && !padIsOpen()) {
+    // Muckebox was updated: load the new page (only after a successful answer,
+    // and not while a parent types the PIN).
     window.location.reload();
     return;
   }
@@ -294,6 +306,7 @@ async function start() {
   loadMessages();
   translatePage();
   bindControls();
+  initBedtime({ onChange: pollSoon });
   renderState();
   try {
     await loadTiles();
