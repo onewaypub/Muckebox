@@ -739,7 +739,9 @@ def test_parents_allow_more_time(admin, services):
     assert schedule["phase"] == "open"
     assert schedule["override_until"] == int(services.runtime.clock.time()) + 1800
     response = admin.delete("/api/admin/override", headers=POST)
-    assert response.get_json()["schedule"]["phase"] == "closed"
+    schedule = response.get_json()["schedule"]
+    assert schedule["phase"] == "fading"  # ends gently: fade, then pause
+    assert schedule["override_until"] == int(services.runtime.clock.time()) + 600
     morning = admin.post("/api/admin/override", json={"until": "morning"}, headers=POST)
     assert morning.get_json()["schedule"]["phase"] == "open"
     assert admin.post("/api/admin/override", json={"minutes": 7}, headers=POST).status_code == 400

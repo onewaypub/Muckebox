@@ -19,7 +19,7 @@ import json
 import logging
 import threading
 from collections.abc import Iterator
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -43,8 +43,9 @@ class TimerState:
     sleep: SleepTimer | None = None
     #: The end (a Phase.last_end) that has been handled: paused and restored.
     done_end: float | None = None
-    #: The volume when the fade before an end began: {end: volume}.
-    fade_base: dict[str, int] = field(default_factory=dict)
+    #: The volume before the current fade began (restored after the pause, or
+    #: when the fade stops early, e.g. because parents allowed more time).
+    pre_fade: int | None = None
     #: Local date ("YYYY-MM-DD") and the game seconds used on it.
     games_date: str | None = None
     games_seconds: float = 0.0
@@ -114,7 +115,7 @@ def _from_json(data: object) -> TimerState:
         raise ValueError("not an object")
     override = data.get("override")
     sleep = data.get("sleep")
-    base = data.get("fade_base") or {}
+    pre_fade = data.get("pre_fade")
     date = data.get("games_date")
     return TimerState(
         override=(_number(override[0]), _number(override[1])) if override else None,
@@ -124,7 +125,7 @@ def _from_json(data: object) -> TimerState:
         if sleep
         else None,
         done_end=_number(data["done_end"]) if data.get("done_end") is not None else None,
-        fade_base={str(key): int(_number(value)) for key, value in base.items()},
+        pre_fade=None if pre_fade is None else int(_number(pre_fade)),
         games_date=date if isinstance(date, str) else None,
         games_seconds=_number(data.get("games_seconds", 0.0)),
         game_mute=data.get("game_mute") is True,
