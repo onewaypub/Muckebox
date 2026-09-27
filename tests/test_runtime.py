@@ -800,3 +800,11 @@ def test_a_slow_disk_never_delays_the_volume_guard(fake, library, make_runtime, 
     finally:
         release.set()
         rt.stop()
+
+
+def test_guard_keeps_the_limit_while_settings_json_is_broken(runtime, fake, tmp_path, monkeypatch):
+    monkeypatch.setattr("muckebox.settings.RELOAD_INTERVAL", 0)
+    (tmp_path / "settings.json").write_text('{"schema": 1, "sonos": null}')
+    fake.volume = 90
+    runtime.poll_volume()
+    assert fake.volume == 25

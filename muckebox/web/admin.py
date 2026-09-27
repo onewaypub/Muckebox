@@ -16,7 +16,7 @@ from muckebox import __version__
 from muckebox.covers import CoverError, normalise
 from muckebox.library import LibraryError, RevConflict, TileNotFound, favorite_source
 from muckebox.runtime.service import Busy, Unavailable
-from muckebox.settings import SettingsError, validate_seed_ip
+from muckebox.settings import SettingsError, SettingsFileError, validate_seed_ip
 from muckebox.sonos.errors import SonosError
 from muckebox.sonos.model import Favorite
 
@@ -142,7 +142,7 @@ def _settings_call(function, *args, **kwargs):
         return function(*args, **kwargs)
     except SettingsError as exc:
         raise ApiError(422, exc.code) from exc
-    except OSError as exc:
+    except (OSError, SettingsFileError) as exc:
         log.error("Could not save the settings: %s", exc)
         raise ApiError(500, "settings_save_failed") from exc
 

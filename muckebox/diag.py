@@ -41,15 +41,21 @@ class Target:
     seed_ip: str | None
     max_volume: int
     fake: bool
+    #: Why settings.json could not be used, if it exists but cannot be read.
+    problem: str | None = None
 
 
 def load_target(
     environ: Mapping[str, str], room: str | None = None, ip: str | None = None
 ) -> Target:
+    problem = None
+    data_dir = data_dir_from(environ)
     try:
-        stored = SettingsStore(data_dir_from(environ), create=False).current()
-    except SettingsFileError:
+        stored = SettingsStore(data_dir, create=False).current()
+    except SettingsFileError as exc:
         stored = None  # nothing set up yet (or unreadable): only overrides count
+        if (data_dir / "settings.json").exists():
+            problem = str(exc)
     same_room = stored is not None and room in (None, stored.room)
     return Target(
         room=room or (stored.room if stored else None),
@@ -57,6 +63,7 @@ def load_target(
         seed_ip=ip or (stored.seed_ip if stored else None),
         max_volume=stored.max_volume if stored else DEFAULT_MAX_VOLUME,
         fake=environ.get("MUCKEBOX_FAKE_SONOS") == "1",
+        problem=problem,
     )
 
 
@@ -195,6 +202,8 @@ def main(
     args = parser.parse_args(argv)
 
     target = load_target(environ, args.room, args.ip)
+    if target.problem:
+        out.write(f"Note: the saved settings are not used: {target.problem}\n")
     try:
         if args.command == "rooms":
             cmd_rooms(target, out)
