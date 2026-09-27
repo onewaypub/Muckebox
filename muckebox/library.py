@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 import secrets
 import shutil
@@ -25,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from muckebox.sonos.model import FavoriteRef, Route, ShareLinkRef
+from muckebox.storage import atomic_write
 
 log = logging.getLogger(__name__)
 
@@ -232,15 +232,7 @@ class Library:
             "tiles": [asdict(tile) for tile in self._tiles],
         }
         payload = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_name(self.path.name + ".tmp")
-        with open(tmp, "wb") as handle:
-            handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
-        if self.path.exists():
-            shutil.copy2(self.path, self.path.with_name(self.path.name + ".bak"))
-        os.replace(tmp, self.path)
+        atomic_write(self.path, payload, backup=True)
         self._rev += 1
 
     def _commit(self, undo: Callable[[], None]) -> None:

@@ -107,7 +107,7 @@ def test_writes_keep_a_backup(library, tmp_path):
     add(library, "B")
     backup = json.loads((tmp_path / "library.json.bak").read_text())
     assert [t["title"] for t in backup["tiles"]] == ["A"]
-    assert not (tmp_path / "library.json.tmp").exists()
+    assert not list(tmp_path.glob("*.tmp"))
 
 
 def test_corrupt_file_is_moved_aside(tmp_path):
@@ -159,7 +159,7 @@ def test_a_failed_write_changes_nothing(library, monkeypatch, change):
     def disk_full(*args, **kwargs):
         raise OSError(28, "No space left on device")
 
-    monkeypatch.setattr("muckebox.library.os.fsync", disk_full)
+    monkeypatch.setattr("muckebox.storage.os.fsync", disk_full)
     with pytest.raises(OSError):
         change(library, tile)
     assert [(t.id, t.title, t.cover) for t in library.tiles()] == before
