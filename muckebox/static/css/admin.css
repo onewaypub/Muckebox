@@ -392,3 +392,20 @@ label.check input {
     display: none;
   }
 }
+
+.tile-row .resume {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  align-items: center;
+}
+
+.tile-row .resume[hidden],
+.tile-row .resume [hidden] {
+  display: none;
+}
+
+.resume-position {
+  color: var(--muted);
+}

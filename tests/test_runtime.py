@@ -997,3 +997,99 @@ def test_timers_survive_a_restart(runtime, make_runtime, clock, evening):
     runtime.poll_transport()  # saves timers.json
     restarted = make_runtime()
     assert restarted.state_document()["schedule"]["phase"] == "open"
+
+
+# -- Weiterhören (resume albums) -------------------------------------------------------
+
+from muckebox.sonos.model import StartAt  # noqa: E402
+
+TRACKS = [f"x-sonos-http:track%3a{n}.mp4?sid=204" for n in (1, 2, 3)]
+
+
+@pytest.fixture
+def album(fake, library):
+    """The demo audio play (an album) with three tracks."""
+    fake.albums[fake.favorites[1].ref.uri] = TRACKS
+    return add_favorite(library, fake, 1)
+
+
+def listen_until(runtime, fake, track, seconds, state="playing"):
+    fake.track, fake.seconds, fake.state = track, seconds, state
+    runtime.poll_transport()
+
+
+def test_an_album_continues_where_it_stopped(runtime, fake, library, album, clock):
+    runtime.play_tile(album.id)
+    assert fake.starts[-1] is None
+    listen_until(runtime, fake, 2, 300)
+    radio = add_favorite(library, fake, 2)
+    runtime.play_tile(radio.id)
+    runtime.play_tile(album.id)
+    assert fake.starts[-1] == StartAt(track=2, seconds=300, track_uri=TRACKS[1])
+    assert (fake.track, fake.seconds) == (2, 295)
+
+
+def test_playlists_start_from_the_beginning(runtime, fake, library):
+    playlist = add_favorite(library, fake, 0)
+    fake.albums[fake.favorites[0].ref.uri] = TRACKS
+    runtime.play_tile(playlist.id)
+    listen_until(runtime, fake, 2, 300)
+    runtime.play_tile(add_favorite(library, fake, 2).id)
+    runtime.play_tile(playlist.id)
+    assert fake.starts[-1] is None
+
+
+def test_an_album_heard_to_the_end_starts_again(runtime, fake, library, album):
+    runtime.play_tile(album.id)
+    listen_until(runtime, fake, 3, 1185)
+    listen_until(runtime, fake, 1, 0, state="stopped")  # Sonos stops after the last track
+    runtime.play_tile(add_favorite(library, fake, 2).id)
+    runtime.play_tile(album.id)
+    assert fake.starts[-1] is None
+
+
+def test_positions_are_read_only_every_few_seconds(runtime, fake, album, clock):
+    runtime.play_tile(album.id)
+    runtime.poll_transport()
+    fake.calls.clear()
+    runtime.poll_transport()
+    assert ("position",) not in fake.calls
+    clock.advance(11)
+    runtime.poll_transport()
+    assert ("position",) in fake.calls
+
+
+def test_positions_are_saved_on_pause_and_rarely_while_playing(runtime, fake, album, clock):
+    path = runtime.data_dir / "resume.json"
+    runtime.play_tile(album.id)
+    clock.advance(11)
+    listen_until(runtime, fake, 2, 60)
+    runtime.poll_transport()
+    assert not path.exists() or album.id not in path.read_text()  # not yet
+    listen_until(runtime, fake, 2, 70, state="paused")
+    runtime.poll_transport()  # the next poll writes it
+    assert '"track": 2' in path.read_text()
+
+
+def test_resume_can_be_switched_off_per_tile(runtime, fake, library, album):
+    library.set_resume(album.id, False)
+    runtime.play_tile(album.id)
+    listen_until(runtime, fake, 2, 300)
+    runtime.play_tile(add_favorite(library, fake, 2).id)
+    runtime.play_tile(album.id)
+    assert fake.starts[-1] is None
+
+
+def test_removed_tiles_lose_their_position(runtime, fake, library, album):
+    runtime.play_tile(album.id)
+    listen_until(runtime, fake, 2, 300)
+    library.remove(album.id)
+    runtime.poll_transport()
+    assert runtime.resume.saved(album.id) is None
+
+
+def test_resume_file_survives_a_restart(runtime, make_runtime, fake, library, album):
+    runtime.play_tile(album.id)
+    listen_until(runtime, fake, 2, 300, state="paused")
+    runtime.stop()
+    assert make_runtime().resume.get(album.id) == StartAt(2, 300, TRACKS[1])

@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from muckebox import __version__
-from muckebox.library import Library, Tile
+from muckebox.library import Library, Tile, TileNotFound
 from muckebox.localtime import Zone, ZoneResolver, local_time
 from muckebox.settings import (
     SettingsError,
@@ -48,6 +48,7 @@ from muckebox.storage import atomic_write
 from .breaker import CircuitBreaker
 from .clock import Clock, SystemClock
 from .lanes import Lane
+from .resume import ResumeStore
 from .state import StateCache
 from .timekeeper import TimeKeeper
 from .timers import TimersFile
@@ -64,6 +65,7 @@ COMMAND_WAIT = 3.5
 VOLUME_WAIT = 2.5
 FAVORITES_WAIT = 15.0
 FAVORITES_TTL = 60.0
+POSITION_INTERVAL = 10.0  # seconds between position reads while an album plays
 SETUP_WAIT = 20.0  # a room search (discovery plus network scan) or a room test
 ROOM_SEARCH_TTL = 15.0  # seconds a room search result is reused
 ROOM_SEARCH_MIN_INTERVAL = 5.0  # a new search at most this often
@@ -157,6 +159,10 @@ class Runtime:
         self.policy = policy or CommandPolicy()
         self.zones = zones or ZoneResolver()
         self.timers = TimersFile(data_dir / "timers.json")
+        self.resume = ResumeStore(data_dir / "resume.json", self.clock)
+        self._position_read_at: float | None = None
+        self._last_play_state: str | None = None
+        self._pruned_rev: int | None = None
         self.keeper = TimeKeeper(store, self.timers, self.clock, self.zones)
         self._pause_sent: float | None = None
         self.transport_lane = lane_factory(
@@ -214,6 +220,7 @@ class Runtime:
         for lane in lanes:
             lane.join(deadline - self.clock.monotonic())
         self.timers.save()
+        self.resume.save(force=True)
 
     def _new_session(self, backend: SonosBackend) -> RoomSession:
         return RoomSession(backend, self.max_volume, self.clock, self.keeper.soft_limit)
@@ -486,7 +493,9 @@ class Runtime:
     def poll_transport(self) -> None:
         """Idle task of the transport lane."""
         self.keeper.tidy()
+        self._prune_positions()
         self.timers.save()  # here, never in a web request or under a lock
+        self.resume.save()
         session = self._session
         if session is None or not session.transport_breaker.allow():
             return
@@ -494,9 +503,53 @@ class Runtime:
             self._ensure_room(session)
             playback = self._refresh_playback(session)
             self._enforce_time(session, playback)
+            self._record_position(session, playback)
             session.transport_breaker.success()
         except SonosError as exc:
             self._on_error(session, exc)
+
+    def _record_position(self, session: RoomSession, playback: Playback) -> None:
+        """Remember where an album tile is, for "Weiterhören"."""
+        now_playing = self._now_playing
+        tile_id = self.state.get("playback")["tile_id"]
+        if not tile_id or now_playing is None or now_playing.route != Route.QUEUE.value:
+            return
+        try:
+            tile = self.library.get(tile_id)
+        except TileNotFound:
+            return
+        if not tile.resumes:
+            return
+        state = playback.state
+        changed, self._last_play_state = state != self._last_play_state, state
+        if state == "stopped":
+            if changed:
+                self.resume.stopped(tile_id)  # heard to the end: next time from the start
+            return
+        if state not in ("playing", "paused"):
+            return
+        now = self.clock.monotonic()
+        recent = (
+            self._position_read_at is not None and now - self._position_read_at < POSITION_INTERVAL
+        )
+        if recent and not changed:
+            return
+        self._position_read_at = now
+        try:
+            position = session.backend.position()
+        except SonosError as exc:
+            if exc.connection_problem:
+                raise
+            return
+        if position is not None:
+            self.resume.record(tile_id, position, playback.queue_length)
+        if state == "paused" and changed:
+            self.resume.urgent()
+
+    def _prune_positions(self) -> None:
+        if self._pruned_rev != self.library.rev:
+            self._pruned_rev = self.library.rev
+            self.resume.prune({tile.id for tile in self.library.tiles()})
 
     def _enforce_time(self, session: RoomSession, playback: Playback) -> None:
         """Pause once at the end of the usage time or the sleep timer."""
@@ -640,14 +693,17 @@ class Runtime:
 
     def _start_tile(self, session: RoomSession, tile: Tile) -> None:
         try:
+            start = self.resume.get(tile.id) if tile.resumes else None
+            self.resume.urgent()  # the tile that played before is saved soon
+            self._last_play_state = None
             try:
                 self._ensure_room(session)
                 if tile.kind == "favorite":
                     route = session.backend.play_favorite(
-                        tile.favorite_ref(), tile.favorite_route()
+                        tile.favorite_ref(), tile.favorite_route(), start
                     )
                 else:
-                    session.backend.play_share_link(tile.share_link(), tile.title)
+                    session.backend.play_share_link(tile.share_link(), tile.title, start)
                     route = Route.QUEUE
             except SonosError as exc:
                 log.warning("Starting tile %s failed: %s", tile.id, exc)

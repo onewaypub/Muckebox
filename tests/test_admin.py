@@ -810,3 +810,38 @@ def test_the_sleep_timer_cannot_start_at_bedtime(admin, client, services):
     )
     set_evening(services)
     assert error_code(client.post("/api/sleep-timer/start", headers=POST)) == (409, "bedtime")
+
+
+# -- Weiterhören ------------------------------------------------------------------------
+
+
+def test_tiles_show_and_change_resume(admin, services, fake_sonos):
+    album = add_favorite(admin, 2).get_json()["tile"]  # "Hörspiel Folge 1", an album
+    radio = add_favorite(admin, 3).get_json()["tile"]
+    assert album["resume"] == {
+        "available": True,
+        "enabled": True,
+        "default": True,
+        "position": None,
+    }
+    assert radio["resume"]["available"] is False
+    from muckebox.sonos.model import Position
+
+    services.runtime.resume.record(album["id"], Position(3, 760, 1200, "x"), 5)
+    tiles = admin.get("/api/admin/tiles").get_json()
+    shown = next(tile for tile in tiles["tiles"] if tile["id"] == album["id"])
+    assert shown["resume"]["position"] == {"track": 3, "seconds": 760}
+    response = admin.delete(f"/api/admin/tiles/{album['id']}/position", headers=POST)
+    shown = next(tile for tile in response.get_json()["tiles"] if tile["id"] == album["id"])
+    assert shown["resume"]["position"] is None
+    body = {"enabled": False, "rev": response.get_json()["rev"]}
+    response = admin.put(f"/api/admin/tiles/{album['id']}/resume", json=body, headers=POST)
+    shown = next(tile for tile in response.get_json()["tiles"] if tile["id"] == album["id"])
+    assert shown["resume"]["enabled"] is False
+    assert (
+        admin.put(
+            f"/api/admin/tiles/{album['id']}/resume", json={"enabled": "no"}, headers=POST
+        ).status_code
+        == 400
+    )
+    assert admin.delete("/api/admin/tiles/t-missing/position", headers=POST).status_code == 404

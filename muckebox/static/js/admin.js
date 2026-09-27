@@ -171,6 +171,7 @@ function renderTiles(data) {
         success: t("admin.saved"),
       }).then((result) => result && renderTiles(result.data));
     });
+    renderResume(row, tile);
     const up = row.querySelector(".up");
     const down = row.querySelector(".down");
     up.disabled = index === 0;
@@ -295,6 +296,38 @@ async function searchRooms(refresh) {
   } finally {
     button.disabled = false;
   }
+}
+
+// "Weiterhören": albums continue where they stopped.
+function renderResume(row, tile) {
+  const box = row.querySelector(".resume");
+  const resume = tile.resume;
+  box.hidden = !resume.available;
+  if (!resume.available) return;
+  const toggle = row.querySelector(".resume-toggle");
+  toggle.checked = resume.enabled;
+  toggle.addEventListener("change", () =>
+    mutate(() =>
+      request("PUT", `/api/admin/tiles/${tile.id}/resume`, {
+        // Back to "automatic" when it matches the default again.
+        body: { enabled: toggle.checked === resume.default ? null : toggle.checked, rev },
+      }),
+    ).then((result) => result && renderTiles(result.data)),
+  );
+  const position = resume.position;
+  const text = row.querySelector(".resume-position");
+  const restart = row.querySelector(".resume-restart");
+  text.hidden = restart.hidden = !(resume.enabled && position);
+  if (resume.enabled && position) {
+    const minutes = Math.floor(position.seconds / 60);
+    const seconds = String(position.seconds % 60).padStart(2, "0");
+    text.textContent = t("admin.resume_position", { track: position.track, time: `${minutes}:${seconds}` });
+  }
+  restart.addEventListener("click", () =>
+    mutate(() => request("DELETE", `/api/admin/tiles/${tile.id}/position`), { success: t("admin.saved") }).then(
+      (result) => result && renderTiles(result.data),
+    ),
+  );
 }
 
 function renderFavorites(favorites) {
