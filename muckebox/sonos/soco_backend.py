@@ -14,8 +14,10 @@ import html
 import logging
 import socket
 import threading
-from collections.abc import Callable, Iterable
+import time
+from collections.abc import Callable, Iterable, Iterator
 from typing import Any
+from urllib.parse import urlsplit
 
 import requests
 import soco
@@ -30,11 +32,14 @@ from soco.exceptions import (
 )
 from soco.plugins.sharelink import ShareLinkPlugin
 
+from muckebox.netfetch import ANY_HOST, Fetcher, FetchError
+
 from . import routing
 from .errors import (
     ROUTE_ERRORS,
     UPNP_SERVICE_ERROR,
     UPNP_SERVICE_ERROR_2,
+    UPNP_TRANSITION_NOT_AVAILABLE,
     ActionNotAvailable,
     CommandRejected,
     GroupProblem,
@@ -49,6 +54,7 @@ from .errors import (
 )
 from .model import Favorite, FavoriteRef, Playback, RoomInfo, Route, ShareLinkRef
 from .sharelink import plugin_uri
+from .topology import Member, parse_zone_group_state
 
 log = logging.getLogger(__name__)
 
@@ -56,6 +62,9 @@ REQUEST_TIMEOUT = 3.0  # normal commands
 SLOW_TIMEOUT = 30.0  # enqueueing a large playlist can take this long
 VOLUME_TIMEOUT = 1.5  # the volume guard must never wait long
 DISCOVERY_TIMEOUT = 3.0
+TOPOLOGY_TTL = 5.0  # seconds a group coordinator lookup stays valid
+ART_DEADLINE = 10.0  # seconds for one album art download
+RETRY_PAUSE = 0.5  # seconds before repeating a step after a transient UPnP error
 MAX_ART_BYTES = 10 * 1024 * 1024
 
 _STATES = {
@@ -128,6 +137,16 @@ def _int_or_none(value: Any) -> int | None:
         return None
 
 
+def _body_chunks(response: Any) -> Iterator[bytes]:
+    """The body as it arrives (read1 returns after one receive)."""
+    read1 = getattr(getattr(response, "raw", None), "read1", None)
+    if read1 is None:
+        yield from response.iter_content(64 * 1024)
+        return
+    while chunk := read1(64 * 1024, decode_content=True):
+        yield chunk
+
+
 def _same_room(a: str, b: str) -> bool:
     return a.strip().casefold() == b.strip().casefold()
 
@@ -144,6 +163,8 @@ class SocoBackend:
         discover: Callable[..., Iterable[Any] | None] = soco.discover,
         resolve_host: Callable[[str], str] = socket.gethostbyname,
         http_get: Callable[..., requests.Response] = requests.get,
+        fetcher_factory: Callable[[], Fetcher] = Fetcher,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         if not room and not seed_ip:
             raise ValueError("room or seed_ip is required")
@@ -153,7 +174,15 @@ class SocoBackend:
         self._discover = discover
         self._resolve_host = resolve_host
         self._http_get = http_get
+        self._fetcher_factory = fetcher_factory
+        self._clock = clock
         self._lock = threading.RLock()
+        # The last room found. Kept when a later lookup fails, so that the
+        # volume guard keeps working even while the seed speaker is off.
+        self._room: Member | None = None
+        self._coordinator_member: Member | None = None
+        self._known_ips: frozenset[str] = frozenset()
+        self._topology_at = 0.0
         self._player: Any = None
 
     # -- finding the room -------------------------------------------------
@@ -161,43 +190,75 @@ class SocoBackend:
     def resolve(self) -> RoomInfo:
         with self._lock:
             try:
-                player = self._find_player()
-                coordinator = self._coordinator_of(player)
-                group = player.group
-                info = RoomInfo(
-                    name=player.player_name,
-                    player_ip=player.ip_address,
-                    coordinator_ip=coordinator.ip_address,
-                    coordinator_uid=coordinator.uid,
-                    grouped=bool(group and len([m for m in group.members if m.is_visible]) > 1),
-                )
+                members = self._read_topology()
+                room, coordinator = self._select(members)
             except Exception as exc:
-                self._player = None
                 raise translate(exc) from exc
-            self._player = player
-            return info
+            self._room, self._coordinator_member = room, coordinator
+            self._known_ips = frozenset(member.ip for member in members)
+            self._topology_at = self._clock()
+            self._player = self._soco_factory(room.ip)
+            group_size = sum(
+                1 for m in members if m.visible and m.coordinator_uid == room.coordinator_uid
+            )
+            return RoomInfo(
+                name=room.name,
+                player_ip=room.ip,
+                coordinator_ip=coordinator.ip,
+                coordinator_uid=coordinator.uid,
+                grouped=group_size > 1,
+            )
 
-    def _find_player(self) -> Any:
+    def _read_topology(self) -> list[Member]:
+        """Ask the known room first, then the seed (or discovery) for the topology."""
+        sources = [self._room.ip] if self._room else []
         if self._seed_ip:
-            ip = self._resolve_host(self._seed_ip)
-            seed = self._soco_factory(ip)
-            zones = seed.visible_zones
-            wanted = self._room_name or seed.player_name
-        else:
+            try:
+                sources.append(self._resolve_host(self._seed_ip))
+            except OSError as exc:
+                if not sources:
+                    raise SonosUnreachable(f"cannot resolve {self._seed_ip}: {exc}") from exc
+        elif not sources:
             zones = self._discover(timeout=DISCOVERY_TIMEOUT) or set()
-            wanted = self._room_name or ""
-        matches = [zone for zone in zones if _same_room(zone.player_name, wanted)]
-        if not matches:
-            raise RoomNotFound(f"room {wanted!r} not found")
-        return sorted(matches, key=lambda zone: zone.ip_address)[0]
+            sources = sorted(zone.ip_address for zone in zones)
+            if not sources:
+                raise RoomNotFound("no Sonos speaker found on this network")
+        error: SonosError | None = None
+        for ip in dict.fromkeys(sources):
+            try:
+                return self._topology_from(ip)
+            except SonosError as exc:
+                if not exc.connection_problem:
+                    raise
+                error = exc
+        raise error or SonosUnreachable("no speaker to ask")
 
-    @staticmethod
-    def _coordinator_of(player: Any) -> Any:
-        group = player.group
-        coordinator = group.coordinator if group is not None else None
+    def _topology_from(self, ip: str) -> list[Member]:
+        speaker = self._soco_factory(ip)
+        # An explicit (empty) argument list keeps SoCo from downloading the
+        # service description first, which has its own long timeout.
+        result = self._call(speaker.zoneGroupTopology.GetZoneGroupState, [])
+        try:
+            return parse_zone_group_state(result["ZoneGroupState"])
+        except (KeyError, SyntaxError, ValueError) as exc:
+            raise CommandRejected(f"unreadable zone group state: {exc}") from exc
+
+    def _select(self, members: list[Member]) -> tuple[Member, Member]:
+        wanted = self._room_name
+        if not wanted:
+            seed_ip = self._room.ip if self._room else self._resolve_host(self._seed_ip or "")
+            wanted = next((m.name for m in members if m.ip == seed_ip), "")
+        rooms = sorted(
+            (m for m in members if m.visible and _same_room(m.name, wanted)),
+            key=lambda m: m.ip,
+        )
+        if not rooms:
+            raise RoomNotFound(f"room {wanted!r} not found")
+        room = rooms[0]
+        coordinator = next((m for m in members if m.uid == room.coordinator_uid), None)
         if coordinator is None:
             raise GroupProblem("the room has no group coordinator")
-        return coordinator
+        return room, coordinator
 
     def _room_player(self) -> Any:
         player = self._player
@@ -206,11 +267,14 @@ class SocoBackend:
             player = self._player
         return player
 
-    def _coordinator(self) -> Any:
-        try:
-            return self._coordinator_of(self._room_player())
-        except Exception as exc:
-            raise translate(exc) from exc
+    def _coordinator(self) -> tuple[Any, str]:
+        """The group coordinator (as a SoCo object) and its UID, a few seconds fresh."""
+        if self._room is None or self._clock() - self._topology_at > TOPOLOGY_TTL:
+            self.resolve()
+        coordinator = self._coordinator_member
+        if coordinator is None:  # pragma: no cover - resolve() sets it or raises
+            raise GroupProblem("the room has no group coordinator")
+        return self._soco_factory(coordinator.ip), coordinator.uid
 
     # -- favorites --------------------------------------------------------
 
@@ -220,7 +284,14 @@ class SocoBackend:
             items = player.music_library.get_sonos_favorites(complete_result=True)
         except Exception as exc:
             raise translate(exc) from exc
-        return [self._favorite(item, player.ip_address) for item in items]
+        favorites = []
+        for item in items:
+            try:
+                favorites.append(self._favorite(item, player.ip_address))
+            except Exception:
+                # One odd favorite must never hide all the others.
+                log.warning("Skipping a favorite Muckebox cannot read", exc_info=True)
+        return favorites
 
     def _favorite(self, item: Any, player_ip: str) -> Favorite:
         resources = getattr(item, "resources", None) or []
@@ -230,8 +301,8 @@ class SocoBackend:
         item_class, broken = "", False
         try:
             item_class = item.reference.item_class
-        except (SoCoException, AttributeError, IndexError):
-            broken = True
+        except Exception:  # resMD comes from the speaker: missing, empty or unparsable
+            broken, res_md = True, ""
         route, reason = routing.classify(uri, item_class)
         if route is not Route.UNSUPPORTED and broken and routing.music_source(uri) != "LIBRARY":
             route, reason = Route.UNSUPPORTED, "broken_metadata"
@@ -263,20 +334,19 @@ class SocoBackend:
     def play_favorite(self, ref: FavoriteRef, route: Route) -> Route:
         if route is Route.UNSUPPORTED:
             raise NotPlayable("favorite is not playable")
-        coordinator = self._coordinator()
-        self._normal_play_mode(coordinator)
+        coordinator, uid = self._coordinator()
         try:
-            self._start(coordinator, ref, route)
+            self._start(coordinator, uid, ref, route)
             return route
         except SonosError as exc:
             if exc.upnp_code not in ROUTE_ERRORS:
                 raise
             fallback = routing.other_route(route)
             log.info("Route %s rejected (UPnP %s); trying %s", route, exc.upnp_code, fallback)
-            self._start(coordinator, ref, fallback)
+            self._start(coordinator, uid, ref, fallback)
             return fallback
 
-    def _start(self, coordinator: Any, ref: FavoriteRef, route: Route) -> None:
+    def _start(self, coordinator: Any, uid: str, ref: FavoriteRef, route: Route) -> None:
         if route is Route.DIRECT:
             meta = ref.res_md or _DIRECT_META.format(title=_xml_text(ref.title))
             self._call(
@@ -301,7 +371,7 @@ class SocoBackend:
                     timeout=SLOW_TIMEOUT,
                 ),
             )
-            self._play_queue(coordinator, first)
+            self._play_queue(coordinator, uid, first)
 
     @staticmethod
     def _queue_item(ref: FavoriteRef) -> Any:
@@ -312,7 +382,7 @@ class SocoBackend:
                 parsed = from_didl_string(ref.res_md)
                 # from_didl_string is cached; never modify the shared objects.
                 item = copy.deepcopy(parsed[0]) if parsed else None
-            except (SoCoException, IndexError, ValueError, SyntaxError):
+            except (SoCoException, IndexError, ValueError, SyntaxError, TypeError):
                 item = None
         if item is None:
             if routing.music_source(ref.uri) != "LIBRARY":
@@ -323,8 +393,7 @@ class SocoBackend:
         return item
 
     def play_share_link(self, link: ShareLinkRef, title: str) -> None:
-        coordinator = self._coordinator()
-        self._normal_play_mode(coordinator)
+        coordinator, uid = self._coordinator()
         self._clear_queue(coordinator)
         plugin = ShareLinkPlugin(coordinator)
         first = self._enqueue(
@@ -333,10 +402,25 @@ class SocoBackend:
                 plugin_uri(link), dc_title=_xml_text(title), timeout=SLOW_TIMEOUT
             ),
         )
-        self._play_queue(coordinator, first)
+        self._play_queue(coordinator, uid, first)
 
     def _enqueue(self, coordinator: Any, add: Callable[[], Any]) -> int:
-        """Run an enqueue call; tolerate a read timeout if items arrived."""
+        """Run an enqueue call; tolerate a read timeout if items arrived.
+
+        A music service answers 800 now and then (e.g. while it refreshes
+        its token): the queue is cleared and the call repeated once.
+        """
+        try:
+            return self._enqueue_once(coordinator, add)
+        except ServiceUnavailable as exc:
+            if exc.upnp_code != UPNP_SERVICE_ERROR:
+                raise
+            log.info("Enqueueing failed with UPnP 800; trying once more")
+            time.sleep(RETRY_PAUSE)
+            self._clear_queue(coordinator)
+            return self._enqueue_once(coordinator, add)
+
+    def _enqueue_once(self, coordinator: Any, add: Callable[[], Any]) -> int:
         try:
             result = add()
         except requests.exceptions.ReadTimeout as exc:
@@ -375,15 +459,18 @@ class SocoBackend:
             if exc.upnp_code != UPNP_SERVICE_ERROR_2:
                 raise
 
-    def _play_queue(self, coordinator: Any, first_track: int) -> None:
+    def _play_queue(self, coordinator: Any, uid: str, first_track: int) -> None:
         self._call(
             coordinator.avTransport.SetAVTransportURI,
             [
                 _INSTANCE,
-                ("CurrentURI", f"x-rincon-queue:{coordinator.uid}#0"),
+                ("CurrentURI", f"x-rincon-queue:{uid}#0"),
                 ("CurrentURIMetaData", ""),
             ],
         )
+        # Shuffle and repeat belong to the queue: reset them once the queue
+        # is the active source (on a radio stream Sonos would refuse).
+        self._normal_play_mode(coordinator)
         self._call(
             coordinator.avTransport.Seek,
             [_INSTANCE, ("Unit", "TRACK_NR"), ("Target", max(first_track, 1))],
@@ -391,10 +478,27 @@ class SocoBackend:
         self._play(coordinator)
 
     def _play(self, coordinator: Any) -> None:
-        try:
+        def play() -> None:
             self._call(coordinator.avTransport.Play, [_INSTANCE, ("Speed", 1)])
+
+        try:
+            # Right after a new source is set, Play can fail with 701 while
+            # the speaker is still transitioning: try once more.
+            self._once_more(play, UPNP_TRANSITION_NOT_AVAILABLE)
         except ActionNotAvailable as exc:
             raise PlaybackFailed("the speaker refused to start playback") from exc
+
+    @staticmethod
+    def _once_more(step: Callable[[], Any], upnp_code: int) -> Any:
+        """Run ``step``; repeat it once after a short pause on ``upnp_code``."""
+        try:
+            return step()
+        except SonosError as exc:
+            if exc.upnp_code != upnp_code:
+                raise
+            log.info("UPnP error %s; trying once more", upnp_code)
+            time.sleep(RETRY_PAUSE)
+            return step()
 
     def _normal_play_mode(self, coordinator: Any) -> None:
         """Switch shuffle and repeat off, so that audio plays keep their order."""
@@ -406,7 +510,7 @@ class SocoBackend:
             log.debug("Could not reset play mode: %s", exc)
 
     def transport(self, action: str) -> None:
-        coordinator = self._coordinator()
+        coordinator, _ = self._coordinator()
         service = coordinator.avTransport
         if action == "play":
             self._call(service.Play, [_INSTANCE, ("Speed", 1)])
@@ -422,7 +526,7 @@ class SocoBackend:
             raise ValueError(f"unknown transport action {action!r}")
 
     def playback(self) -> Playback:
-        coordinator = self._coordinator()
+        coordinator, _ = self._coordinator()
         info = self._call(coordinator.avTransport.GetTransportInfo, [_INSTANCE])
         media = self._call(coordinator.avTransport.GetMediaInfo, [_INSTANCE])
         media_uri = media.get("CurrentURI") or ""
@@ -493,19 +597,65 @@ class SocoBackend:
     # -- album art --------------------------------------------------------
 
     def fetch_art(self, uri: str) -> bytes:
+        """Download album art named in favorite metadata.
+
+        Art served by a speaker of this household is fetched from it directly
+        (no redirects). Anything else goes through the restricted fetcher:
+        public addresses only, every redirect checked, size and time limits.
+        """
         if uri.startswith("/"):
             uri = f"http://{self._room_player().ip_address}:1400{uri}"
-        if not uri.startswith(("http://", "https://")):
-            raise NotPlayable("unsupported album art URI")
         try:
-            response = self._http_get(uri, timeout=(REQUEST_TIMEOUT, 8), stream=True)
-            response.raise_for_status()
-            data = bytearray()
-            for chunk in response.iter_content(64 * 1024):
-                data += chunk
-                if len(data) > MAX_ART_BYTES:
-                    raise CommandRejected("album art too large")
-            return bytes(data)
+            parts = urlsplit(uri)
+            host, port = parts.hostname or "", parts.port
+        except ValueError as exc:
+            raise NotPlayable("unsupported album art URI") from exc
+        if parts.scheme == "http" and port == 1400 and host in self._speaker_ips():
+            return self._fetch_speaker_art(uri)
+        if parts.scheme not in ("http", "https"):
+            raise NotPlayable("unsupported album art URI")
+        fetcher = self._fetcher_factory()
+        try:
+            result = fetcher.get(
+                uri,
+                max_bytes=MAX_ART_BYTES,
+                accept="image/*",
+                allow=(ANY_HOST,),
+                allow_http=True,
+            )
+        except FetchError as exc:
+            raise CommandRejected(f"album art not available: {exc.code}") from exc
+        finally:
+            fetcher.close()
+        if result.status != 200:
+            raise CommandRejected(f"album art answered {result.status}")
+        return result.body
+
+    def _speaker_ips(self) -> frozenset[str]:
+        ips = set(self._known_ips)
+        if self._player is not None:
+            ips.add(self._player.ip_address)
+        return frozenset(ips)
+
+    def _fetch_speaker_art(self, uri: str) -> bytes:
+        deadline = self._clock() + ART_DEADLINE
+        try:
+            response = self._http_get(
+                uri, timeout=(REQUEST_TIMEOUT, 5), stream=True, allow_redirects=False
+            )
+            try:
+                if response.status_code != 200:
+                    raise CommandRejected(f"album art answered {response.status_code}")
+                data = bytearray()
+                for chunk in _body_chunks(response):
+                    data += chunk
+                    if len(data) > MAX_ART_BYTES:
+                        raise CommandRejected("album art too large")
+                    if self._clock() > deadline:
+                        raise SonosTimeout("album art download too slow")
+                return bytes(data)
+            finally:
+                response.close()
         except SonosError:
             raise
         except Exception as exc:

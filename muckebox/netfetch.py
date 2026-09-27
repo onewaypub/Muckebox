@@ -102,6 +102,10 @@ def system_resolver(host: str, port: int) -> list[str]:
 _HOST_NAME_RE = re.compile(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*")
 
 
+#: Allowlist entry that admits every host name; the address checks still apply.
+ANY_HOST = "*"
+
+
 def host_allowed(host: str, allow: Iterable[str]) -> bool:
     """True if ``host`` is one of the ``allow`` domains or a subdomain of one.
 
@@ -113,6 +117,8 @@ def host_allowed(host: str, allow: Iterable[str]) -> bool:
     if not _HOST_NAME_RE.fullmatch(host):
         return False
     for domain in allow:
+        if domain == ANY_HOST:
+            return True
         domain = domain.lower().strip(".")
         if domain and (host == domain or host.endswith("." + domain)):
             return True
@@ -177,6 +183,7 @@ class Fetcher:
         stop_at: bytes | None = None,
         truncate: bool = False,
         stop_redirect: Callable[[str], bool] | None = None,
+        allow_http: bool = False,
     ) -> FetchResult:
         """Fetch ``url`` and return the final response.
 
@@ -193,6 +200,9 @@ class Fetcher:
         ``stop_redirect`` is called with each absolute redirect target before
         it is checked and followed; if it returns true, the redirect response
         is returned with ``location`` set instead.
+
+        ``allow_http`` also permits plain http on port 80 (for cover art that
+        some services still serve that way); all other checks stay the same.
         """
         method = method.upper()
         if method not in _METHODS:
@@ -202,7 +212,7 @@ class Fetcher:
         started = self._clock()
         redirects = 0
         while True:
-            host, port = self._check_url(url, domains)
+            host, port = self._check_url(url, domains, allow_http)
             self._check_addresses(host, port)
             response = self._send(method, url, headers, started)
             try:
@@ -231,24 +241,27 @@ class Fetcher:
     # -- helpers ----------------------------------------------------------
 
     @staticmethod
-    def _check_url(url: str, domains: tuple[str, ...]) -> tuple[str, int]:
+    def _check_url(url: str, domains: tuple[str, ...], allow_http: bool = False) -> tuple[str, int]:
         try:
             parts = urlsplit(url)
             port = parts.port
         except ValueError as exc:
             raise FetchError("bad_url", str(exc)) from exc
-        if parts.scheme.lower() != "https":
+        scheme = parts.scheme.lower()
+        default_port = {"https": 443, "http": 80}.get(scheme) if allow_http else None
+        if scheme != "https" and default_port is None:
             raise FetchError("not_https", f"only https is allowed: {parts.scheme!r}")
+        default_port = default_port or 443
         host = (parts.hostname or "").rstrip(".")
         if "\\" in parts.netloc:
             raise FetchError("bad_url", "backslash in host")
         if not host or parts.username is not None or parts.password is not None:
             raise FetchError("bad_url", "missing host or user info in URL")
-        if port not in (None, 443):
+        if port not in (None, default_port):
             raise FetchError("bad_url", f"port {port} is not allowed")
         if not host_allowed(host, domains):
             raise FetchError("host_not_allowed", f"host not allowed: {host}")
-        return host, 443
+        return host, default_port
 
     def _check_addresses(self, host: str, port: int) -> None:
         try:

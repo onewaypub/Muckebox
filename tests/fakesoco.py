@@ -31,8 +31,16 @@ def res_md(item_id, title, item_class, service="SA_RINCON52231_X_#Svc52231-0-Tok
     )
 
 
-def favorite_xml(number, title, uri, meta, *, fav_type="instantPlay", description="Apple Music",
-                 art="/getaa?s=1&u=x-sonos-http%3aart"):  # fmt: skip
+def favorite_xml(
+    number,
+    title,
+    uri,
+    meta,
+    *,
+    fav_type="instantPlay",
+    description="Apple Music",
+    art="/getaa?s=1&u=x-sonos-http%3aart",
+):
     res = (
         f'<res protocolInfo="{uri.split(":", 1)[0]}:*:*:*">{escape(uri)}</res>'
         if uri
@@ -129,8 +137,6 @@ class FakeZone:
         self.ip_address = ip
         self.uid = uid
         self.is_visible = visible
-        self.group = None
-        self.visible_zones = set()
         self.avTransport = FakeService(
             "avTransport",
             {
@@ -152,20 +158,59 @@ class FakeZone:
         self.contentDirectory = FakeService(
             "contentDirectory", {"Browse": {"Result": "", "TotalMatches": "0"}}
         )
+        self.zoneGroupTopology = FakeService("zoneGroupTopology")
         self.music_library = SimpleNamespace(get_sonos_favorites=lambda **kwargs: [])
 
     def __repr__(self):
         return f"FakeZone({self.player_name!r})"
 
 
-def household(*zones, groups=None):
-    """Wire zones into a household. ``groups`` lists (coordinator, members...)."""
-    visible = {zone for zone in zones if zone.is_visible}
-    for zone in zones:
-        zone.visible_zones = visible
-    groups = groups or [(zone, zone) for zone in zones]
+def zone_group_state(groups):
+    """ZoneGroupState XML for ``groups``: a list of (coordinator, members...)."""
+    parts = ["<ZoneGroupState><ZoneGroups>"]
     for coordinator, *members in groups:
-        group = SimpleNamespace(coordinator=coordinator, members=set(members))
+        parts.append(f'<ZoneGroup Coordinator="{coordinator.uid}" ID="{coordinator.uid}:1">')
         for member in members:
-            member.group = group
+            invisible = "" if member.is_visible else ' Invisible="1"'
+            parts.append(
+                f'<ZoneGroupMember UUID="{member.uid}" '
+                f'Location="http://{member.ip_address}:1400/xml/device_description.xml" '
+                f'ZoneName="{escape(member.player_name)}"{invisible}/>'
+            )
+        parts.append("</ZoneGroup>")
+    parts.append("</ZoneGroups><VanishedDevices/></ZoneGroupState>")
+    return "".join(parts)
+
+
+def household(*zones, groups=None):
+    """Wire zones into a household. ``groups`` lists (coordinator, members...).
+
+    Every zone answers GetZoneGroupState with the whole household.
+    """
+    groups = groups or [(zone, zone) for zone in zones]
+    xml = zone_group_state(groups)
+    for zone in zones:
+        zone.zoneGroupTopology.responses["GetZoneGroupState"] = {"ZoneGroupState": xml}
     return {zone.ip_address: zone for zone in zones}
+
+
+def switch_off(zone):
+    """Make every request to ``zone`` time out, like an unplugged speaker."""
+    import requests
+
+    for service in (
+        zone.avTransport,
+        zone.renderingControl,
+        zone.contentDirectory,
+        zone.zoneGroupTopology,
+    ):
+        service.errors = {
+            name: requests.exceptions.ConnectTimeout("off")
+            for name in (
+                "GetZoneGroupState",
+                "GetVolume",
+                "SetVolume",
+                "Play",
+                "GetTransportInfo",
+            )
+        }
