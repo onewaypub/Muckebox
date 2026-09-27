@@ -104,8 +104,9 @@ class Library:
         self._lock = threading.RLock()
         self._rev = 0
         self._tiles: list[Tile] = []
-        #: Set when library.json could not be read and was moved aside.
-        self.load_problem: str | None = None
+        #: Set when library.json could not be read and was moved aside:
+        #: {"code": "library_corrupt", "file": <name of the moved file>}.
+        self.load_problem: dict[str, str] | None = None
         self._load()
 
     # -- reading ----------------------------------------------------------
@@ -212,10 +213,13 @@ class Library:
         except (OSError, ValueError, KeyError, TypeError) as exc:
             broken = self.path.with_name(f"{self.path.name}.corrupt-{int(time.time())}")
             shutil.move(self.path, broken)
-            self.load_problem = (
-                f"{self.path.name} could not be read ({exc}); moved to {broken.name}"
+            self.load_problem = {"code": "library_corrupt", "file": broken.name}
+            log.error(
+                "Library: %s could not be read (%s); moved to %s. Starting with an empty library.",
+                self.path.name,
+                exc,
+                broken,
             )
-            log.error("Library: %s. Starting with an empty library.", self.load_problem)
             return
         self._tiles, self._rev = tiles, rev
 

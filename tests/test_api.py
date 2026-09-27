@@ -192,3 +192,19 @@ def test_icons(client, path, size):
 
 def test_unknown_icon_size(client):
     assert client.get("/icon-99.png").status_code == 404
+
+
+def test_state_reports_the_page_build(client, app):
+    state = client.get("/api/state").get_json()
+    assert state["assets"] == app.jinja_env.globals["asset_version"]
+    assert f'data-asset-version="{state["assets"]}"' in client.get("/").get_data(as_text=True)
+
+
+def test_volume_while_a_tap_is_running(client, connected, monkeypatch):
+    from muckebox.runtime.service import Busy
+
+    def busy(direction):
+        raise Busy()
+
+    monkeypatch.setattr(connected.runtime, "change_volume", busy)
+    assert client.post("/api/volume/up", headers=POST).status_code == 409

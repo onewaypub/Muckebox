@@ -39,7 +39,6 @@ const model = {
   state: null,
   etag: null,
   libraryRev: null,
-  version: null,
   failures: 0,
   localPending: null,
   shownErrorAt: null,
@@ -58,8 +57,7 @@ function renderTiles(tiles) {
     node.querySelector(".title").textContent = tile.title;
     const cover = node.querySelector(".cover");
     if (tile.cover) {
-      cover.src = tile.cover;
-      cover.addEventListener("error", () => showPlaceholder(node, tile), { once: true });
+      loadCover(node, cover, tile);
     } else {
       showPlaceholder(node, tile);
     }
@@ -68,6 +66,34 @@ function renderTiles(tiles) {
   }
   view.empty.hidden = tiles.length > 0;
   renderState();
+}
+
+// A cover that fails to load (e.g. while the Wi-Fi reconnects) is tried
+// again a few times; meanwhile the tile shows its letter.
+const COVER_RETRIES = 6;
+
+function loadCover(node, cover, tile) {
+  let tries = 0;
+  cover.addEventListener("load", () => showCover(node));
+  cover.addEventListener("error", () => {
+    showPlaceholder(node, tile);
+    if (tries >= COVER_RETRIES) return;
+    const delay = Math.min(60000, 5000 * 2 ** tries++);
+    setTimeout(() => {
+      if (!node.isConnected) return; // the tiles were rebuilt meanwhile
+      cover.loading = "eager";
+      cover.src = `${tile.cover}?retry=${tries}`;
+    }, delay);
+  });
+  cover.src = tile.cover;
+}
+
+function showCover(node) {
+  const cover = node.querySelector(".cover");
+  cover.hidden = false;
+  node.classList.remove("no-cover");
+  node.style.background = "";
+  node.querySelector(".placeholder").textContent = "";
 }
 
 function showPlaceholder(node, tile) {
@@ -176,13 +202,15 @@ async function poll() {
   model.pollTimer = setTimeout(poll, nextDelay(model.failures));
 }
 
+// The build of the page itself; the server reports its current one.
+const PAGE_ASSETS = document.body.dataset.assetVersion;
+
 function applyState(state) {
-  if (model.version && state.version !== model.version) {
-    // The server was updated: load the new page (only after a successful answer).
+  if (state.assets && PAGE_ASSETS && state.assets !== PAGE_ASSETS) {
+    // Muckebox was updated: load the new page (only after a successful answer).
     window.location.reload();
     return;
   }
-  model.version = state.version;
   model.state = state;
   if (!state.pending) model.localPending = null;
   renderState();
@@ -224,7 +252,17 @@ function playTile(id) {
 }
 
 function transport(action) {
-  command(() => post(`/api/transport/${action}`));
+  command(() => post(`/api/transport/${action}`)).then((data) => {
+    if (data && data.playback && model.state) {
+      model.state.playback = data.playback;
+      renderState();
+    }
+  });
+}
+
+// Send what the button shows: a double tap then cannot undo the first tap.
+function togglePlayback() {
+  transport(isPlaying(model.state) ? "pause" : "play");
 }
 
 async function changeVolume(direction) {
@@ -236,7 +274,7 @@ async function changeVolume(direction) {
 }
 
 function bindControls() {
-  view.toggle.addEventListener("click", () => transport("toggle"));
+  view.toggle.addEventListener("click", togglePlayback);
   view.prev.addEventListener("click", () => transport("previous"));
   view.next.addEventListener("click", () => transport("next"));
   view.louder.addEventListener("click", () => changeVolume("up"));

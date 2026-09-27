@@ -10,6 +10,7 @@ Needs Playwright browsers (`python -m playwright install webkit chromium`).
 Without them the tests are skipped, unless MUCKEBOX_REQUIRE_E2E=1 (CI).
 """
 
+import itertools
 import os
 import re
 import threading
@@ -148,14 +149,27 @@ def test_server_gone_shows_offline_overlay(page, server):
     expect(overlay).to_contain_text("Keine Verbindung zur Muckebox")
 
 
-def test_layout_fits_the_screen_with_big_targets(page, server):
-    server.add_tiles(0, 1, 2, 3, 4)
+@pytest.mark.parametrize(
+    "size", [None, (640, 1000), (390, 844)], ids=["device", "tablet-portrait", "phone-portrait"]
+)
+def test_layout_fits_the_screen_with_big_targets(page, server, size):
+    server.add_tiles(*[i % 5 for i in range(14)])
+    if size:
+        page.set_viewport_size({"width": size[0], "height": size[1]})
     page.goto(server.url)
-    expect(page.locator(".tile")).to_have_count(5)
+    tiles = page.locator(".tile")
+    expect(tiles).to_have_count(14)
     width = page.evaluate("document.documentElement.scrollWidth")
     assert width <= page.viewport_size["width"]
-    for box in [page.locator(".tile").first.bounding_box(), page.locator("#louder").bounding_box()]:
-        assert box["width"] >= 60 and box["height"] >= 60
+    louder = page.locator("#louder").bounding_box()
+    assert louder["x"] + louder["width"] <= page.viewport_size["width"]
+    assert louder["width"] >= 40 and louder["height"] >= 40
+    boxes = [tiles.nth(i).bounding_box() for i in range(14)]
+    assert all(box["width"] >= 100 for box in boxes)
+    for a, b in itertools.combinations(boxes, 2):  # no two tiles may overlap
+        overlap_x = min(a["x"] + a["width"], b["x"] + b["width"]) - max(a["x"], b["x"])
+        overlap_y = min(a["y"] + a["height"], b["y"] + b["height"]) - max(a["y"], b["y"])
+        assert overlap_x <= 0 or overlap_y <= 0
 
 
 def test_parents_add_a_favorite_for_the_kids(page, server):

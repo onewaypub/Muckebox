@@ -241,6 +241,10 @@ class Runtime:
         future = self.transport_lane.submit(self._favorites_job)
         return self._wait(future, FAVORITES_WAIT)
 
+    def cached_favorites(self) -> list[Favorite] | None:
+        """The last favorites list, however old (no speaker access)."""
+        return self._favorites[1] if self._favorites else None
+
     def fetch_art(self, uri: str) -> bytes:
         """Download album art (runs in the calling thread; no UPnP involved)."""
         return self.backend.fetch_art(uri)

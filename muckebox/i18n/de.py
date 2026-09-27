@@ -78,6 +78,15 @@ MESSAGES: dict[str, str] = {
     "error.method_not_allowed": "Diese Aktion ist hier nicht möglich.",
     "error.request_too_large": "Die Anfrage ist zu groß.",
     "error.internal_error": "Ein unerwarteter Fehler ist aufgetreten.",
+    "error.offline": "Keine Verbindung zur Muckebox.",
+    "error.timeout": (
+        "Die Muckebox hat nicht rechtzeitig geantwortet. Die Änderung ist eventuell trotzdem "
+        "gespeichert – bitte die Liste prüfen."
+    ),
+    "error.library_corrupt": (
+        "Die Kachel-Liste war beschädigt. Sie wurde als {file} im Datenordner beiseitegelegt; "
+        "es geht mit einer leeren Liste weiter."
+    ),
     "error.busy": "Einen Moment, die Muckebox ist noch beschäftigt.",
     "error.tile_not_found": "Diese Kachel gibt es nicht mehr.",
     "error.favorite_not_found": "Diesen Favoriten gibt es nicht mehr. Bitte neu laden.",
