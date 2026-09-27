@@ -27,12 +27,17 @@ class FakeClock:
 
     def __init__(self, start: float = 1_000.0) -> None:
         self.now = start
+        self.offset = 1_790_000_000.0
 
     def monotonic(self) -> float:
         return self.now
 
     def time(self) -> float:
-        return 1_790_000_000.0 + self.now
+        return self.offset + self.now
 
     def advance(self, seconds: float) -> None:
         self.now += seconds
+
+    def set_time(self, epoch: float) -> None:
+        """Make the wall clock show ``epoch`` now (monotonic time stays)."""
+        self.offset = epoch - self.now

@@ -44,6 +44,7 @@ changes increase the `api` number reported by `/api/state`.
 | `POST /api/volume/up`, `POST /api/volume/down` | Change the volume of the kids room by the step set on the parents' page, clamped to `0…limit`. One change at a time. | `200 {"ok": true, "volume": {…}}`, `409 busy`, `503 volume_unknown` (the volume could not be read or set) or `503 <code>` |
 | `GET /covers/<hash>.jpg` | Cover image (600×600 JPEG, immutable). | `200`, `404` |
 
+`409 bedtime` means the usage time is over (see `schedule` in the state).
 `503 <code>` is the reason the speaker cannot be controlled right now:
 `sonos_unreachable`, `upnp_disabled` or `room_not_found` (with `retry_in`),
 `not_configured` (no room chosen yet), `sonos_timeout`, or another error
@@ -67,9 +68,12 @@ code such as `service_unavailable`.
     "can_next": true,
     "can_prev": true
   },
-  "volume": {"value": 12, "max": 25, "step": 3},
+  "volume": {"value": 12, "max": 25, "limit": 25, "step": 3},
   "pending": null,
-  "last_error": null
+  "last_error": null,
+  "schedule": {"phase": "open", "ends_at": 1790013600, "opens_at": null,
+               "fade_from": 1790013000, "override_until": null},
+  "sleep_timer": {"enabled": false, "minutes": 30, "ends_at": null}
 }
 ```
 
@@ -80,7 +84,17 @@ code such as `service_unavailable`.
   present once the room was found.
 - `playback.state`: `playing`, `paused`, `stopped`, `transitioning`, `unknown`.
   `tile_id` is the tile Muckebox started, as long as it is still playing.
-- `volume.value` is `null` while the volume is unknown.
+- `volume.value` is `null` while the volume is unknown. `max` is the parents'
+  limit (the scale of the volume bar); `limit` is the cap right now, lower
+  while the music fades before the end of the usage time or the sleep timer.
+- `schedule.phase`: `off` (no usage times), `open`, `fading` (before
+  `ends_at`, from `fade_from`) or `closed` (until `opens_at`). All times are
+  Unix seconds. While closed, only pause and quieter are allowed; other
+  commands get `409 bedtime`. `override_until` is set while the parents
+  allow extra time.
+- `sleep_timer.ends_at` is set while the kids' sleep timer runs. When it ends,
+  the music fades and pauses, and `schedule.phase` stays `closed` until the
+  next morning.
 - `pending`: `null` or `{"action": "start", "tile_id": "…", "since": <unix time>}`.
 - `last_error`: `null` or `{"code": "…", "tile_id": "…", "at": <unix time>}`;
   cleared after a successful start or after 60 seconds.

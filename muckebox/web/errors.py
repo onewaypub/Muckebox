@@ -14,6 +14,8 @@ import logging
 from flask import Flask, Response, jsonify
 from werkzeug.exceptions import HTTPException
 
+from muckebox.runtime.timekeeper import Refused
+
 log = logging.getLogger(__name__)
 
 _HTTP_CODES = {
@@ -45,6 +47,12 @@ def register_error_handlers(app: Flask) -> None:
     @app.errorhandler(ApiError)
     def _api_error(exc: ApiError):
         return error_response(exc.status, exc.code, exc.retry_in)
+
+    @app.errorhandler(Refused)
+    def _refused(exc: Refused):
+        # Not allowed right now (e.g. bedtime): a 409 like "busy", which the
+        # kids view does not show as a speaker problem.
+        return error_response(409, exc.code)
 
     @app.errorhandler(HTTPException)
     def _http_error(exc: HTTPException):
