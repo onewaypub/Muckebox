@@ -129,6 +129,10 @@ MESSAGES: dict[str, str] = {
     "error.max_volume_invalid": "MAX_VOLUME muss eine ganze Zahl von 1 bis 100 sein.",
     "error.volume_step_invalid": "VOLUME_STEP muss eine ganze Zahl von 1 bis MAX_VOLUME sein.",
     "error.admin_pin_missing": "Es ist keine ADMIN_PIN gesetzt. Die Eltern-Seite bleibt gesperrt.",
+    "error.admin_pin_placeholder": (
+        "Die ADMIN_PIN ist noch ein Beispielwert. Bitte eine eigene PIN setzen; "
+        "bis dahin bleibt die Eltern-Seite gesperrt."
+    ),
     "error.admin_pin_too_short": (
         "Die ADMIN_PIN muss mindestens {min_length} Zeichen lang sein. "
         "Die Eltern-Seite bleibt gesperrt."

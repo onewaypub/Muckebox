@@ -158,3 +158,10 @@ def test_settings_are_immutable():
 
 def test_repr_hides_the_pin():
     assert "2468" not in repr(load_settings({**BASE, "ADMIN_PIN": "2468"}))
+
+
+@pytest.mark.parametrize("pin", ["change-me", "CHANGE-ME", "changeme", "1234", "0000"])
+def test_example_pins_lock_the_admin(pin):
+    s = load_settings({**BASE, "ADMIN_PIN": pin})
+    assert s.admin_locked
+    assert "admin_pin_placeholder" in codes(s)
