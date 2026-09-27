@@ -5,6 +5,8 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 # Contributing to Muckebox
 
+Everyone taking part in Muckebox agrees to our [Code of Conduct](CODE_OF_CONDUCT.md).
+
 Thank you for helping! Bug reports, translations, documentation and code are
 all welcome.
 
