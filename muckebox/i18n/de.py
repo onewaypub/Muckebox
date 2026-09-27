@@ -21,6 +21,52 @@ MESSAGES: dict[str, str] = {
     "admin.pin": "PIN",
     "admin.login": "Anmelden",
     "admin.logout": "Abmelden",
+    "admin.login_hint": (
+        "Erster Start oder PIN vergessen? Die Start-PIN steht im Log der Muckebox. "
+        "Eine neue PIN erzeugt dieser Befehl im Container:"
+    ),
+    "admin.pin_banner": "Du nutzt noch die Start-PIN aus dem Log. Bitte lege eine eigene PIN fest.",
+    "admin.pin_banner_link": "PIN ändern",
+    "admin.setup": "Einrichtung",
+    "admin.room_current": "Gewählter Raum: {room}",
+    "admin.room_none": (
+        "Noch kein Raum gewählt. Wähle unten den Raum, den die Muckebox steuern soll."
+    ),
+    "admin.seed_ip": "IP-Adresse eines Lautsprechers (optional)",
+    "admin.seed_ip_hint": (
+        "Nur nötig, wenn die Suche nichts findet, z. B. wenn die Lautsprecher in einem "
+        "anderen Netz (VLAN) sind oder mehrere Sonos-Systeme im Netz laufen."
+    ),
+    "admin.seed_ip_placeholder": "z. B. 192.0.2.10",
+    "admin.search_rooms": "Räume suchen",
+    "admin.searching": "Suche läuft … (bis zu 20 Sekunden)",
+    "admin.rooms_none": (
+        "Keine Räume gefunden. Trage die IP-Adresse eines Lautsprechers ein und suche erneut."
+    ),
+    "admin.room_grouped": "gruppiert",
+    "admin.choose": "Wählen",
+    "admin.chosen": "Gewählt",
+    "admin.room_saved": "Die Muckebox steuert jetzt „{room}“.",
+    "admin.room_hint": (
+        "Muckebox prüft die Verbindung, bevor sie den Raum speichert. "
+        "Das Lautstärke-Limit gilt im gewählten Raum sofort."
+    ),
+    "admin.favorites_no_room": "Wähle zuerst einen Raum, dann erscheinen hier seine Favoriten.",
+    "admin.volume": "Lautstärke",
+    "admin.volume_step": "Schrittweite der Lauter/Leiser-Tasten",
+    "admin.volume_hint": (
+        "Das Limit gilt sofort (1 bis 100). Stelle zusätzlich in der Sonos-App ein "
+        "Lautstärke-Limit für den Raum ein."
+    ),
+    "admin.pin_change": "PIN ändern",
+    "admin.pin_current": "Aktuelle PIN",
+    "admin.pin_new": "Neue PIN",
+    "admin.pin_repeat": "Neue PIN wiederholen",
+    "admin.pin_hint": (
+        "Mindestens 4 Zeichen. Nach dem Ändern sind alle anderen Geräte abgemeldet."
+    ),
+    "admin.pin_mismatch": "Die beiden neuen PINs stimmen nicht überein.",
+    "admin.pin_changed": "PIN geändert. Andere Geräte sind jetzt abgemeldet.",
     "admin.kids_view": "Zur Kinderansicht",
     "admin.tiles": "Kacheln",
     "admin.tiles_empty": "Noch keine Kacheln. Füge unten Favoriten oder Links hinzu.",
@@ -47,7 +93,7 @@ MESSAGES: dict[str, str] = {
     "admin.status": "Status",
     "admin.room": "Raum",
     "admin.connection": "Verbindung",
-    "admin.max_volume": "Maximale Lautstärke",
+    "admin.max_volume": "Lautstärke-Limit",
     "admin.corrections": "Lautstärke-Korrekturen",
     "admin.version": "Version",
     "admin.source": "Quellcode (AGPL-3.0)",
@@ -66,6 +112,7 @@ MESSAGES: dict[str, str] = {
     # Connection status
     "status.ok": "Verbunden",
     "status.starting": "Verbindet …",
+    "status.not_configured": "Noch kein Raum gewählt",
     # -- errors (API codes) --------------------------------------------------------
     "error.bad_request": "Die Anfrage ist ungültig.",
     "error.csrf_header_missing": "Die Anfrage wurde aus Sicherheitsgründen abgelehnt.",

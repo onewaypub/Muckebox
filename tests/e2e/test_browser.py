@@ -37,13 +37,14 @@ DEVICES = {"webkit": "iPad (gen 7) landscape", "chromium": "Galaxy Tab S4 landsc
 
 
 class Server:
-    def __init__(self, tmp_path):
+    def __init__(self, tmp_path, set_up=True):
         household = FakeHousehold()
         self.fake = household.speaker("Kinderzimmer")
         settings = load_settings({"DATA_DIR": str(tmp_path)})
-        store = SettingsStore(tmp_path, scrypt={"n": 2**4, "r": 8, "p": 1})
-        store.set_room("Kinderzimmer", household.uid("Kinderzimmer"), None)
-        store.change_pin("2468")
+        store = self.store = SettingsStore(tmp_path, scrypt={"n": 2**4, "r": 8, "p": 1})
+        if set_up:
+            store.set_room("Kinderzimmer", household.uid("Kinderzimmer"), None)
+            store.change_pin("2468")
         self.library = Library(tmp_path / "library.json")
         self.runtime = Runtime(
             store,
@@ -111,6 +112,15 @@ def page(request, playwright):
 @pytest.fixture
 def server(tmp_path):
     server = Server(tmp_path)
+    server.start()
+    yield server
+    server.stop()
+
+
+@pytest.fixture
+def new_server(tmp_path):
+    """A Muckebox on its first start: no room, a generated PIN."""
+    server = Server(tmp_path, set_up=False)
     server.start()
     yield server
     server.stop()
@@ -197,3 +207,39 @@ def test_parents_add_a_favorite_for_the_kids(page, server):
     page.goto(server.url)
     expect(page.locator(".tile")).to_have_count(1)
     expect(page.locator(".tile")).to_have_attribute("aria-label", "Kinderradio")
+
+
+def test_first_start_setup(page, new_server):
+    page.goto(new_server.url)
+    overlay = page.locator("#overlay")
+    expect(overlay).to_contain_text("noch nicht fertig eingerichtet")
+
+    page.goto(new_server.url + "/admin")
+    expect(page.locator("#login .hint")).to_contain_text("reset-pin")
+    page.locator("#pin").fill(new_server.store.current().pin.generated)
+    page.locator("#login button").tap()
+    expect(page.locator("#pin-banner")).to_be_visible()
+    expect(page.locator("#favorites-no-room")).to_be_visible()
+    rooms = page.locator(".room-row")
+    expect(rooms).to_have_count(2)  # searched without asking
+    rooms.filter(has_text="Kinderzimmer").locator("button").tap()
+    expect(page.locator("#room-current")).to_have_text("Gewählter Raum: Kinderzimmer")
+    expect(rooms.filter(has_text="Kinderzimmer").locator("button")).to_have_text("Gewählt")
+    expect(page.locator(".favorite-row", has_text="Kinderradio")).to_be_visible()
+
+    page.locator("#max-volume").fill("18")
+    page.locator("#volume-step").fill("2")
+    page.locator("#volume button").tap()
+    expect(page.locator("#flash")).to_have_text("Gespeichert")
+    assert new_server.store.current().max_volume == 18
+
+    page.locator("#pin-current").fill(new_server.store.current().pin.generated)
+    page.locator("#pin-new").fill("9753")
+    page.locator("#pin-repeat").fill("9753")
+    page.locator("#pin-form button").tap()
+    expect(page.locator("#pin-banner")).to_be_hidden()
+    assert new_server.store.verify_pin("9753")
+
+    page.goto(new_server.url)
+    expect(page.locator("#empty")).to_be_visible()
+    expect(overlay).to_be_hidden()
