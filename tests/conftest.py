@@ -79,16 +79,39 @@ def _no_network(monkeypatch):
 # -- application fixtures ----------------------------------------------------------
 
 
-@pytest.fixture
-def fake_sonos():
-    from muckebox.sonos.fake import FakeSonos
-
-    return FakeSonos()
+TEST_SCRYPT = {"n": 2**4, "r": 8, "p": 1}  # fast PIN hashing for tests
 
 
 @pytest.fixture
-def make_services(tmp_path, fake_sonos):
-    """Build the app's services on FakeSonos, with lanes that run inline."""
+def household():
+    from muckebox.sonos.fake import FakeHousehold
+
+    return FakeHousehold()
+
+
+@pytest.fixture
+def fake_sonos(household):
+    """The speaker of the room the services control by default."""
+    return household.speaker("Kinderzimmer")
+
+
+@pytest.fixture
+def make_store(tmp_path, household):
+    """A settings store in tmp_path; ``room`` is chosen unless it is None."""
+    from muckebox.settings import SettingsStore
+
+    def make(room="Kinderzimmer", seed_ip=None, **kwargs):
+        store = SettingsStore(tmp_path, scrypt=TEST_SCRYPT, **kwargs)
+        if room is not None:
+            store.set_room(room, household.uid(room), seed_ip)
+        return store
+
+    return make
+
+
+@pytest.fixture
+def make_services(tmp_path, household, make_store):
+    """Build the app's services on FakeHousehold, with lanes that run inline."""
     from muckebox.config import load_settings
     from muckebox.covers import CoverStore
     from muckebox.library import Library
@@ -97,15 +120,15 @@ def make_services(tmp_path, fake_sonos):
     from muckebox.runtime.service import Runtime
     from muckebox.web.app import Services
 
-    def make(**env):
-        settings = load_settings(
-            {"SONOS_IP": "192.0.2.10", "DATA_DIR": str(tmp_path), "ADMIN_PIN": "2468", **env}
-        )
+    def make(room="Kinderzimmer", **env):
+        settings = load_settings({"DATA_DIR": str(tmp_path), "ADMIN_PIN": "2468", **env})
         library = Library(tmp_path / "library.json")
         runtime = Runtime(
-            settings,
-            fake_sonos,
+            make_store(room),
             library,
+            tmp_path,
+            backend_factory=household.backend,
+            room_finder=household.find_rooms,
             clock=FakeClock(),
             lane_factory=lambda name, idle, interval: InlineLane(name),
         )

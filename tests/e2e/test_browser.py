@@ -25,7 +25,8 @@ from muckebox.config import load_settings  # noqa: E402
 from muckebox.covers import CoverStore  # noqa: E402
 from muckebox.library import Library, favorite_source  # noqa: E402
 from muckebox.runtime.service import Runtime  # noqa: E402
-from muckebox.sonos.fake import FakeSonos  # noqa: E402
+from muckebox.settings import SettingsStore  # noqa: E402
+from muckebox.sonos.fake import FakeHousehold  # noqa: E402
 from muckebox.web import create_app  # noqa: E402
 from muckebox.web.app import Services  # noqa: E402
 
@@ -37,12 +38,19 @@ DEVICES = {"webkit": "iPad (gen 7) landscape", "chromium": "Galaxy Tab S4 landsc
 
 class Server:
     def __init__(self, tmp_path):
-        self.fake = FakeSonos()
-        settings = load_settings(
-            {"SONOS_IP": "192.0.2.10", "DATA_DIR": str(tmp_path), "ADMIN_PIN": "2468"}
-        )
+        household = FakeHousehold()
+        self.fake = household.speaker("Kinderzimmer")
+        settings = load_settings({"DATA_DIR": str(tmp_path), "ADMIN_PIN": "2468"})
+        store = SettingsStore(tmp_path, scrypt={"n": 2**4, "r": 8, "p": 1})
+        store.set_room("Kinderzimmer", household.uid("Kinderzimmer"), None)
         self.library = Library(tmp_path / "library.json")
-        self.runtime = Runtime(settings, self.fake, self.library)
+        self.runtime = Runtime(
+            store,
+            self.library,
+            tmp_path,
+            backend_factory=household.backend,
+            room_finder=household.find_rooms,
+        )
         services = Services(
             settings, self.runtime, self.library, CoverStore(tmp_path / "c"), b"k" * 32
         )

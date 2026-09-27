@@ -127,8 +127,18 @@ MESSAGES: dict[str, str] = {
     "error.command_rejected": "Der Lautsprecher hat den Befehl abgelehnt.",
     "error.action_not_available": "Das geht gerade nicht.",
     "error.volume_unknown": "Die Lautstärke konnte nicht gelesen werden.",
-    "error.config_error": "Die Muckebox ist noch nicht fertig eingerichtet.",
+    "error.not_configured": (
+        "Die Muckebox ist noch nicht eingerichtet. Bitte auf der Eltern-Seite einen Raum wählen."
+    ),
     # Configuration problems (shown to parents)
+    "error.pin_generated": (
+        "Die Eltern-PIN ist noch die erzeugte Start-PIN aus dem Log. "
+        "Bitte eine eigene PIN festlegen."
+    ),
+    "error.settings_corrupt": (
+        "Die gespeicherten Einstellungen waren beschädigt und wurden beiseitegelegt. "
+        "Bitte Raum, Lautstärke und PIN neu festlegen."
+    ),
     "error.sonos_not_configured": (
         "Es ist kein Sonos-Lautsprecher eingestellt. Bitte SONOS_ROOM oder SONOS_IP setzen."
     ),

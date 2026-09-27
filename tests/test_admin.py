@@ -161,7 +161,7 @@ def test_status(admin):
     assert data["sonos"]["status"] == "ok"
     assert data["volume_guard"]["max"] == 25
     assert data["source_url"].startswith("https://github.com/")
-    assert data["config_problems"] == []
+    assert data["config_problems"] == ["pin_generated"]  # no own PIN set yet
 
 
 def test_favorites(admin):
