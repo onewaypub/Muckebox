@@ -77,9 +77,11 @@ changes increase the `api` number reported by `/api/state`.
 
 ## Admin (session cookie)
 
-All admin endpoints return `403 admin_locked` when `ADMIN_PIN` is not set.
-Mutations additionally require a valid session and a same-origin `Origin`
-header.
+All admin endpoints return `403 admin_locked` when `ADMIN_PIN` is not set
+and `401 login_required` without a valid session. Mutations additionally
+require a same-origin `Origin` header when the browser sends one
+(`403 origin_mismatch`). Tile endpoints answer with the full tile list:
+`{"ok": true, "rev": 8, "tiles": [...]}`.
 
 | Method and path | Purpose |
 |---|---|
@@ -87,9 +89,10 @@ header.
 | `POST /api/admin/login` `{"pin": "…"}` | Start a session. `401 pin_wrong`, `429 pin_rate_limited` (with `retry_in`). |
 | `POST /api/admin/logout` | End the session. |
 | `GET /api/admin/status` | Diagnostics for parents: room, coordinator, connection state, volume guard statistics, recent errors with hints, versions, source code link. |
-| `GET /api/admin/favorites[?refresh=1]` | Sonos favorites with `playable`, `reason` and whether a tile already exists. |
+| `GET /api/admin/favorites[?refresh=1]` | Sonos favorites: `item_id`, `title`, `description`, `playable`, `reason` (`no_resource`, `tv_input`, `broken_metadata`), `route` (`direct`, `queue`, `unsupported`), `has_art`, and `tile_id` if a tile already plays it. Cached for 60 s. |
+| `GET /api/admin/favorite-art?item_id=FV:2/5` | The favorite's artwork as JPEG (fetched through Muckebox, because the speaker or image server may not be reachable from the parent's phone). |
 | `GET /api/admin/tiles` | Tiles including source details. |
-| `POST /api/admin/tiles` | Create a tile: `{"source": "favorite", "item_id": "FV:2/5"}` or `{"source": "sharelink", "url": "…"}`. `201`, or `422 not_playable` / `sharelink_unsupported` / `sharelink_unresolvable`. |
+| `POST /api/admin/tiles` | Create a tile: `{"source": "favorite", "item_id": "FV:2/5"}` or `{"source": "sharelink", "url": "…"}`. `201` with `tile` and `warnings` (`cover_missing`, `title_missing`, `sharelink_experimental`), or `404 favorite_not_found`, `422 not_playable` / `sharelink_unsupported` / `sharelink_unresolvable`. |
 | `PATCH /api/admin/tiles/<id>` `{"title": "…", "rev": 8}` | Rename a tile. |
 | `POST /api/admin/tiles/<id>/move` `{"direction": "up" \| "down", "rev": 8}` | Reorder. |
 | `DELETE /api/admin/tiles/<id>?rev=8` | Remove a tile and its unused cover. |
