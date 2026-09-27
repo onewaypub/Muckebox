@@ -29,6 +29,7 @@ EXIT_DATA_DIR = 3
 EXIT_PORT_IN_USE = 4
 
 WEB_THREADS = 8
+WAITRESS_BODY_LIMIT_FACTOR = 2
 
 
 class DataDirError(Exception):
@@ -85,12 +86,17 @@ def ensure_data_dir(path: Path) -> None:
         ) from exc
 
 
-class _Shutdown(Exception):
-    """Raised by the SIGTERM handler to stop the server loop."""
+class _Shutdown(SystemExit):
+    """Raised by the SIGTERM handler to stop the server loop.
+
+    A SystemExit subclass: waitress re-raises it from its channel handlers
+    and lets running requests finish before ``run()`` returns.
+    """
 
 
 def _raise_shutdown(signum: int, frame: FrameType | None) -> None:
-    raise _Shutdown
+    signal.signal(signal.SIGTERM, signal.SIG_DFL)  # a second SIGTERM ends the process at once
+    raise _Shutdown(0)
 
 
 def _serve(app: Flask, port: int) -> None:
@@ -102,14 +108,18 @@ def _serve(app: Flask, port: int) -> None:
         port=port,
         threads=WEB_THREADS,
         ident="Muckebox",
-        max_request_body_size=app.config["MAX_CONTENT_LENGTH"],
+        # Backstop only: waitress answers oversized bodies with plain text.
+        # Its cap is kept well above the app's limit so that Flask can reply
+        # with the JSON error envelope for anything in between.
+        max_request_body_size=WAITRESS_BODY_LIMIT_FACTOR * app.config["MAX_CONTENT_LENGTH"],
     )
     signal.signal(signal.SIGTERM, _raise_shutdown)
     try:
         server.run()
     except (KeyboardInterrupt, _Shutdown):
-        log.info("Shutting down")
+        pass  # only reached if the signal arrives outside waitress's loop
     finally:
+        log.info("Shutting down")
         server.close()
 
 
