@@ -5,8 +5,10 @@ import pytest
 import requests
 from soco.exceptions import SoCoSlaveException, SoCoUPnPException
 
+from muckebox.sonos import soco_backend
 from muckebox.sonos.errors import (
     ActionNotAvailable,
+    CommandRejected,
     GroupProblem,
     NotPlayable,
     RoomNotFound,
@@ -16,7 +18,13 @@ from muckebox.sonos.errors import (
     UpnpDisabled,
 )
 from muckebox.sonos.model import FavoriteRef, Route, ShareLinkRef
-from muckebox.sonos.soco_backend import SLOW_TIMEOUT, VOLUME_TIMEOUT, SocoBackend, translate
+from muckebox.sonos.soco_backend import (
+    REQUEST_TIMEOUT,
+    SLOW_TIMEOUT,
+    VOLUME_TIMEOUT,
+    SocoBackend,
+    translate,
+)
 from tests.fakesoco import (
     ALBUM_URI,
     NAS_URI,
@@ -25,6 +33,8 @@ from tests.fakesoco import (
     household,
     parsed_favorites,
     res_md,
+    switch_off,
+    zone_group_state,
 )
 
 
@@ -92,9 +102,12 @@ def test_unknown_room(kids, living):
 
 
 def test_room_by_discovery_without_ip(kids, living):
-    household(kids, living)
+    zones = household(kids, living)
     backend = SocoBackend(
-        room="Kinderzimmer", seed_ip=None, discover=lambda timeout: {kids, living}
+        room="Kinderzimmer",
+        seed_ip=None,
+        discover=lambda timeout: {kids, living},
+        soco_factory=lambda ip: zones[ip],
     )
     assert backend.resolve().player_ip == "192.0.2.10"
 
@@ -105,26 +118,67 @@ def test_discovery_finding_nothing(kids):
         backend.resolve()
 
 
-def test_unreachable_seed():
-    class Offline:
-        @property
-        def visible_zones(self):
-            raise requests.exceptions.ConnectTimeout("timed out")
-
-    backend = SocoBackend(
-        room="Kinderzimmer",
-        seed_ip="192.0.2.99",
-        soco_factory=lambda ip: Offline(),
-        resolve_host=lambda host: host,
-    )
+def test_unreachable_seed(kids):
+    zones = household(kids)
+    switch_off(kids)
     with pytest.raises(SonosUnreachable):
-        backend.resolve()
+        backend_for(zones, seed="192.0.2.10").resolve()
 
 
 def test_missing_coordinator_is_a_group_problem(kids):
     zones = household(kids)
-    kids.group.coordinator = None
+    xml = zone_group_state([(FakeZone("Gone", "192.0.2.99", "RINCON_000000000099001400"), kids)])
+    kids.zoneGroupTopology.responses["GetZoneGroupState"] = {"ZoneGroupState": xml}
     with pytest.raises(GroupProblem):
+        backend_for(zones, seed="192.0.2.10").resolve()
+
+
+def test_resolving_asks_one_speaker_once_without_service_descriptions(kids, living):
+    zones = household(kids, living)
+    backend_for(zones).resolve()
+    assert living.zoneGroupTopology.calls == [("GetZoneGroupState", {}, REQUEST_TIMEOUT)]
+    assert kids.zoneGroupTopology.calls == []  # other rooms are never contacted
+
+
+def test_seed_speaker_off_keeps_the_kids_room_under_control(kids, living):
+    """The seed (e.g. the living room) goes off; the kids room stays reachable."""
+    zones = household(kids, living)
+    backend = backend_for(zones, seed="192.0.2.11")
+    backend.resolve()
+    switch_off(living)
+    info = backend.resolve()  # asks the kids room itself now
+    assert info.player_ip == "192.0.2.10"
+    kids.renderingControl.responses["GetVolume"] = {"CurrentVolume": "80"}
+    assert backend.get_volume() == 80
+    backend.set_volume(25)
+    assert kids.renderingControl.calls[-1][1]["DesiredVolume"] == 25
+
+
+def test_failed_lookup_keeps_the_last_known_room(kids, living):
+    zones = household(kids, living)
+    backend = backend_for(zones, seed="192.0.2.11")
+    backend.resolve()
+    switch_off(kids)
+    switch_off(living)
+    with pytest.raises(SonosUnreachable):
+        backend.resolve()
+    kids.renderingControl.errors = {}  # the kids room answers again
+    assert backend.get_volume() == 12  # no new lookup needed
+
+
+def test_seed_host_name_that_does_not_resolve(kids):
+    def no_dns(host):
+        raise OSError("name not known")
+
+    backend = SocoBackend(room="Kinderzimmer", seed_ip="speaker.example", resolve_host=no_dns)
+    with pytest.raises(SonosUnreachable):
+        backend.resolve()
+
+
+def test_unreadable_zone_group_state(kids):
+    zones = household(kids)
+    kids.zoneGroupTopology.responses["GetZoneGroupState"] = {"ZoneGroupState": "<broken"}
+    with pytest.raises(CommandRejected):
         backend_for(zones, seed="192.0.2.10").resolve()
 
 
@@ -184,10 +238,10 @@ def test_queue_route_on_the_group_coordinator(kids, living):
     assert route is Route.QUEUE
     assert kids.avTransport.calls == []  # never the grouped member
     assert living.avTransport.actions() == [
-        "SetPlayMode",
         "RemoveAllTracksFromQueue",
         "AddURIToQueue",
         "SetAVTransportURI",
+        "SetPlayMode",  # once the queue is the source, so Sonos accepts it
         "Seek",
         "Play",
     ]
@@ -207,8 +261,8 @@ def test_queue_route_on_the_group_coordinator(kids, living):
 def test_direct_route_never_touches_the_queue(kids):
     zones = household(kids)
     assert backend_for(zones, seed="192.0.2.10").play_favorite(RADIO, Route.DIRECT) is Route.DIRECT
-    assert kids.avTransport.actions() == ["SetPlayMode", "SetAVTransportURI", "Play"]
-    args = kids.avTransport.calls[1][1]
+    assert kids.avTransport.actions() == ["SetAVTransportURI", "Play"]
+    args = kids.avTransport.calls[0][1]
     assert args["CurrentURI"] == RADIO_URI
     assert args["CurrentURIMetaData"] == RADIO.res_md
 
@@ -223,7 +277,7 @@ def test_route_error_switches_route_once(kids):
 
 def test_other_errors_do_not_switch_route(kids):
     zones = household(kids)
-    kids.avTransport.errors["AddURIToQueue"] = [upnp_error(800)]
+    kids.avTransport.errors["AddURIToQueue"] = [upnp_error(800), upnp_error(800)]
     with pytest.raises(ServiceUnavailable):
         backend_for(zones, seed="192.0.2.10").play_favorite(ALBUM, Route.QUEUE)
     assert "Play" not in kids.avTransport.actions()
@@ -360,12 +414,11 @@ class FakeResponse:
         self.chunks = chunks
         self.status_code = status
 
-    def raise_for_status(self):
-        if self.status_code >= 400:
-            raise requests.exceptions.HTTPError(response=self)
-
     def iter_content(self, size):
         return iter(self.chunks)
+
+    def close(self):
+        pass
 
 
 def test_relative_art_is_fetched_from_the_speaker(kids):
@@ -386,6 +439,7 @@ def test_art_size_is_limited(kids):
     backend = backend_for(
         zones, seed="192.0.2.10", http_get=lambda url, **kw: FakeResponse([b"x" * 6_000_000] * 2)
     )
+    backend.resolve()
     with pytest.raises(Exception, match="too large"):
         backend.fetch_art("http://192.0.2.10:1400/getaa")
 
@@ -431,3 +485,97 @@ def test_translate_keeps_upnp_code():
 def test_translate_reraises_programming_errors():
     with pytest.raises(KeyError):
         translate(KeyError("bug"))
+
+
+# -- review regressions ---------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def no_retry_pause(monkeypatch):
+    monkeypatch.setattr(soco_backend, "RETRY_PAUSE", 0)
+
+
+def test_one_transient_service_error_is_retried(kids):
+    zones = household(kids)
+    kids.avTransport.errors["AddURIToQueue"] = [upnp_error(800)]
+    backend_for(zones, seed="192.0.2.10").play_favorite(ALBUM, Route.QUEUE)
+    actions = kids.avTransport.actions()
+    assert actions.count("AddURIToQueue") == 2
+    assert actions.count("RemoveAllTracksFromQueue") == 2  # a half-filled queue is cleared
+    assert actions[-1] == "Play"
+
+
+def test_play_during_transition_is_retried(kids):
+    zones = household(kids)
+    kids.avTransport.errors["Play"] = [upnp_error(701)]
+    backend_for(zones, seed="192.0.2.10").play_favorite(RADIO, Route.DIRECT)
+    assert kids.avTransport.actions().count("Play") == 2
+
+
+def test_play_refused_twice_fails(kids):
+    from muckebox.sonos.errors import PlaybackFailed
+
+    zones = household(kids)
+    kids.avTransport.errors["Play"] = [upnp_error(701), upnp_error(701)]
+    with pytest.raises(PlaybackFailed):
+        backend_for(zones, seed="192.0.2.10").play_favorite(RADIO, Route.DIRECT)
+
+
+def test_odd_favorites_never_break_the_list(kids):
+    from soco.data_structures_entry import from_didl_string
+
+    from tests.fakesoco import NS, favorite_xml
+
+    xml = (
+        f"<DIDL-Lite {NS}>"
+        + favorite_xml(1, "Empty metadata", "x-sonos-http:song%3a1.mp4?sid=204", "")
+        + favorite_xml(2, "Garbage library", NAS_URI, "no xml at all")
+        + "</DIDL-Lite>"
+    )
+    zones = household(kids)
+    kids.music_library.get_sonos_favorites = lambda **kwargs: from_didl_string(xml)
+    favorites = {f.title: f for f in backend_for(zones, seed="192.0.2.10").list_favorites()}
+    assert favorites["Empty metadata"].reason == "broken_metadata"
+    library = favorites["Garbage library"]
+    assert library.playable
+    assert library.ref.res_md == ""  # broken metadata is never stored in a tile
+
+
+def test_speaker_art_is_fetched_without_redirects(kids):
+    zones = household(kids)
+    options = {}
+
+    def get(url, **kwargs):
+        options.update(kwargs)
+        return FakeResponse([b"img"])
+
+    backend = backend_for(zones, seed="192.0.2.10", http_get=get)
+    backend.resolve()
+    assert backend.fetch_art("http://192.0.2.10:1400/getaa?u=x") == b"img"
+    assert options["allow_redirects"] is False
+
+
+def test_other_art_goes_through_the_restricted_fetcher(kids):
+    from muckebox.netfetch import FetchError, FetchResult
+
+    zones = household(kids)
+    calls = []
+
+    class Fetcher:
+        def get(self, url, **kwargs):
+            calls.append((url, kwargs))
+            if "lan" in url:
+                raise FetchError("address_not_allowed")
+            return FetchResult(url=url, status=200, headers={}, body=b"cdn")
+
+        def close(self):
+            pass
+
+    backend = backend_for(zones, seed="192.0.2.10", fetcher_factory=Fetcher)
+    backend.resolve()
+    assert backend.fetch_art("https://images.example.com/cover.jpg") == b"cdn"
+    assert calls[0][1]["allow_http"] is True
+    # A speaker-looking URL on an address that is not one of our speakers is
+    # not trusted: it goes through the fetcher and its address checks.
+    with pytest.raises(CommandRejected):
+        backend.fetch_art("http://lan.example:1400/getaa")
