@@ -4,6 +4,7 @@
 
 MESSAGES: dict[str, str] = {
     # Generic API errors
+    "error.bad_request": "Die Anfrage ist ungültig.",
     "error.csrf_header_missing": "Die Anfrage wurde aus Sicherheitsgründen abgelehnt.",
     "error.not_found": "Nicht gefunden.",
     "error.method_not_allowed": "Diese Aktion ist hier nicht möglich.",
