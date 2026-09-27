@@ -20,7 +20,7 @@ def test_changes_are_saved_once(tmp_path, monkeypatch):
     with timers.change() as state:
         state.override = (1.0, 2.0)
         state.sleep = SleepTimer(ends_at=3.0, lock_end=4.0, fade=60.0)
-        state.fade_base = {"3": 17}
+        state.pre_fade = 17
         state.games_date, state.games_seconds, state.game_mute = "2026-09-28", 90.0, True
     timers.save()
     timers.save()
@@ -28,7 +28,7 @@ def test_changes_are_saved_once(tmp_path, monkeypatch):
     again = TimersFile(tmp_path / "timers.json").state
     assert again.override == (1.0, 2.0)
     assert again.sleep == SleepTimer(3.0, 4.0, 60.0)
-    assert (again.fade_base, again.games_seconds, again.game_mute) == ({"3": 17}, 90.0, True)
+    assert (again.pre_fade, again.games_seconds, again.game_mute) == (17, 90.0, True)
 
 
 @pytest.mark.parametrize(

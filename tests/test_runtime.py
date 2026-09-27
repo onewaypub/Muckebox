@@ -1105,3 +1105,35 @@ def test_a_game_mute_left_behind_is_undone_on_start(make_runtime, fake):
     restarted.poll_transport()
     assert fake.muted is False
     assert restarted.timers.state.game_mute is False
+
+
+def test_more_time_during_the_fade_keeps_the_volume_from_before(runtime, fake, clock, evening):
+    at(clock, "2026-09-28 18:55")
+    runtime.poll_volume()
+    assert fake.volume == 12
+    runtime.keeper.override(minutes=15)  # until 19:10: open again until 19:00
+    runtime.poll_transport()
+    assert fake.volume == 20  # the fade stopped: the volume from before is back
+    at(clock, "2026-09-28 19:05")
+    runtime.poll_volume()
+    assert fake.volume == 12  # the new fade starts from 20 again
+    at(clock, "2026-09-28 19:10:05")
+    runtime.poll_transport()
+    runtime.poll_transport()
+    assert (fake.state, fake.volume) == ("paused", 20)
+
+
+def test_ending_an_override_fades_first(runtime, fake, clock, evening):
+    at(clock, "2026-09-28 19:00:10")
+    runtime.keeper.override(minutes=60)
+    runtime.play_tile(evening.id)
+    at(clock, "2026-09-28 19:20")
+    runtime.keeper.end_override()
+    runtime.poll_transport()
+    assert fake.state == "playing"  # not cut off
+    at(clock, "2026-09-28 19:25")
+    runtime.poll_volume()
+    assert fake.volume < 20
+    at(clock, "2026-09-28 19:30:05")
+    runtime.poll_transport()
+    assert fake.state == "paused"

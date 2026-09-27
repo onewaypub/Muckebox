@@ -564,8 +564,13 @@ class Runtime:
 
     def _enforce_time(self, session: RoomSession, playback: Playback) -> None:
         """Pause once at the end of the usage time or the sleep timer."""
+        if not self._current(session):
+            return
         end = self.keeper.due_pause()
-        if end is None or not self._current(session):
+        if end is None:
+            released = self.keeper.fade_released()
+            if released is not None:
+                self._restore_volume(session, released)
             return
         if playback.state in ("playing", "transitioning"):
             sonos, shown = self.state.get("sonos"), self.state.get("playback")

@@ -69,18 +69,20 @@ class TimeKeeper:
     # -- fading and pausing ----------------------------------------------------
 
     def soft_limit(self, observed: int) -> int | None:
-        """The volume limit during a fade, starting from the volume at its start."""
+        """The volume limit during a fade, starting from the volume before it.
+
+        The volume before the fade is kept across moving ends (an override
+        during the fade, a sleep timer), so it is never replaced by an
+        already faded volume.
+        """
         now = self.clock.time()
         phase = self.phase(now)
         if phase.kind != "fading":
             return None
-        key = _key(phase.ends_at)
-        with self.timers.read() as state:
-            base = state.fade_base.get(key)
-        if base is None:
-            base = observed
-            with self.timers.change() as state:
-                state.fade_base = {key: base}  # only the current fade matters
+        with self.timers.change() as state:
+            if state.pre_fade is None:
+                state.pre_fade = observed
+            base = state.pre_fade
         return max(1, round(base * fade_factor(phase, now)))
 
     def current_limit(self) -> int | None:
@@ -90,8 +92,21 @@ class TimeKeeper:
         if phase.kind != "fading":
             return None
         with self.timers.read() as state:
-            base = state.fade_base.get(_key(phase.ends_at))
+            base = state.pre_fade
         return None if base is None else max(1, round(base * fade_factor(phase, now)))
+
+    def fade_released(self) -> int | None:
+        """The volume before a fade that stopped without an end (e.g. more time
+        was allowed, or the usage times were switched off): restore it now."""
+        phase = self.phase()
+        if phase.kind not in ("open", "off"):
+            return None
+        with self.timers.read() as state:
+            if state.pre_fade is None:
+                return None
+        with self.timers.change() as state:
+            volume, state.pre_fade = state.pre_fade, None
+        return volume
 
     def due_pause(self) -> float | None:
         """The end that still needs a pause, or None."""
@@ -111,7 +126,8 @@ class TimeKeeper:
         """Remember that ``end`` is handled; returns the volume before its fade."""
         with self.timers.change() as state:
             state.done_end = end
-            return state.fade_base.pop(_key(end), None)
+            volume, state.pre_fade = state.pre_fade, None
+            return volume
 
     # -- the parents' override -------------------------------------------------
 
@@ -137,10 +153,12 @@ class TimeKeeper:
         return self.phase(now)
 
     def end_override(self) -> Phase:
+        """End the override: the music fades (the usual fade minutes) and pauses."""
         now = self.clock.time()
+        fade = self.store.current().schedule.fade_minutes * 60
         with self.timers.change() as state:
             if state.override and state.override[1] > now:
-                state.override = (state.override[0], now)
+                state.override = (state.override[0], min(state.override[1], now + fade))
         return self.phase(now)
 
     # -- the kids' sleep timer ---------------------------------------------------
@@ -179,14 +197,18 @@ class TimeKeeper:
         """Drop timers that are long over (keeps timers.json small)."""
         now = self.clock.time()
         with self.timers.read() as state:
-            stale_sleep = state.sleep is not None and state.sleep.lock_end < now
-            stale_override = state.override is not None and state.override[1] < now - PAUSE_GRACE
-        if stale_sleep or stale_override:
-            with self.timers.change() as state:
-                if stale_sleep:
-                    state.sleep = None
-                if stale_override:
-                    state.override = None
+            stale = (state.sleep is not None and state.sleep.lock_end < now) or (
+                state.override is not None and state.override[1] < now - PAUSE_GRACE
+            )
+        if not stale:
+            return
+        # Checked again under the same lock as the change: a new override or
+        # sleep timer set in between must survive.
+        with self.timers.change() as state:
+            if state.sleep is not None and state.sleep.lock_end < now:
+                state.sleep = None
+            if state.override is not None and state.override[1] < now - PAUSE_GRACE:
+                state.override = None
 
     def document(self) -> dict[str, Any]:
         """For /api/state: only values that change at transitions (stable ETag)."""
@@ -213,10 +235,6 @@ class TimeKeeper:
 
     def _local(self, epoch: float) -> str:
         return local_time(epoch, self.zone()).strftime("%a %H:%M")
-
-
-def _key(end: float | None) -> str:
-    return f"{end:.0f}"
 
 
 def _epoch(value: float | None) -> int | None:

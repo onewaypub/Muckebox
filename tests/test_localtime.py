@@ -63,3 +63,10 @@ def test_local_time_follows_daylight_saving(tmp_path):
     winter = datetime(2026, 12, 1, 10, 0, tzinfo=UTC).timestamp()
     assert local_time(summer, zone).hour == 12
     assert local_time(winter, zone).hour == 11
+
+
+def test_posix_and_right_zone_links_use_the_plain_name(tmp_path):
+    link = tmp_path / "localtime"
+    os.symlink("/usr/share/zoneinfo/posix/Europe/Berlin", link)
+    zone = ZoneResolver({}, localtime=link).zone()
+    assert (zone.name, zone.source) == ("Europe/Berlin", "system")

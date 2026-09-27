@@ -92,7 +92,14 @@ def _system_zone_name(localtime: Path) -> str | None:
     except OSError:
         return None
     marker = "zoneinfo/"
-    return target.split(marker, 1)[1] if marker in target else None
+    if marker not in target:
+        return None
+    name = target.split(marker, 1)[1]
+    # "posix/Europe/Berlin" and "right/..." are the same zones under names
+    # that browsers do not know (the parents' page shows the zone's times).
+    for prefix in ("posix/", "right/"):
+        name = name.removeprefix(prefix)
+    return name
 
 
 def local_time(epoch: float, zone: Zone) -> datetime:
