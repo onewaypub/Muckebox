@@ -16,6 +16,7 @@ from muckebox import __version__
 from muckebox.covers import CoverError, normalise
 from muckebox.library import LibraryError, RevConflict, TileNotFound, favorite_source
 from muckebox.runtime.service import Busy, Unavailable
+from muckebox.settings import SettingsError, validate_seed_ip
 from muckebox.sonos.errors import SonosError
 from muckebox.sonos.model import Favorite
 
@@ -81,7 +82,7 @@ def _runtime_call(function, *args, **kwargs):
 
 @bp.get("/session")
 def session_state():
-    return jsonify(ok=True, locked=auth.is_locked(), logged_in=auth.is_logged_in())
+    return jsonify(ok=True, logged_in=auth.is_logged_in())
 
 
 @bp.post("/login")
@@ -91,6 +92,24 @@ def login():
         raise ApiError(400, "bad_request")
     auth.login(pin, _limiter)
     return jsonify(ok=True, logged_in=True)
+
+
+@bp.post("/pin")
+@auth.require_admin
+def change_pin():
+    """Set a new PIN. Ends all other sessions; this one stays logged in."""
+    body = _body()
+    try:
+        auth.check_pin(body.get("current"), _limiter)
+    except ApiError as exc:
+        if exc.code == "pin_wrong":
+            # 403, not 401: the parent is still logged in.
+            raise ApiError(403, "pin_wrong") from exc
+        raise
+    _settings_call(_services().store.change_pin, body.get("new"))
+    auth.start_session()
+    log.info("The parents' PIN was changed")
+    return _settings_response()
 
 
 @bp.post("/logout")
@@ -112,6 +131,77 @@ def status():
         source_url=SOURCE_URL,
         tiles=len(services.library.tiles()),
         **services.runtime.status(),
+    )
+
+
+# -- settings -------------------------------------------------------------------------
+
+
+def _settings_call(function, *args, **kwargs):
+    try:
+        return function(*args, **kwargs)
+    except SettingsError as exc:
+        raise ApiError(422, exc.code) from exc
+    except OSError as exc:
+        log.error("Could not save the settings: %s", exc)
+        raise ApiError(500, "settings_save_failed") from exc
+
+
+def _settings_response():
+    services = _services()
+    current = services.store.current()
+    return jsonify(
+        ok=True,
+        settings={
+            "room": current.room,
+            "seed_ip": current.seed_ip,
+            "max_volume": current.max_volume,
+            "volume_step": current.volume_step,
+            "pin_generated": current.pin_generated,
+        },
+        sonos=services.runtime.state.get("sonos"),
+    )
+
+
+@bp.get("/settings")
+@auth.require_admin
+def settings():
+    return _settings_response()
+
+
+@bp.put("/settings/volume")
+@auth.require_admin
+def set_volume():
+    body = _body()
+    _settings_call(_services().store.set_volume, body.get("max_volume"), body.get("volume_step"))
+    return _settings_response()
+
+
+@bp.put("/settings/room")
+@auth.require_admin
+def set_room():
+    """Test the room and save it only if it answers."""
+    body = _body()
+    _settings_call(
+        _runtime_call, _services().runtime.choose_room, body.get("room"), body.get("seed_ip")
+    )
+    return _settings_response()
+
+
+@bp.post("/rooms/search")
+@auth.require_admin
+def search_rooms():
+    body = _body()
+    seed_ip = _settings_call(validate_seed_ip, body.get("seed_ip"))
+    refresh = body.get("refresh") is True
+    rooms = _runtime_call(_services().runtime.search_rooms, seed_ip, refresh)
+    chosen = _services().store.current().room
+    return jsonify(
+        ok=True,
+        rooms=[
+            {"name": r.name, "ip": r.ip, "grouped": r.grouped, "chosen": r.name == chosen}
+            for r in rooms
+        ],
     )
 
 

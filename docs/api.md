@@ -41,13 +41,13 @@ changes increase the `api` number reported by `/api/state`.
 | `GET /api/tiles` | Tiles in display order. | `200 {"ok": true, "rev": 7, "tiles": [{"id": "…", "title": "…", "cover": "/covers/….jpg" or null}]}` |
 | `POST /api/tiles/<id>/play` | Start a tile. Tapping the tile that is already playing is a no-op; tapping it while paused resumes. | `202 {"ok": true, "result": "accepted", "pending": {…}}`, `200 {"ok": true, "result": "noop" \| "resumed", "pending": null}`, `404 tile_not_found`, `409 busy`, `503 <code>` |
 | `POST /api/transport/play`, `…/pause`, `…/toggle`, `…/next`, `…/previous` | Transport control on the group coordinator. `play` and `pause` do nothing if the speaker is already in that state. | `200 {"ok": true, "playback": {…}}`, `409 busy`, `503 <code>` |
-| `POST /api/volume/up`, `POST /api/volume/down` | Change the volume of the kids room by `VOLUME_STEP`, clamped to `0…MAX_VOLUME`. One change at a time. | `200 {"ok": true, "volume": {…}}`, `409 busy`, `503 volume_unknown` (the volume could not be read or set) or `503 <code>` |
+| `POST /api/volume/up`, `POST /api/volume/down` | Change the volume of the kids room by the step set on the parents' page, clamped to `0…limit`. One change at a time. | `200 {"ok": true, "volume": {…}}`, `409 busy`, `503 volume_unknown` (the volume could not be read or set) or `503 <code>` |
 | `GET /covers/<hash>.jpg` | Cover image (600×600 JPEG, immutable). | `200`, `404` |
 
 `503 <code>` is the reason the speaker cannot be controlled right now:
 `sonos_unreachable`, `upnp_disabled` or `room_not_found` (with `retry_in`),
-`config_error`, `sonos_timeout`, or another error code such as
-`service_unavailable`.
+`not_configured` (no room chosen yet), `sonos_timeout`, or another error
+code such as `service_unavailable`.
 
 ### State document
 
@@ -73,8 +73,8 @@ changes increase the `api` number reported by `/api/state`.
 }
 ```
 
-- `sonos.status`: `starting`, `ok`, `config_error` (then `sonos.problem`
-  names the configuration problem), or, when the speaker cannot be reached,
+- `sonos.status`: `not_configured` (no room chosen yet), `starting`, `ok`,
+  or, when the speaker cannot be reached,
   `sonos_unreachable`, `upnp_disabled` or `room_not_found` (then
   `sonos.retry_in` gives the seconds until the next attempt). `grouped` is
   present once the room was found.
@@ -92,18 +92,24 @@ changes increase the `api` number reported by `/api/state`.
 
 ## Admin (session cookie)
 
-All admin endpoints return `403 admin_locked` when `ADMIN_PIN` is not set
-and `401 login_required` without a valid session. Mutations additionally
+All admin endpoints except `session` and `login` return `401 login_required`
+without a valid session. A session ends after 12 hours and whenever the PIN
+changes (on the parents' page or with `reset-pin`). Mutations additionally
 require a same-origin `Origin` header when the browser sends one
 (`403 origin_mismatch`). Tile endpoints answer with the full tile list:
 `{"ok": true, "rev": 8, "tiles": [...]}`.
 
 | Method and path | Purpose |
 |---|---|
-| `GET /api/admin/session` | `{"ok": true, "locked": false, "logged_in": true}` |
-| `POST /api/admin/login` `{"pin": "…"}` | Start a session. `401 pin_wrong`, `429 pin_rate_limited` (with `retry_in`). |
+| `GET /api/admin/session` | `{"ok": true, "logged_in": true}` |
+| `POST /api/admin/login` `{"pin": "…"}` | Start a session. `401 pin_wrong`, `429 pin_rate_limited` (with `retry_in`). Failed attempts are counted per client (5) and in total (20) for 15 minutes; a new PIN clears the counters. |
 | `POST /api/admin/logout` | End the session. |
-| `GET /api/admin/status` | Diagnostics for parents: `version`, `source_url`, `tiles` (count), `sonos` (as in the state document), `config_problems` (codes), `library_problem` (`null` or `{"code": "library_corrupt", "file": …}`), `volume_guard` (`max`, `corrections`, `fighting`, `fixed_volume`), `breaker` (`transport_retry_in`, `volume_retry_in`). |
+| `POST /api/admin/pin` `{"current": "…", "new": "…"}` | Change the PIN. Ends all other sessions; this one stays logged in. `403 pin_wrong` (counted like a failed login), `429 pin_rate_limited`, `422 pin_too_short` / `pin_placeholder` / `pin_invalid`. Answers like `GET /api/admin/settings`. |
+| `GET /api/admin/settings` | `{"ok": true, "settings": {"room": "Kids room" \| null, "seed_ip": "192.0.2.10" \| null, "max_volume": 25, "volume_step": 3, "pin_generated": false}, "sonos": {…}}`. Never contains PIN data. `pin_generated` is true while the PIN is still the one Muckebox created and printed in its log. |
+| `PUT /api/admin/settings/volume` `{"max_volume": 25, "volume_step": 3}` | Set the volume limit (1–100) and the step of the volume buttons (1–limit). Applies at once. `422 max_volume_invalid` / `volume_step_invalid`. |
+| `POST /api/admin/rooms/search` `{"seed_ip": "…" \| null, "refresh": false}` | Find the household's rooms, through the speaker at `seed_ip` or by discovery. `{"ok": true, "rooms": [{"name": "…", "ip": "…", "grouped": false, "chosen": true}]}`. Results are reused for 15 s (with `refresh`, at most every 5 s). One search or room test at a time: `409 busy`. `422 seed_ip_invalid`, `503 <code>`. |
+| `PUT /api/admin/settings/room` `{"room": "…", "seed_ip": "…" \| null}` | Choose the room to control. Muckebox connects to it first and saves it only on success; the volume limit applies to it at once. `422 room_invalid` / `seed_ip_invalid`, `409 busy`, `503 room_not_found` / `sonos_unreachable` / …, `500 settings_save_failed`. Answers like `GET /api/admin/settings`. |
+| `GET /api/admin/status` | Diagnostics for parents: `version`, `source_url`, `tiles` (count), `sonos` (as in the state document), `config_problems` (codes: `not_configured`, `pin_generated`, `settings_corrupt`), `library_problem` (`null` or `{"code": "library_corrupt", "file": …}`), `volume_guard` (`max`, `corrections`, `fighting`, `fixed_volume`), `breaker` (`transport_retry_in`, `volume_retry_in`). |
 | `GET /api/admin/favorites[?refresh=1]` | Sonos favorites: `item_id`, `title`, `description`, `playable`, `reason` (`no_resource`, `tv_input`, `broken_metadata`), `route` (`direct`, `queue`, `unsupported`), `has_art`, and `tile_id` if a tile already plays it. Cached for 60 s. |
 | `GET /api/admin/favorite-art?item_id=FV:2/5` | The favorite's artwork as JPEG (fetched through Muckebox, because the speaker or image server may not be reachable from the parent's phone). |
 | `GET /api/admin/tiles` | Tiles including source details. |

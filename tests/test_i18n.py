@@ -3,7 +3,6 @@
 
 import pytest
 
-from muckebox.config import MIN_PIN_LENGTH, load_settings
 from muckebox.i18n import CATALOGUES, DEFAULT_LANG, placeholders, translate
 
 
@@ -28,13 +27,13 @@ def test_all_languages_have_the_same_keys_and_placeholders(lang):
 
 
 def test_translate_fills_placeholders():
-    text = translate("error.admin_pin_too_short", min_length=MIN_PIN_LENGTH)
-    assert f"{MIN_PIN_LENGTH} Zeichen" in text
+    text = translate("error.pin_rate_limited", retry_in=7)
+    assert "in 7 Sekunden" in text
     assert "{" not in text
 
 
 def test_translate_leaves_unknown_placeholders_and_ignores_extra_params():
-    assert "{min_length}" in translate("error.admin_pin_too_short", other=1)
+    assert "{retry_in}" in translate("error.pin_rate_limited", other=1)
 
 
 def test_unknown_key_returns_key():
@@ -45,24 +44,9 @@ def test_unknown_language_falls_back_to_default():
     assert translate("error.not_found", lang="xx") == translate("error.not_found")
 
 
-def test_every_config_problem_has_a_text():
-    environments = [
-        {},
-        {"SONOS_IP": "not a host"},
-        {"SONOS_IP": "192.0.2.1", "MAX_VOLUME": "0", "VOLUME_STEP": "0", "ADMIN_PIN": "1"},
-        {"SONOS_IP": "192.0.2.1", "ADMIN_PIN": "change-me"},
-    ]
-    problem_codes = {p.code for env in environments for p in load_settings(env).problems}
-    assert problem_codes == {
-        "sonos_not_configured",
-        "sonos_ip_invalid",
-        "max_volume_invalid",
-        "volume_step_invalid",
-        "admin_pin_missing",
-        "admin_pin_too_short",
-        "admin_pin_placeholder",
-    }
-    for code in problem_codes:
+def test_every_settings_problem_has_a_text():
+    # Shown to parents in the status (see Runtime.status).
+    for code in ("not_configured", "pin_generated", "settings_corrupt"):
         assert f"error.{code}" in CATALOGUES[DEFAULT_LANG]
 
 
@@ -94,13 +78,13 @@ def test_every_error_class_has_a_text():
 
 
 def test_every_literal_error_code_in_the_code_has_a_text():
-    pattern = re.compile(r'(?:ApiError\(\d+, |Unavailable\()"([a-z_]+)"')
+    pattern = re.compile(r'(?:ApiError\(\d+, |Unavailable\(|SettingsError\()"([a-z_]+)"')
     codes = {
         code
         for path in PACKAGE.rglob("*.py")
         for code in pattern.findall(path.read_text(encoding="utf-8"))
     }
-    assert "busy" in codes and "not_configured" in codes  # the scan works
+    assert {"busy", "not_configured", "pin_placeholder"} <= codes  # the scan works
     missing = sorted(code for code in codes if f"error.{code}" not in CATALOGUE)
     assert not missing
 

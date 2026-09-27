@@ -23,12 +23,7 @@ from muckebox.config import LISTEN_ALL
 
 @pytest.fixture
 def env(tmp_path):
-    return {
-        "SONOS_IP": "192.0.2.10",
-        "DATA_DIR": str(tmp_path / "data"),
-        "ADMIN_PIN": "2468",
-        "MUCKEBOX_FAKE_SONOS": "1",
-    }
+    return {"DATA_DIR": str(tmp_path / "data"), "MUCKEBOX_FAKE_SONOS": "1"}
 
 
 def test_main_serves_app_on_configured_port(env):
@@ -54,15 +49,6 @@ def test_secret_key_is_created_once_and_private(env, tmp_path):
     assert key_file.stat().st_mode & 0o077 == 0
     main(env, serve=lambda app, port, host: None)
     assert key_file.read_bytes() == key
-
-
-def test_invalid_sonos_settings_still_serve(env):
-    served = []
-    code = main(
-        {**env, "SONOS_IP": "", "MUCKEBOX_FAKE_SONOS": ""}, serve=lambda a, p, h: served.append(a)
-    )
-    assert code == EXIT_OK
-    assert served
 
 
 def test_invalid_port_exits_before_serving(env, caplog):
@@ -105,11 +91,29 @@ def test_other_bind_errors_are_reported_cleanly(env, caplog):
     assert "Permission denied" in caplog.text
 
 
-def test_config_problems_are_logged_without_secrets(env, caplog):
-    main({**env, "ADMIN_PIN": "12", "MAX_VOLUME": "500"}, serve=lambda *a: None)
-    assert "MAX_VOLUME" in caplog.text
-    assert "ADMIN_PIN must have at least" in caplog.text
-    assert "'12'" not in caplog.text
+def test_old_variables_are_named_but_their_values_never_logged(env, caplog):
+    old = {"SONOS_IP": "speaker.example", "MAX_VOLUME": "loud", "ADMIN_PIN": "secret-pin"}
+    main({**env, **old}, serve=lambda *a: None)
+    assert "Ignoring SONOS_IP, MAX_VOLUME, ADMIN_PIN" in caplog.text
+    for value in old.values():
+        assert value not in caplog.text
+
+
+def test_generated_pin_is_logged_on_every_start_until_changed(env, tmp_path, caplog):
+    from muckebox.settings import SettingsStore
+
+    main(env, serve=lambda *a: None)
+    pin = SettingsStore(tmp_path / "data").current().pin.generated
+    assert f"Parents' PIN: {pin}" in caplog.text
+    assert "No room chosen yet" in caplog.text
+    caplog.clear()
+    main(env, serve=lambda *a: None)
+    assert f"Parents' PIN: {pin}" in caplog.text
+    SettingsStore(tmp_path / "data").change_pin("8642")
+    caplog.clear()
+    main(env, serve=lambda *a: None)
+    assert "Parents' PIN" not in caplog.text
+    assert "8642" not in caplog.text
 
 
 class FakeServer:
@@ -140,7 +144,7 @@ def test_serve_closes_server_on_shutdown(monkeypatch, exc, tmp_path):
         installed[signum] = handler
 
     monkeypatch.setattr(entry.signal, "signal", fake_signal)
-    settings = entry.load_settings({"SONOS_IP": "192.0.2.10", "DATA_DIR": str(tmp_path)})
+    settings = entry.load_settings({"DATA_DIR": str(tmp_path)})
     app = entry.create_app(entry.build_services(settings, fake_sonos=True))
     entry._serve(app, 9123, "127.0.0.1")
     # After the first signal, a second Ctrl+C or SIGTERM ends the process at once.

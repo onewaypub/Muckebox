@@ -42,24 +42,18 @@ def add_favorite(admin, index):
     )
 
 
-# -- locked, login, session --------------------------------------------------------------
+# -- login, session --------------------------------------------------------------------
 
 
-def test_locked_without_pin(make_services):
-    client = create_app(make_services(ADMIN_PIN="")).test_client()
-    assert client.get("/api/admin/session").get_json() == {
-        "ok": True,
-        "locked": True,
-        "logged_in": False,
-    }
-    response = login(client, "")
-    assert (response.status_code, response.get_json()["error"]["code"]) == (403, "admin_locked")
-    assert client.get("/api/admin/tiles").status_code == 403
+def test_session_state(client):
+    assert client.get("/api/admin/session").get_json() == {"ok": True, "logged_in": False}
 
 
-def test_short_pin_locks_too(make_services):
-    client = create_app(make_services(ADMIN_PIN="12")).test_client()
-    assert client.get("/api/admin/session").get_json()["locked"] is True
+def test_generated_pin_works_until_it_is_changed(make_services):
+    services = make_services(pin=None)
+    client = create_app(services).test_client()
+    generated = services.store.current().pin.generated
+    assert login(client, generated).status_code == 200
 
 
 @pytest.mark.parametrize("path", ["/api/admin/status", "/api/admin/tiles", "/api/admin/favorites"])
@@ -110,13 +104,36 @@ def test_rate_limit_expires():
     assert limiter.retry_in("192.0.2.5") is None
 
 
-def test_changing_the_pin_ends_sessions(make_services, services):
-    app = create_app(services)
-    client = app.test_client()
-    login(client)
-    assert client.get("/api/admin/tiles").status_code == 200
-    app.extensions["muckebox"] = make_services(ADMIN_PIN="9999")
-    assert client.get("/api/admin/tiles").status_code == 401
+def test_a_pin_changed_elsewhere_ends_sessions(admin, services, tmp_path, monkeypatch):
+    from muckebox.settings import SettingsStore
+
+    from .conftest import TEST_SCRYPT
+
+    monkeypatch.setattr("muckebox.settings.RELOAD_INTERVAL", 0)
+    assert admin.get("/api/admin/tiles").status_code == 200
+    new_pin = SettingsStore(tmp_path, scrypt=TEST_SCRYPT).reset_pin()  # e.g. reset-pin
+    assert admin.get("/api/admin/tiles").status_code == 401
+    assert login(admin, "2468").status_code == 401
+    assert login(admin, new_pin).status_code == 200
+
+
+def test_a_new_pin_clears_the_rate_limit(client, services, tmp_path, monkeypatch):
+    from muckebox.settings import SettingsStore
+
+    from .conftest import TEST_SCRYPT
+
+    monkeypatch.setattr("muckebox.settings.RELOAD_INTERVAL", 0)
+    for _ in range(auth.MAX_FAILURES_PER_CLIENT):
+        login(client, "9999")
+    assert login(client).status_code == 429
+    new_pin = SettingsStore(tmp_path, scrypt=TEST_SCRYPT).reset_pin()
+    assert login(client, new_pin).status_code == 200
+
+
+def test_overlong_pins_are_refused_without_hashing(client, services, monkeypatch):
+    monkeypatch.setattr(services.store, "verify_pin", lambda pin: pytest.fail("hashed"))
+    response = login(client, "7" * 1000)
+    assert (response.status_code, response.get_json()["error"]["code"]) == (401, "pin_wrong")
 
 
 def test_session_expires(admin, monkeypatch):
@@ -161,7 +178,7 @@ def test_status(admin):
     assert data["sonos"]["status"] == "ok"
     assert data["volume_guard"]["max"] == 25
     assert data["source_url"].startswith("https://github.com/")
-    assert data["config_problems"] == ["pin_generated"]  # no own PIN set yet
+    assert data["config_problems"] == []
 
 
 def test_favorites(admin):
@@ -421,3 +438,177 @@ def test_status_reports_a_corrupt_library_as_a_code(make_services, tmp_path):
     login(client)
     problem = client.get("/api/admin/status").get_json()["library_problem"]
     assert problem["code"] == "library_corrupt"
+
+
+# -- settings ------------------------------------------------------------------------
+
+
+def error_code(response):
+    return response.status_code, response.get_json()["error"]["code"]
+
+
+def test_settings_never_contain_pin_data(admin, services):
+    data = admin.get("/api/admin/settings").get_json()
+    assert data["settings"] == {
+        "room": "Kinderzimmer",
+        "seed_ip": None,
+        "max_volume": 25,
+        "volume_step": 3,
+        "pin_generated": False,
+    }
+    assert data["sonos"]["status"] == "ok"
+    text = admin.get("/api/admin/settings").get_data(as_text=True)
+    pin = services.store.current().pin
+    for secret in ("salt", "hash", pin.salt, pin.hash, "2468"):
+        assert secret not in text
+
+
+@pytest.mark.parametrize(
+    "path", ["/api/admin/settings/volume", "/api/admin/settings/room", "/api/admin/pin"]
+)
+def test_settings_changes_need_login_and_csrf_header(client, admin, path):
+    method = admin.post if path == "/api/admin/pin" else admin.put
+    assert error_code(method(path, json={})) == (403, "csrf_header_missing")
+    assert admin.post("/api/admin/logout", headers=POST).status_code == 200
+    assert error_code(method(path, json={}, headers=POST)) == (401, "login_required")
+
+
+def test_volume_settings_apply_at_once(admin, services):
+    response = admin.put(
+        "/api/admin/settings/volume", json={"max_volume": 18, "volume_step": 2}, headers=POST
+    )
+    assert response.status_code == 200
+    assert response.get_json()["settings"]["max_volume"] == 18
+    assert services.runtime.state_document()["volume"] == {"value": None, "max": 18, "step": 2}
+
+
+@pytest.mark.parametrize(
+    ("body", "code"),
+    [
+        ({"max_volume": 0, "volume_step": 1}, "max_volume_invalid"),
+        ({"max_volume": "20", "volume_step": 2}, "max_volume_invalid"),
+        ({"max_volume": 10, "volume_step": 11}, "volume_step_invalid"),
+        ({"max_volume": 10}, "volume_step_invalid"),
+    ],
+)
+def test_invalid_volume_settings(admin, services, body, code):
+    response = admin.put("/api/admin/settings/volume", json=body, headers=POST)
+    assert error_code(response) == (422, code)
+    assert services.store.current().max_volume == 25
+
+
+def test_room_search_lists_rooms(admin):
+    response = admin.post("/api/admin/rooms/search", json={}, headers=POST)
+    assert response.get_json()["rooms"] == [
+        {"name": "Kinderzimmer", "ip": "192.0.2.10", "grouped": False, "chosen": True},
+        {"name": "Wohnzimmer", "ip": "192.0.2.11", "grouped": False, "chosen": False},
+    ]
+
+
+def test_room_search_with_a_speaker_ip(admin, household):
+    body = {"seed_ip": " 192.0.2.11 ", "refresh": True}
+    assert admin.post("/api/admin/rooms/search", json=body, headers=POST).status_code == 200
+    assert household.searches == ["192.0.2.11"]
+
+
+def test_room_search_problems(admin, household):
+    response = admin.post("/api/admin/rooms/search", json={"seed_ip": "http://x"}, headers=POST)
+    assert error_code(response) == (422, "seed_ip_invalid")
+    household.reachable = False
+    response = admin.post("/api/admin/rooms/search", json={}, headers=POST)
+    assert error_code(response) == (503, "sonos_unreachable")
+
+
+def test_choosing_a_room(admin, services, household):
+    response = admin.put(
+        "/api/admin/settings/room", json={"room": "Wohnzimmer", "seed_ip": ""}, headers=POST
+    )
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["settings"]["room"] == "Wohnzimmer"
+    assert data["sonos"] == {"status": "ok", "room": "Wohnzimmer", "grouped": False}
+    assert services.store.current().room_uid == household.uid("Wohnzimmer")
+
+
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        ({"room": "Keller"}, (503, "room_not_found")),
+        ({"room": ""}, (422, "room_invalid")),
+        ({"room": 5}, (422, "room_invalid")),
+        ({"room": "Wohnzimmer", "seed_ip": "192.0.2.1:1400"}, (422, "seed_ip_invalid")),
+    ],
+)
+def test_room_that_cannot_be_chosen(admin, services, body, expected):
+    response = admin.put("/api/admin/settings/room", json=body, headers=POST)
+    assert error_code(response) == expected
+    assert services.store.current().room == "Kinderzimmer"
+
+
+def test_room_that_cannot_be_saved(admin, services, monkeypatch):
+    def broken(*args):
+        raise OSError("read-only file system")
+
+    monkeypatch.setattr(services.store, "set_room", broken)
+    response = admin.put("/api/admin/settings/room", json={"room": "Wohnzimmer"}, headers=POST)
+    assert error_code(response) == (500, "settings_save_failed")
+    assert services.runtime.state_document()["sonos"]["room"] == "Kinderzimmer"
+
+
+def test_first_start_without_a_room(make_services):
+    services = make_services(room=None, pin=None)
+    client = create_app(services).test_client()
+    assert login(client, services.store.current().pin.generated).status_code == 200
+    data = client.get("/api/admin/settings").get_json()
+    assert data["settings"]["room"] is None
+    assert data["settings"]["pin_generated"] is True
+    assert data["sonos"]["status"] == "not_configured"
+    status = client.get("/api/admin/status").get_json()
+    assert status["config_problems"] == ["not_configured", "pin_generated"]
+    assert error_code(client.get("/api/admin/favorites")) == (503, "not_configured")
+    response = client.put("/api/admin/settings/room", json={"room": "Kinderzimmer"}, headers=POST)
+    assert response.get_json()["sonos"]["status"] == "ok"
+    assert client.get("/api/admin/favorites").status_code == 200
+
+
+# -- changing the PIN ------------------------------------------------------------------
+
+
+def change_pin(client, current="2468", new="9753"):
+    return client.post("/api/admin/pin", json={"current": current, "new": new}, headers=POST)
+
+
+def test_changing_the_pin_ends_all_other_sessions(admin, app, tmp_path):
+    other = app.test_client()
+    assert login(other).status_code == 200
+    response = change_pin(admin)
+    assert response.status_code == 200
+    assert response.get_json()["settings"]["pin_generated"] is False
+    assert admin.get("/api/admin/tiles").status_code == 200  # this session stays
+    assert other.get("/api/admin/tiles").status_code == 401
+    assert login(other, "2468").status_code == 401
+    assert login(other, "9753").status_code == 200
+    assert "9753" not in (tmp_path / "settings.json").read_text()
+
+
+def test_changing_the_pin_needs_the_current_one(admin, services):
+    response = change_pin(admin, current="1111")
+    assert error_code(response) == (403, "pin_wrong")  # 403: still logged in
+    assert services.store.verify_pin("2468")
+    for _ in range(auth.MAX_FAILURES_PER_CLIENT):
+        change_pin(admin, current="1111")
+    assert error_code(change_pin(admin)) == (429, "pin_rate_limited")
+
+
+@pytest.mark.parametrize(
+    ("new", "code"),
+    [
+        ("12", "pin_too_short"),
+        ("1234", "pin_placeholder"),
+        ("x" * 65, "pin_invalid"),
+        (None, "pin_invalid"),
+    ],
+)
+def test_new_pin_rules(admin, services, new, code):
+    assert error_code(change_pin(admin, new=new)) == (422, code)
+    assert services.store.verify_pin("2468")
