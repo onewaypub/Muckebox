@@ -159,7 +159,15 @@ class Runtime:
         )
         self._command_lock = threading.Lock()
         self._volume_lock = threading.Lock()
+        # Guards the session swap and the shared state. Never held during file
+        # or network I/O: the volume guard publishes through it every second.
         self._switch_lock = threading.RLock()
+        # Serialises writes of the room to settings.json (choice and renames).
+        self._room_lock = threading.Lock()
+        # Serialises writes of state.json; see _persist_now_playing().
+        self._state_file_lock = threading.Lock()
+        self._now_playing_version = 0
+        self._saved_version = 0
         self._search_lock = threading.Lock()
         self._searches: dict[str | None, tuple[float, list[RoomChoice]]] = {}
         self._session: RoomSession | None = None
@@ -389,12 +397,14 @@ class Runtime:
         finally:
             self._search_lock.release()
         room_uid = info.player_uid or uid
-        with self._switch_lock:
+        with self._room_lock:
             self.store.set_room(info.name, room_uid, seed_ip)  # raises OSError: nothing changes
-            if room_uid != self._room_uid:
-                self._set_now_playing(None)  # another room: forget the highlighted tile
-            self._room_uid = room_uid
-            self._install(session, info.name, grouped=info.grouped, status="ok")
+            with self._switch_lock:
+                if room_uid != self._room_uid:
+                    self._set_now_playing(None)  # another room: forget the highlighted tile
+                self._room_uid = room_uid
+                self._install(session, info.name, grouped=info.grouped, status="ok")
+        self._persist_now_playing()
         log.info("Now controlling room %s", info.name)
         return info
 
@@ -477,27 +487,30 @@ class Runtime:
         first = session.resolved_at is None
         room = session.backend.resolve()
         session.resolved_at = now
-        with self._switch_lock:
-            if not self._current(session):
-                return
-            self.state.update(sonos={"status": "ok", "room": room.name, "grouped": room.grouped})
-            self._remember_rename(room)
+        self._publish(session, sonos={"status": "ok", "room": room.name, "grouped": room.grouped})
+        self._remember_rename(session, room)
         if first:
             log.info("Controlling room %s", room.name)
             self._detect_fixed_volume(session)
 
-    def _remember_rename(self, room: RoomInfo) -> None:
+    def _remember_rename(self, session: RoomSession, room: RoomInfo) -> None:
         """Keep the stored room name up to date after a rename in the Sonos app."""
         current = self.store.current()
         room_uid = room.player_uid or current.room_uid
         if (room.name, room_uid) == (current.room, current.room_uid):
             return
-        try:
-            self.store.set_room(room.name, room_uid, current.seed_ip)
-        except (SettingsError, OSError) as exc:
-            log.warning("Could not save the new room name: %s", exc)
-            return
-        self._room_uid = room_uid
+        # Under the room lock, so that a room chosen meanwhile is never
+        # overwritten with the old room's name.
+        with self._room_lock:
+            if not self._current(session):
+                return
+            try:
+                self.store.set_room(room.name, room_uid, current.seed_ip)
+            except (SettingsError, OSError) as exc:
+                log.warning("Could not save the new room name: %s", exc)
+                return
+            with self._switch_lock:
+                self._room_uid = room_uid
 
     def _detect_fixed_volume(self, session: RoomSession) -> None:
         try:
@@ -515,6 +528,7 @@ class Runtime:
                     playback={"state": playback.state, "tile_id": self._match(playback)},
                     actions=sorted(playback.actions),
                 )
+        self._persist_now_playing()
         return playback
 
     def _match(self, playback: Playback) -> str | None:
@@ -573,6 +587,7 @@ class Runtime:
                         )
                     )
                     self.state.update(last_error=None)
+            self._persist_now_playing()
             session.transport_breaker.success()
             try:
                 self._refresh_playback(session)  # also learns the first queue item
@@ -689,24 +704,40 @@ class Runtime:
         return self.data_dir / "state.json"
 
     def _set_now_playing(self, now_playing: NowPlaying | None) -> None:
+        """Remember what Muckebox started (call with _switch_lock held).
+
+        Only memory changes here; _persist_now_playing() writes the file
+        later, outside the lock, because a sleeping NAS disk can take seconds.
+        """
         if now_playing == self._now_playing:
             return
         self._now_playing = now_playing
-        try:
-            path = self._state_file()
-            if now_playing is None:
-                path.unlink(missing_ok=True)
-            else:
-                data = {"room_uid": self._room_uid, "now_playing": asdict(now_playing)}
-                atomic_write(path, json.dumps(data).encode("utf-8"))
-        except OSError as exc:
-            log.warning("Could not save state.json: %s", exc)
+        self._now_playing_version += 1
+
+    def _persist_now_playing(self) -> None:
+        """Write the latest highlight to state.json (never call with _switch_lock held)."""
+        with self._state_file_lock:
+            with self._switch_lock:
+                version = self._now_playing_version
+                now_playing, room_uid = self._now_playing, self._room_uid
+            if version == self._saved_version:
+                return
+            try:
+                path = self._state_file()
+                if now_playing is None:
+                    path.unlink(missing_ok=True)
+                else:
+                    data = {"room_uid": room_uid, "now_playing": asdict(now_playing)}
+                    atomic_write(path, json.dumps(data).encode("utf-8"))
+            except OSError as exc:
+                log.warning("Could not save state.json: %s", exc)
+            self._saved_version = version  # also after a failure: no retry storm
 
     def _load_now_playing(self, room_uid: str | None) -> NowPlaying | None:
         try:
             data = json.loads(self._state_file().read_text(encoding="utf-8"))
-            if data.get("room_uid") != room_uid:
-                return None  # started in another room
+            if not isinstance(data, dict) or data.get("room_uid") != room_uid:
+                return None  # started in another room (or not our file)
             return NowPlaying(**data["now_playing"])
         except (OSError, ValueError, KeyError, TypeError):
             return None
