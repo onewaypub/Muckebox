@@ -324,10 +324,7 @@ def test_unsupported_links(text, kind):
         ("https://deezer.page.link/Ex4mple", "https://deezer.page.link/Ex4mple"),
         ("http://tidal.link/Ex4mple", "https://tidal.link/Ex4mple"),
         ("https://apple.co/Ex4mple", "https://apple.co/Ex4mple"),
-        (
-            f"https://geo.music.apple.com/de/album/_/{AP_ALBUM}",
-            f"https://geo.music.apple.com/de/album/_/{AP_ALBUM}",
-        ),
+        ("https://geo.music.apple.com/Ex4mple", "https://geo.music.apple.com/Ex4mple"),
         (
             f"https://itunes.apple.com/de/album/id{AP_ALBUM}",
             f"https://itunes.apple.com/de/album/id{AP_ALBUM}",
@@ -575,10 +572,38 @@ def test_apple_short_link_through_itunes(web, fetcher):
     assert web.call_count == 2
 
 
-def test_geo_apple_link_follows_the_storefront_redirect(web, fetcher):
-    geo = f"https://geo.music.apple.com/us/album/_/{AP_ALBUM}"
-    web.get(geo, status_code=301, headers={"Location": f"{AP}/de/album/beispiel/{AP_SONG}"})
-    assert resolve(geo, fetcher).ref == ShareLinkRef("apple_music", "album", AP_SONG)
+def test_geo_apple_link_with_storefront_is_parsed_without_redirect(web, fetcher):
+    # Following it would let Apple choose a storefront (and its catalogue IDs)
+    # from the server's IP address.
+    geo = f"https://geo.music.apple.com/de/album/_/{AP_ALBUM}?i={AP_SONG}&itsct=music_box_link"
+    web.get(geo, status_code=301, headers={"Location": f"{AP}/us/album/x/1999999999"})
+    assert resolve(geo, fetcher).ref == ShareLinkRef("apple_music", "song", AP_SONG)
+    assert not web.called
+
+
+def test_deezer_dest_is_used_only_in_deezers_own_form(web, fetcher):
+    root = "https://link.deezer.com/?dest=https%3A%2F%2Fwww.deezer.com%2Falbum%2F123"
+    assert resolve(root, fetcher).ref == ShareLinkRef("deezer", "album", "123")
+    assert not web.called
+    # On /s/<code> links Deezer ignores dest and redirects to the real target.
+    coded = "https://link.deezer.com/s/Ex4mple?dest=https%3A%2F%2Fwww.deezer.com%2Fplaylist%2F9"
+    web.get(coded, status_code=302, headers={"Location": "https://www.deezer.com/album/456"})
+    assert resolve(coded, fetcher).ref == ShareLinkRef("deezer", "album", "456")
+    # A dest that points elsewhere is never taken at face value.
+    other = "https://link.deezer.com/?dest=https%3A%2F%2Fopen.spotify.com%2Falbum%2F1"
+    web.get(other, status_code=404)
+    with pytest.raises(LinkError):
+        resolve(other, fetcher)
+
+
+def test_spotify_covers_prefer_the_640_px_variant(web, fetcher):
+    small = "https://i.scdn.co/image/ab67706f00000002" + "0" * 24
+    large = "https://i.scdn.co/image/ab67706f00000003" + "0" * 24
+    web.get(large, content=b"large")
+    web.get(small, content=b"small")
+    assert fetch_image(small, fetcher) == b"large"
+    web.get(large, status_code=404)
+    assert fetch_image(small, fetcher) == b"small"
 
 
 # -- metadata: Spotify ---------------------------------------------------------------------
