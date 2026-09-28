@@ -109,6 +109,8 @@ class FakeSonos:
     seconds: int = 0
     track_seconds: int = 1200
     muted: bool = False
+    #: The room is grouped with another room (whose music it plays).
+    grouped: bool = False
     #: The resume points the kids' tiles asked for.
     starts: list[StartAt | None] = field(default_factory=list)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
@@ -133,9 +135,17 @@ class FakeSonos:
             name=self.room_name,
             player_ip=f"192.0.2.{10 + index}",
             coordinator_ip=f"192.0.2.{10 + index}",
-            coordinator_uid=_fake_uid(index),
+            coordinator_uid=_fake_uid(index) if not self.grouped else _fake_uid(99),
             player_uid=_fake_uid(index),
+            grouped=self.grouped,
         )
+
+    def _play_alone(self) -> None:
+        """Like the real speaker: leave the group; the room is silent then."""
+        if self.grouped:
+            self.calls.append(("leave_group",))
+            self.grouped = False
+            self.media_uri, self.queue, self.state = "", [], "stopped"
 
     def list_favorites(self) -> list[Favorite]:
         self._enter("list_favorites")
@@ -143,6 +153,7 @@ class FakeSonos:
 
     def play_favorite(self, ref: FavoriteRef, route: Route, start: StartAt | None = None) -> Route:
         self._enter("play_favorite", ref.uri, route)
+        self._play_alone()
         self._wait()
         if route is Route.DIRECT:
             self.media_uri, self.queue = ref.uri, []
@@ -154,6 +165,7 @@ class FakeSonos:
 
     def play_share_link(self, link: ShareLinkRef, title: str, start: StartAt | None = None) -> None:
         self._enter("play_share_link", link, title)
+        self._play_alone()
         self._wait()
         self.media_uri = "x-rincon-queue:RINCON_000000000000001400#0"
         self.queue = [f"{link.service}:{link.kind}:{link.item_id}"]
@@ -178,6 +190,7 @@ class FakeSonos:
 
     def transport(self, action: str) -> None:
         self._enter("transport", action)
+        self._play_alone()
         if action in ("next", "previous") and not self.queue:
             raise ActionNotAvailable(upnp_code=701)
         if action == "play" and self.media_uri:

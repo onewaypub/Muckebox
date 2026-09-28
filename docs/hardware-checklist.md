@@ -20,7 +20,9 @@ a release is tried at home, and report anything that differs.
 - [ ] End of the usage time: the fade sounds smooth (1-step changes) and the
       music pauses once; TuneIn radio stops or pauses; the volume is back
       afterwards.
-- [ ] A grouped kids room with other music is only faded, not paused.
+- [ ] Grouped with the living room: a tile, pause and the end of the usage
+      time take the kids room out of the group; the living room plays on.
+      Also when the kids room was the group's coordinator.
 - [ ] Freeze dance: mute and unmute take effect quickly; with a stereo pair
       or a Sub; in a group only the kids room is silent.
 - [ ] Fixed-volume products (line out): the limit and fading have no effect;

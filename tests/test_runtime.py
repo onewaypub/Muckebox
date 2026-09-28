@@ -907,15 +907,33 @@ def test_long_after_the_end_nothing_is_paused(make_runtime, fake, clock, evening
     assert fake.state == "playing"
 
 
-def test_a_grouped_room_with_other_music_is_only_faded(runtime, fake, clock, evening):
+def test_at_bedtime_a_grouped_kids_room_leaves_the_group(runtime, fake, clock, evening):
     fake.media_uri, fake.queue = "x-sonosapi-stream:other", []  # the living room's radio
-    runtime.poll_transport()
-    runtime.state.update(sonos={"status": "ok", "room": "Kinderzimmer", "grouped": True})
+    fake.grouped = True
     at(clock, "2026-09-28 19:00:10")
     runtime.poll_transport()
-    assert fake.state == "playing"  # pausing would stop the living room too
+    assert ("leave_group",) in fake.calls  # the kids room is silent ...
+    assert fake.state == "stopped"  # ... the living room plays on (not simulated)
     runtime.poll_transport()
-    assert fake.state == "playing"
+    assert runtime.state_document()["sonos"]["grouped"] is False
+
+
+def test_a_tile_plays_only_in_the_kids_room(runtime, fake, library):
+    fake.grouped = True
+    runtime.poll_transport()
+    tile = add_favorite(library, fake, 0)
+    runtime.play_tile(tile.id)
+    assert ("leave_group",) in fake.calls  # left the group, then played alone
+    assert (fake.grouped, fake.state) == (False, "playing")
+    assert runtime.state_document()["sonos"]["grouped"] is False
+
+
+def test_pause_on_the_tablet_leaves_the_group_instead_of_stopping_it(runtime, fake):
+    fake.grouped, fake.media_uri, fake.state = True, "x-sonosapi-stream:other", "playing"
+    runtime.poll_transport()
+    runtime.transport("pause")
+    assert ("leave_group",) in fake.calls
+    assert fake.state == "stopped"
 
 
 def test_transitioning_is_paused_on_the_next_poll(runtime, fake, clock, evening):

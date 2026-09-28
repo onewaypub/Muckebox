@@ -158,9 +158,12 @@ speaker address) keeps the highlight.
 
 ### Groups
 
-When the kids room is grouped with other rooms, transport and queue commands
-go to the group **coordinator**, looked up again when older than 5 seconds;
-the whole group plays. The volume limit applies to the **kids room's own player**:
+The tablet only ever controls the kids room. Before a tile starts and before
+play, pause, next or previous, Muckebox looks the room up afresh; if it is
+grouped, it leaves the group (`BecomeCoordinatorOfStandaloneGroup` on its own
+player) and the other rooms play on. Transport and queue commands go to the
+group **coordinator**, which is then the kids room itself (looked up again
+when older than 5 seconds). The volume limit applies to the **kids room's own player**:
 Sonos group volume is an average of its members, so clamping it would not cap
 the kids room.
 
@@ -321,8 +324,8 @@ No personal data about the children is stored. See
 - **Pausing once:** the transport lane pauses when that latest end has not
   been handled yet and is at most 15 minutes old, then records it. So a
   restart right after 19:00 still pauses, and later nothing ever pauses
-  music that adults start from the Sonos app. A grouped room playing other
-  music is only faded.
+  music that adults start from the Sonos app. A grouped room leaves its
+  group instead of pausing it, so the other rooms play on.
 - **Fading** is a soft limit in the volume guard: from the volume when the
   fade began down to 20 %. It is not counted as a correction. After the
   confirmed pause the earlier volume is restored.

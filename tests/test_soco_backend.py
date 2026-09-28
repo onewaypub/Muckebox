@@ -255,12 +255,13 @@ RADIO = FavoriteRef(
 )
 
 
-def test_queue_route_on_the_group_coordinator(kids, living):
+def test_a_grouped_kids_room_leaves_its_group_and_plays_alone(kids, living):
     zones = household(kids, living, groups=[(living, living, kids)])
     route = backend_for(zones).play_favorite(ALBUM, Route.QUEUE)
     assert route is Route.QUEUE
-    assert kids.avTransport.calls == []  # never the grouped member
-    assert living.avTransport.actions() == [
+    assert living.avTransport.calls == []  # the living room plays on untouched
+    assert kids.avTransport.actions() == [
+        "BecomeCoordinatorOfStandaloneGroup",
         "RemoveAllTracksFromQueue",
         "AddURIToQueue",
         "SetAVTransportURI",
@@ -268,7 +269,7 @@ def test_queue_route_on_the_group_coordinator(kids, living):
         "Seek",
         "Play",
     ]
-    calls = {name: (args, timeout) for name, args, timeout in living.avTransport.calls}
+    calls = {name: (args, timeout) for name, args, timeout in kids.avTransport.calls}
     assert calls["SetPlayMode"][0]["NewPlayMode"] == "NORMAL"
     add_args, add_timeout = calls["AddURIToQueue"]
     assert add_args["EnqueuedURI"] == ALBUM_URI
@@ -276,9 +277,23 @@ def test_queue_route_on_the_group_coordinator(kids, living):
     assert ALBUM_URI.replace("&", "&amp;") in add_args["EnqueuedURIMetaData"]
     assert add_timeout == SLOW_TIMEOUT
     assert (
-        calls["SetAVTransportURI"][0]["CurrentURI"] == "x-rincon-queue:RINCON_000000000001001400#0"
+        calls["SetAVTransportURI"][0]["CurrentURI"]
+        == "x-rincon-queue:RINCON_000000000000001400#0"  # the kids room
     )
     assert calls["Seek"][0] == {"InstanceID": 0, "Unit": "TRACK_NR", "Target": 1}
+
+
+def test_a_room_on_its_own_does_not_leave_anything(kids):
+    zones = household(kids)
+    backend_for(zones, seed="192.0.2.10").play_favorite(ALBUM, Route.QUEUE)
+    assert "BecomeCoordinatorOfStandaloneGroup" not in kids.avTransport.actions()
+
+
+def test_pause_in_a_group_only_silences_the_kids_room(kids, living):
+    zones = household(kids, living, groups=[(living, living, kids)])
+    backend_for(zones).transport("pause")
+    assert living.avTransport.actions() == []  # the living room is not paused
+    assert kids.avTransport.actions()[0] == "BecomeCoordinatorOfStandaloneGroup"
 
 
 def test_direct_route_never_touches_the_queue(kids):

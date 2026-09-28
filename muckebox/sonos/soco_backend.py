@@ -35,6 +35,7 @@ from soco.plugins.sharelink import ShareLinkPlugin
 from muckebox.netfetch import ANY_HOST, Fetcher, FetchError
 
 from . import routing
+from .backend import TRANSPORT_ACTIONS
 from .errors import (
     ROUTE_ERRORS,
     UPNP_SERVICE_ERROR,
@@ -303,6 +304,7 @@ class SocoBackend:
         self._known_ips: frozenset[str] = frozenset()
         self._topology_at = 0.0
         self._player: Any = None
+        self._group_size = 1
 
     # -- finding the room -------------------------------------------------
 
@@ -320,6 +322,7 @@ class SocoBackend:
             group_size = sum(
                 1 for m in members if m.visible and m.coordinator_uid == room.coordinator_uid
             )
+            self._group_size = group_size
             return RoomInfo(
                 name=room.name,
                 player_ip=room.ip,
@@ -361,6 +364,25 @@ class SocoBackend:
             self.resolve()
             player = self._player
         return player
+
+    def _play_alone(self) -> None:
+        """Take the kids room out of its group before the kids control it.
+
+        The tablet only ever controls the kids room: the other rooms of a
+        group (e.g. the living room) play on undisturbed. Looked up afresh,
+        because adults may have grouped the rooms a moment ago.
+        """
+        self.resolve()
+        if self._group_size <= 1:
+            return
+        player = self._room_player()
+        self._call(player.avTransport.BecomeCoordinatorOfStandaloneGroup, [_INSTANCE])
+        log.info("The kids room left its group; the other rooms play on")
+        with self._lock:
+            # The room is its own coordinator now; the next lookup confirms it.
+            self._coordinator_member = self._room
+            self._group_size = 1
+            self._topology_at = self._clock()
 
     def _coordinator(self) -> tuple[Any, str]:
         """The group coordinator (as a SoCo object) and its UID, a few seconds fresh."""
@@ -429,6 +451,7 @@ class SocoBackend:
     def play_favorite(self, ref: FavoriteRef, route: Route, start: StartAt | None = None) -> Route:
         if route is Route.UNSUPPORTED:
             raise NotPlayable("favorite is not playable")
+        self._play_alone()
         coordinator, uid = self._coordinator()
         try:
             self._start(coordinator, uid, ref, route, start)
@@ -495,6 +518,7 @@ class SocoBackend:
         return item
 
     def play_share_link(self, link: ShareLinkRef, title: str, start: StartAt | None = None) -> None:
+        self._play_alone()
         coordinator, uid = self._coordinator()
         self._clear_queue(coordinator)
         plugin = ShareLinkPlugin(coordinator)
@@ -668,6 +692,11 @@ class SocoBackend:
             log.debug("Could not reset play mode: %s", exc)
 
     def transport(self, action: str) -> None:
+        if action not in TRANSPORT_ACTIONS:
+            raise ValueError(f"unknown transport action {action!r}")
+        # In a group, "pause" means: the kids room leaves it and is silent,
+        # while the other rooms play on.
+        self._play_alone()
         coordinator, _ = self._coordinator()
         service = coordinator.avTransport
         if action == "play":

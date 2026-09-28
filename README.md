@@ -236,12 +236,14 @@ limit also applies when Muckebox is not running.
   tapping it while paused continues. Albums continue where they stopped
   (*Weiterhören*); audiobooks and podcast episodes do so on their own.
   Shuffle and repeat are switched off when a tile starts, so that stories
-  play in order. If the room is grouped with other rooms in the Sonos app,
-  the whole group plays; the volume limit applies to the kids room.
+  play in order. The tablet only ever controls the kids room: if the room
+  is grouped with other rooms in the Sonos app, it leaves the group when a
+  tile starts (or when pause, next or previous is tapped), and the other
+  rooms play on undisturbed.
 - **When the usage time ends**, the volume bar shrinks and a small moon
   appears; then the music pauses and a big moon replaces the tiles. Pause
-  and quieter still work. If the room plays in a group with other music, it
-  is only faded, because a pause would stop the other rooms too. After the
+  and quieter still work. If the room plays in a group, it leaves the group
+  and is silent, while the other rooms play on. After the
   pause, the volume from before the fade is back for the next morning.
   Parents allow more time by holding the moon for 3 seconds and typing the
   PIN (digits only; with a PIN that contains letters, use the parents'

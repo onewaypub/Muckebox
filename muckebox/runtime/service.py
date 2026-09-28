@@ -583,13 +583,8 @@ class Runtime:
                 self._restore_volume(session, released)
             return
         if playback.state in ("playing", "transitioning"):
-            sonos, shown = self.state.get("sonos"), self.state.get("playback")
-            if sonos.get("grouped") and not shown["tile_id"]:
-                # Pausing would stop the whole group (e.g. the living room too):
-                # leave it; the kids room itself has been faded down.
-                log.info("Usage time over; the room plays in a group, so it was only faded")
-                self.keeper.mark_done(end)
-                return
+            # In a group the kids room leaves it (and is silent); the other
+            # rooms play on.
             if self._pause_sent != end:
                 log.info("Usage time over: pausing")
                 self._pause_sent = end
@@ -724,12 +719,10 @@ class Runtime:
 
     def _pause_for_game(self) -> None:
         """The quiz and "move like" sound from the tablet: pause the speaker."""
-        sonos, shown = self.state.get("sonos"), self.state.get("playback")
+        shown = self.state.get("playback")
         if shown["state"] not in ("playing", "transitioning"):
             return
-        if sonos.get("grouped") and not shown["tile_id"]:
-            return  # would stop the whole group
-        try:
+        try:  # in a group the kids room leaves it; the other rooms play on
             self.transport("pause")
         except (Unavailable, Busy, Refused) as exc:
             log.info("Could not pause for the game: %s", exc)
@@ -917,6 +910,7 @@ class Runtime:
                     )
                     self.state.update(last_error=None)
             self._persist_now_playing()
+            self._left_group(session)
             session.transport_breaker.success()
             try:
                 self._refresh_playback(session)  # also learns the first queue item
@@ -951,7 +945,17 @@ class Runtime:
         except SonosError as exc:
             self._on_error(session, exc)
             raise
+        self._left_group(session)
         self._refresh_playback(session)
+
+    def _left_group(self, session: RoomSession) -> None:
+        """The kids room may just have left its group: show it at once."""
+        if not self.state.get("sonos").get("grouped"):
+            return
+        try:
+            self._ensure_room(session, force=True)
+        except SonosError as exc:
+            log.info("Could not look up the room again: %s", exc)
 
     def _volume_job(self, session: RoomSession, direction: str) -> int:
         try:
