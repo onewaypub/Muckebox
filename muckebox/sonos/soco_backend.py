@@ -161,6 +161,25 @@ def _without_query(uri: str) -> str:
     return uri.split("?", 1)[0]
 
 
+#: Longest track title passed on to the kids view.
+MAX_TRACK_TITLE = 120
+
+
+def _track_title(meta: Any) -> str | None:
+    """The title from a track's DIDL-Lite metadata, or None."""
+    if not isinstance(meta, str) or not meta.lstrip().startswith("<"):
+        return None  # empty or "NOT_IMPLEMENTED"
+    try:
+        items = from_didl_string(meta)
+    except (SoCoException, ValueError, SyntaxError, AttributeError):
+        return None
+    title = getattr(items[0], "title", None) if items else None
+    if not isinstance(title, str):
+        return None
+    cleaned = " ".join("".join(c if c.isprintable() else " " for c in title).split())
+    return cleaned[:MAX_TRACK_TITLE] or None
+
+
 def _int_or_none(value: Any) -> int | None:
     try:
         return int(value)
@@ -740,6 +759,7 @@ class SocoBackend:
             seconds=seconds,
             duration=_seconds(info.get("TrackDuration")),
             track_uri=info.get("TrackURI") or "",
+            title=_track_title(info.get("TrackMetaData")),
         )
 
     def _actions(self, coordinator: Any) -> set[str]:

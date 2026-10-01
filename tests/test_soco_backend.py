@@ -455,10 +455,22 @@ def test_position(kids):
         "RelTime": "0:12:40",
         "TrackDuration": "0:20:05",
         "TrackURI": TRACK_3,
+        "TrackMetaData": (
+            '<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" '
+            'xmlns:dc="http://purl.org/dc/elements/1.1/" '
+            'xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/">'
+            '<item id="-1" parentID="-1" restricted="true"><dc:title>Kapitel\t3</dc:title>'
+            "<upnp:class>object.item.audioItem.musicTrack</upnp:class></item></DIDL-Lite>"
+        ),
     }
     position = backend_for(zones, seed="192.0.2.10").position()
     assert (position.track, position.seconds, position.duration) == (3, 760, 1205)
     assert position.track_uri == TRACK_3
+    assert position.title == "Kapitel 3"
+    kids.avTransport.responses["GetPositionInfo"]["TrackMetaData"] = "NOT_IMPLEMENTED"
+    assert backend_for(zones, seed="192.0.2.10").position().title is None
+    kids.avTransport.responses["GetPositionInfo"]["TrackMetaData"] = "<DIDL-Lite><broken"
+    assert backend_for(zones, seed="192.0.2.10").position().title is None
     kids.avTransport.responses["GetPositionInfo"] = {"Track": "1", "RelTime": "NOT_IMPLEMENTED"}
     assert backend_for(zones, seed="192.0.2.10").position() is None
 

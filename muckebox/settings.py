@@ -68,6 +68,8 @@ DEFAULT_TAP_COOLDOWN = 5
 TAP_COOLDOWN = (0, 30)  # seconds; 0 = off
 DEFAULT_IDLE_MINUTES = 60
 IDLE_MINUTES = (0, 240)  # 0 = off
+#: Layouts of the kids view: "small" (0-6 years) and "big" (7-14 years).
+PROFILES = ("small", "big")
 _TILE_ID_RE = re.compile(r"^t[0-9a-f]{8,32}$")
 
 # RFC 1123 host name: dot-separated labels of letters, digits and hyphens.
@@ -143,6 +145,10 @@ class ControlSettings:
     #: Minutes of playback without a tap on the tablet before Muckebox fades
     #: and pauses.
     idle_minutes: int = DEFAULT_IDLE_MINUTES
+    #: Layout of the kids view.
+    profile: str = "small"
+    #: Previous/next on the "small" layout ("big" always has them).
+    skip_buttons: bool = False
 
 
 @dataclass(frozen=True)
@@ -274,18 +280,27 @@ def validate_controls(data: object) -> ControlSettings:
         raise SettingsError("controls_invalid")
     cooldown = data.get("tap_cooldown", DEFAULT_TAP_COOLDOWN)
     idle = data.get("idle_minutes", DEFAULT_IDLE_MINUTES)
+    profile = data.get("profile", "small")
+    skip = data.get("skip_buttons", False)
     if (
         type(cooldown) is not int
         or not TAP_COOLDOWN[0] <= cooldown <= TAP_COOLDOWN[1]
         or type(idle) is not int
         or not IDLE_MINUTES[0] <= idle <= IDLE_MINUTES[1]
+        or profile not in PROFILES
+        or type(skip) is not bool
     ):
         raise SettingsError("controls_invalid")
-    return ControlSettings(cooldown, idle)
+    return ControlSettings(cooldown, idle, profile, skip)
 
 
 def controls_to_json(settings: ControlSettings) -> dict[str, Any]:
-    return {"tap_cooldown": settings.tap_cooldown, "idle_minutes": settings.idle_minutes}
+    return {
+        "tap_cooldown": settings.tap_cooldown,
+        "idle_minutes": settings.idle_minutes,
+        "profile": settings.profile,
+        "skip_buttons": settings.skip_buttons,
+    }
 
 
 def sleep_timer_to_json(settings: SleepTimerSettings) -> dict[str, Any]:

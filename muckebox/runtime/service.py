@@ -110,6 +110,22 @@ class CommandPolicy:
         """Raise :class:`Unavailable` to refuse ``command``."""
 
 
+def _track(position: Any, playback: Playback, shows: bool, now: float) -> dict[str, Any] | None:
+    """The current track for the "big" kids view; the tablet counts the
+    seconds on from ``at`` while it plays."""
+    if not shows or position is None:
+        return None
+    return {
+        "number": position.track,
+        "count": playback.queue_length,
+        "title": position.title,
+        "seconds": position.seconds,
+        "duration": position.duration,
+        "at": int(now),
+        "playing": playback.state == "playing",
+    }
+
+
 def _iso(epoch: float | None, zone: Zone) -> str | None:
     return None if epoch is None else local_time(epoch, zone).isoformat(timespec="seconds")
 
@@ -189,6 +205,7 @@ class Runtime:
             volume=None,
             pending=None,
             last_error=None,
+            track=None,
         )
         self._command_lock = threading.Lock()
         self._volume_lock = threading.Lock()
@@ -274,6 +291,7 @@ class Runtime:
         playing = playback["state"] in ("playing", "transitioning")
         volume = data["volume"]
         times = self.keeper.document()
+        controls = self.store.current().controls
         if times["schedule"]["phase"] == "closed":
             actions = set()  # only pause stays possible, and only while playing
         return {
@@ -298,14 +316,22 @@ class Runtime:
             },
             "pending": data["pending"],
             "cooldown": {
-                "tile": self.store.current().controls.tap_cooldown,
+                "tile": controls.tap_cooldown,
                 "skip": SKIP_SECONDS,
                 "toggle": TOGGLE_SECONDS,
             },
+            "view": {"profile": controls.profile, "skip_buttons": controls.skip_buttons},
+            "track": data["track"],
+            "progress": self._progress(),
             "last_error": last_error,
             **times,
             "games": self.games.document(),
         }
+
+    def _progress(self) -> dict[str, float]:
+        """How far each album tile got, for the bar on its cover ("big" view)."""
+        resuming = {tile.id for tile in self.library.tiles() if tile.resumes}
+        return {key: value for key, value in self.resume.progress().items() if key in resuming}
 
     # -- commands from the kids view ----------------------------------------
 
@@ -569,22 +595,29 @@ class Runtime:
             self._on_error(session, exc)
 
     def _record_position(self, session: RoomSession, playback: Playback) -> None:
-        """Remember where an album tile is, for "Weiterhören"."""
+        """Remember where an album tile is, for "Weiterhören", and show the
+        track and its progress on the "big" kids view."""
         now_playing = self._now_playing
         tile_id = self.state.get("playback")["tile_id"]
-        if not tile_id or now_playing is None or now_playing.route != Route.QUEUE.value:
+        if not tile_id or now_playing is None:
+            self._publish_track(session, None)
             return
         try:
             tile = self.library.get(tile_id)
         except TileNotFound:
+            self._publish_track(session, None)
             return
-        if not tile.resumes:
+        resumes = tile.resumes and now_playing.route == Route.QUEUE.value
+        shows = self.store.current().controls.profile == "big"
+        if not resumes and not shows:
+            self._publish_track(session, None)
             return
         state = playback.state
         changed, self._last_play_state = state != self._last_play_state, state
         if state == "stopped":
-            if changed:
+            if changed and resumes:
                 self.resume.stopped(tile_id)  # heard to the end: next time from the start
+            self._publish_track(session, None)
             return
         if state not in ("playing", "paused"):
             return
@@ -601,10 +634,15 @@ class Runtime:
             if exc.connection_problem:
                 raise
             return
-        if position is not None:
+        if position is not None and resumes:
             self.resume.record(tile_id, position, playback.queue_length)
-        if state == "paused" and changed:
+        if state == "paused" and changed and resumes:
             self.resume.urgent()
+        self._publish_track(session, _track(position, playback, shows, self.clock.time()))
+
+    def _publish_track(self, session: RoomSession, track: dict[str, Any] | None) -> None:
+        if self.state.get("track") != track:
+            self._publish(session, track=track)
 
     def restart_tile(self, tile_id: str) -> None:
         """ "Von vorn": the tile starts from the beginning next time, even if it

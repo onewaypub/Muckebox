@@ -1343,3 +1343,32 @@ def test_other_music_lowered_by_a_late_fade_gets_its_volume_back(runtime, fake, 
     runtime.poll_transport()
     runtime.poll_transport()
     assert (fake.volume, fake.state) == (20, "playing")
+
+
+# -- the "big" kids view: track, progress, layout ------------------------------------------
+
+
+def test_the_big_view_shows_the_track_and_its_progress(runtime, fake, library, album, clock):
+    runtime.play_tile(album.id)
+    listen_until(runtime, fake, 2, 300)
+    doc = runtime.state_document()
+    assert doc["view"] == {"profile": "small", "skip_buttons": False}
+    assert doc["track"] is None  # the small view shows no titles
+    runtime.store.set_controls({"profile": "big"})
+    clock.advance(10)
+    runtime.poll_transport()
+    doc = runtime.state_document()
+    assert doc["view"]["profile"] == "big"
+    track = doc["track"]
+    assert (track["number"], track["count"], track["title"]) == (2, 3, "Kapitel 2")
+    assert (track["seconds"], track["duration"], track["playing"]) == (300, 1200, True)
+    assert doc["progress"][album.id] == round((1 + 300 / 1200) / 3, 2)
+
+
+def test_the_big_view_shows_no_track_for_the_radio(runtime, fake, library):
+    runtime.store.set_controls({"profile": "big"})
+    runtime.play_tile(add_favorite(library, fake, 2).id)  # radio: no position
+    runtime.poll_transport()
+    doc = runtime.state_document()
+    assert doc["track"] is None
+    assert doc["progress"] == {}

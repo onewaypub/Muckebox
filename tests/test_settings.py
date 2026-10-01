@@ -441,9 +441,11 @@ def test_a_file_without_the_new_sections_still_loads(tmp_path):
 def test_controls_round_trip_and_zero_means_off(tmp_path):
     st = store(tmp_path)
     assert (st.current().controls.tap_cooldown, st.current().controls.idle_minutes) == (5, 60)
-    st.set_controls({"tap_cooldown": 0, "idle_minutes": 0})
+    assert (st.current().controls.profile, st.current().controls.skip_buttons) == ("small", False)
+    st.set_controls({"tap_cooldown": 0, "idle_minutes": 0, "profile": "big", "skip_buttons": True})
     reread = SettingsStore(tmp_path, scrypt=CHEAP).current().controls
     assert (reread.tap_cooldown, reread.idle_minutes) == (0, 0)
+    assert (reread.profile, reread.skip_buttons) == ("big", True)
 
 
 def test_a_hand_edited_controls_section_is_checked(tmp_path):
@@ -483,6 +485,8 @@ def test_reset_pin_keeps_the_new_sections(tmp_path):
         ("set_controls", {"idle_minutes": 241}, "controls_invalid"),
         ("set_controls", {"idle_minutes": True}, "controls_invalid"),
         ("set_controls", None, "controls_invalid"),
+        ("set_controls", {"profile": "teen"}, "controls_invalid"),
+        ("set_controls", {"skip_buttons": "yes"}, "controls_invalid"),
     ],
 )
 def test_invalid_new_settings(tmp_path, setter, data, code):
