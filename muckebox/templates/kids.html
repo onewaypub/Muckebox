@@ -17,59 +17,105 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
+  <link rel="stylesheet" href="/static/css/fonts.css?v={{ asset_version }}">
   <link rel="stylesheet" href="/static/css/kids.css?v={{ asset_version }}">
   <script type="module" src="/static/js/kids.js?v={{ asset_version }}"></script>
 </head>
-<body class="kids" data-asset-version="{{ asset_version }}">
+<body class="kids" data-profile="{{ profile }}" data-skip="{{ 'on' if skip_buttons else 'off' }}" data-asset-version="{{ asset_version }}">
   <script id="i18n" type="application/json">{{ messages|tojson }}</script>
 
-  <main id="tiles" class="tiles" aria-live="polite"></main>
+  <div class="stage">
+    <!-- "Groß": what is playing, with its controls (moved here by kids.js) -->
+    <aside id="now" class="now" aria-live="polite">
+      <div id="now-art" class="now-art">
+        <img id="now-cover" class="now-cover" alt="" hidden>
+        <img id="now-picture" class="now-picture" alt="" src="/static/pictures/moon.svg">
+      </div>
+      <div class="now-text">
+        <p id="now-label" class="now-label"></p>
+        <p id="now-title" class="now-title"></p>
+        <p id="now-sub" class="now-sub"></p>
+      </div>
+      <div id="now-progress" class="now-progress" hidden>
+        <div class="now-bar"><i id="now-bar"></i></div>
+        <div class="now-times"><span id="now-position"></span><span id="now-duration"></span></div>
+      </div>
+      <div id="now-buttons" class="now-buttons"></div>
+      <div class="now-fill"></div>
+      <div id="now-volume" class="now-volume"></div>
+    </aside>
 
-  <section id="bedtime" class="bedtime" hidden>
-    <button id="moon" class="moon" type="button" data-i18n-label="kids.bedtime">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.34 2.02C6.59 1.82 2 6.42 2 12c0 5.52 4.48 10 10 10 3.71 0 6.93-2.02 8.66-5.02-7.51-.25-12.09-8.43-8.32-14.96"/></svg>
-    </button>
-    <p class="bedtime-text" data-i18n="kids.bedtime"></p>
-    <p id="bedtime-until" class="bedtime-until"></p>
-    <button id="bedtime-breathing" class="bedtime-breathing" type="button" hidden>
-      <img src="/static/pictures/breathing.svg" alt="">
-      <span data-i18n="game.breathing"></span>
-    </button>
-  </section>
+    <section class="library">
+      <header class="library-head">
+        <h1 class="library-title" data-i18n="kids.my_music"></h1>
+        <span class="spacer"></span>
+        <div id="head-slot" class="head-slot"></div>
+      </header>
 
-  <p id="empty" class="empty" hidden>
-    <svg class="empty-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3z"/></svg>
-    <span data-i18n="kids.empty"></span>
-  </p>
+      <div class="pager">
+        <main id="tiles" class="tiles"></main>
+        <button id="page-prev" class="page-arrow page-prev" type="button" data-i18n-label="kids.page_prev" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.41 7.41 14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
+        </button>
+        <button id="page-next" class="page-arrow page-next" type="button" data-i18n-label="kids.page_next" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 6 8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
+        </button>
+        <div id="page-dots" class="page-dots" aria-hidden="true"></div>
 
-  <nav class="controls" aria-label="">
-    <button id="prev" class="control" type="button" data-i18n-label="kids.previous">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg>
-    </button>
-    <button id="toggle" class="control control-main" type="button" data-i18n-label="kids.play">
-      <svg class="icon-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
-      <svg class="icon-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 19h4V5H6zm8-14v14h4V5z"/></svg>
-    </button>
-    <button id="next" class="control" type="button" data-i18n-label="kids.next">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 18l8.5-6L6 6zm10-12v12h2V6z"/></svg>
-    </button>
-    <button id="games-button" class="control games-button" type="button" data-i18n-label="kids.games" hidden>
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 11H19V7a2 2 0 0 0-2-2h-4V3.5a2.5 2.5 0 0 0-5 0V5H4a2 2 0 0 0-2 2v3.8h1.5a2.7 2.7 0 0 1 0 5.4H2V20a2 2 0 0 0 2 2h3.8v-1.5a2.7 2.7 0 0 1 5.4 0V22H17a2 2 0 0 0 2-2v-4h1.5a2.5 2.5 0 0 0 0-5"/></svg>
-    </button>
-    <span class="spacer"></span>
-    <button id="small-moon" class="control small-moon" type="button" data-i18n-label="kids.sleep_timer" hidden>
-      <svg class="ring" viewBox="0 0 36 36" aria-hidden="true"><circle class="ring-track" cx="18" cy="18" r="16"/><circle id="ring-fill" class="ring-fill" cx="18" cy="18" r="16" pathLength="100"/></svg>
-      <svg class="moon-shape" viewBox="0 0 24 24" aria-hidden="true"><path d="M12.34 2.02C6.59 1.82 2 6.42 2 12c0 5.52 4.48 10 10 10 3.71 0 6.93-2.02 8.66-5.02-7.51-.25-12.09-8.43-8.32-14.96"/></svg>
-    </button>
-    <button id="quieter" class="control" type="button" data-i18n-label="kids.quieter">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9v6h4l5 5V4L9 9zm13.5 3A4.5 4.5 0 0 0 16 7.97v8.05A4.5 4.5 0 0 0 18.5 12"/></svg>
-      <span class="sign" aria-hidden="true">−</span>
-    </button>
-    <div id="volume" class="volume" role="meter" aria-valuemin="0" data-i18n-label="kids.volume"></div>
-    <button id="louder" class="control" type="button" data-i18n-label="kids.louder">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9v6h4l5 5V4L7 9zm13.5 3A4.5 4.5 0 0 0 14 7.97v8.05A4.5 4.5 0 0 0 16.5 12M14 3.23v2.06a7 7 0 0 1 0 13.42v2.06A9 9 0 0 0 14 3.23"/></svg>
-      <span class="sign" aria-hidden="true">+</span>
-    </button>
+        <section id="bedtime" class="bedtime" hidden>
+          <button id="moon" class="moon" type="button" data-i18n-label="kids.bedtime">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.34 2.02C6.59 1.82 2 6.42 2 12c0 5.52 4.48 10 10 10 3.71 0 6.93-2.02 8.66-5.02-7.51-.25-12.09-8.43-8.32-14.96"/></svg>
+          </button>
+          <p class="bedtime-text" data-i18n="kids.bedtime"></p>
+          <p id="bedtime-until" class="bedtime-until"></p>
+          <button id="bedtime-breathing" class="bedtime-breathing" type="button" hidden>
+            <img src="/static/pictures/breathing.svg" alt="">
+            <span data-i18n="game.breathing"></span>
+          </button>
+        </section>
+
+        <p id="empty" class="empty" hidden>
+          <svg class="empty-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3z"/></svg>
+          <span data-i18n="kids.empty"></span>
+        </p>
+      </div>
+    </section>
+  </div>
+
+  <!-- "Klein": the control bar. kids.js moves the buttons into the slots of the
+       current layout; the buttons themselves exist only once. -->
+  <nav id="bar" class="controls" aria-label="">
+    <div id="bar-left" class="bar-group bar-left">
+      <button id="small-moon" class="control small-moon" type="button" data-i18n-label="kids.sleep_timer" hidden>
+        <svg class="ring" viewBox="0 0 36 36" aria-hidden="true"><circle class="ring-track" cx="18" cy="18" r="16"/><circle id="ring-fill" class="ring-fill" cx="18" cy="18" r="16" pathLength="100"/></svg>
+        <svg class="moon-shape" viewBox="0 0 24 24" aria-hidden="true"><path d="M12.34 2.02C6.59 1.82 2 6.42 2 12c0 5.52 4.48 10 10 10 3.71 0 6.93-2.02 8.66-5.02-7.51-.25-12.09-8.43-8.32-14.96"/></svg>
+      </button>
+      <button id="games-button" class="control games-button" type="button" data-i18n-label="kids.games" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 11H19V7a2 2 0 0 0-2-2h-4V3.5a2.5 2.5 0 0 0-5 0V5H4a2 2 0 0 0-2 2v3.8h1.5a2.7 2.7 0 0 1 0 5.4H2V20a2 2 0 0 0 2 2h3.8v-1.5a2.7 2.7 0 0 1 5.4 0V22H17a2 2 0 0 0 2-2v-4h1.5a2.5 2.5 0 0 0 0-5"/></svg>
+        <span class="games-label" data-i18n="kids.games"></span>
+      </button>
+    </div>
+    <div id="bar-volume" class="bar-group bar-volume">
+      <button id="quieter" class="control control-volume" type="button" data-i18n-label="kids.quieter">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9v6h4l5 5V4L9 9z"/></svg>
+      </button>
+      <div id="volume" class="volume" role="meter" aria-valuemin="0" data-i18n-label="kids.volume"></div>
+      <button id="louder" class="control control-volume" type="button" data-i18n-label="kids.louder">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9v6h4l5 5V4L7 9zm13.5 3A4.5 4.5 0 0 0 14 7.97v8.05A4.5 4.5 0 0 0 16.5 12M14 3.23v2.06a7 7 0 0 1 0 13.42v2.06A9 9 0 0 0 14 3.23"/></svg>
+      </button>
+    </div>
+    <div id="bar-play" class="bar-group bar-play">
+      <button id="prev" class="control control-skip" type="button" data-i18n-label="kids.previous">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg>
+      </button>
+      <button id="toggle" class="control control-main" type="button" data-i18n-label="kids.play">
+        <svg class="icon-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+        <svg class="icon-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 19h4V5H6zm8-14v14h4V5z"/></svg>
+      </button>
+      <button id="next" class="control control-skip" type="button" data-i18n-label="kids.next">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 18l8.5-6L6 6zm10-12v12h2V6z"/></svg>
+      </button>
+    </div>
   </nav>
 
   <div id="overlay" class="overlay" hidden>
@@ -114,11 +160,14 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
   <template id="tile-template">
     <button class="tile" type="button">
-      <img class="cover" alt="" loading="lazy" decoding="async">
-      <span class="placeholder" aria-hidden="true"></span>
+      <span class="art">
+        <img class="cover" alt="" loading="lazy" decoding="async">
+        <img class="picture" alt="" decoding="async">
+        <span class="progress" aria-hidden="true" hidden><i></i></span>
+        <span class="badge-pending" aria-hidden="true"></span>
+      </span>
+      <span class="equalizer" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
       <span class="title"></span>
-      <span class="badge badge-playing" aria-hidden="true"><i></i><i></i><i></i></span>
-      <span class="badge badge-pending" aria-hidden="true"></span>
     </button>
   </template>
 </body>

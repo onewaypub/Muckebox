@@ -10,7 +10,7 @@ import {
   PAD_MAX,
   cooldownGroup,
   POLL_MS,
-  initial,
+  formatTime,
   isBedtime,
   isCooling,
   isPlaying,
@@ -21,7 +21,11 @@ import {
   padPress,
   padReady,
   tileTappable,
+  trackSeconds,
+  pageOf,
+  paginate,
   placeholderColour,
+  placeholderPicture,
   moonMode,
   sleepLeft,
   tileState,
@@ -76,10 +80,9 @@ test("tile state follows pending, playing and paused", () => {
   assert.ok(!isPlaying(null));
 });
 
-test("placeholders get an initial and a stable colour", () => {
-  assert.equal(initial("  über uns"), "Ü");
-  assert.equal(initial("3 Fragezeichen"), "3");
-  assert.equal(initial(""), "♪");
+test("placeholders get a stable picture and colour", () => {
+  assert.equal(placeholderPicture("t1"), placeholderPicture("t1"));
+  assert.match(placeholderPicture("t2"), /^[a-z_]+$/);
   assert.equal(placeholderColour("t1"), placeholderColour("t1"));
   assert.match(placeholderColour("t2"), /^#[0-9a-f]{6}$/);
 });
@@ -146,4 +149,25 @@ test("anti disco: the tap groups wait, the loaded tile can always be resumed", (
   assert.equal(tileTappable("tb", state, cooldowns, 1000), false);
   assert.equal(tileTappable("tb", state, cooldowns, 6000), true);
   assert.equal(tileTappable("tb", null, {}, 0), true);
+});
+
+test("pages of six tiles, and the page of a tile", () => {
+  const tiles = Array.from({ length: 8 }, (_, i) => ({ id: `t${i}` }));
+  const pages = paginate(tiles);
+  assert.deepEqual(pages.map((page) => page.length), [6, 2]);
+  assert.equal(pageOf(pages, "t7"), 1);
+  assert.equal(pageOf(pages, "t0"), 0);
+  assert.equal(pageOf(pages, "nope"), -1);
+  assert.deepEqual(paginate([]), []);
+});
+
+test("track time: counts on while playing, stops at the end", () => {
+  assert.equal(formatTime(0), "0:00");
+  assert.equal(formatTime(750), "12:30");
+  assert.equal(formatTime(3725), "1:02:05");
+  const track = { seconds: 100, duration: 120, playing: true };
+  assert.equal(trackSeconds(track, 1000, 6000), 105);
+  assert.equal(trackSeconds(track, 1000, 60000), 120);
+  assert.equal(trackSeconds({ ...track, playing: false }, 1000, 6000), 100);
+  assert.equal(trackSeconds(null, 0, 0), 0);
 });

@@ -15,9 +15,9 @@ bp = Blueprint("pages", __name__)
 THEME_COLOUR = "#1d3557"
 
 
-def _page(template: str):
+def _page(template: str, **context):
     response = current_app.make_response(
-        render_template(template, lang=DEFAULT_LANG, messages=CATALOGUES[DEFAULT_LANG])
+        render_template(template, lang=DEFAULT_LANG, messages=CATALOGUES[DEFAULT_LANG], **context)
     )
     response.headers["Cache-Control"] = "no-cache"
     return response
@@ -25,7 +25,9 @@ def _page(template: str):
 
 @bp.get("/")
 def kids():
-    return _page("kids.html")
+    # The layout is in the page itself, so the tablet never flashes the other one.
+    controls = current_app.extensions["muckebox"].store.current().controls
+    return _page("kids.html", profile=controls.profile, skip_buttons=controls.skip_buttons)
 
 
 @bp.get("/admin")

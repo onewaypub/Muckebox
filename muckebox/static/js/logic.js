@@ -120,16 +120,60 @@ export function tileTappable(tileId, state, cooldowns, now) {
   return loaded || !isCooling(cooldowns, "tile", now);
 }
 
-/** First letter of a title, for tiles without a cover. */
-export function initial(title) {
-  const match = String(title || "").trim().match(/\p{L}|\p{N}/u);
-  return match ? match[0].toLocaleUpperCase() : "♪";
+/** Tiles per page of the "small" layout: 3 x 2 (or 2 x 3 upright). */
+export const PAGE_SIZE = 6;
+
+/** Split the tiles into pages of ``size``. */
+export function paginate(items, size = PAGE_SIZE) {
+  const pages = [];
+  for (let start = 0; start < items.length; start += size) pages.push(items.slice(start, start + size));
+  return pages;
+}
+
+/** The page a tile is on, or -1. */
+export function pageOf(pages, tileId) {
+  return pages.findIndex((page) => page.some((tile) => tile.id === tileId));
+}
+
+/** Pictures for tiles without a cover: kids tell animals apart, not letters. */
+export const PICTURES = [
+  "lion", "elephant", "rabbit", "bear", "cat", "dog", "bird", "frog", "horse",
+  "penguin", "turtle", "butterfly", "sheep", "mouse", "rooster", "donkey",
+];
+
+function hash(text, seed) {
+  let value = seed;
+  for (const char of String(text)) value = (value * 31 + char.codePointAt(0)) >>> 0;
+  return value;
+}
+
+/** A stable picture for a tile without a cover (independent of its colour). */
+export function placeholderPicture(id) {
+  return PICTURES[hash(id, 7) % PICTURES.length];
+}
+
+/** "m:ss", or "h:mm:ss" from one hour on. */
+export function formatTime(seconds) {
+  const total = Math.max(0, Math.floor(seconds || 0));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = String(total % 60).padStart(2, "0");
+  return h ? `${h}:${String(m).padStart(2, "0")}:${s}` : `${m}:${s}`;
+}
+
+/**
+ * Seconds into the track now: the server's reading plus the time since the
+ * tablet received it, while it plays (never beyond the track's end).
+ */
+export function trackSeconds(track, receivedMs, nowMs) {
+  if (!track) return 0;
+  const running = track.playing ? Math.max(0, (nowMs - receivedMs) / 1000) : 0;
+  const seconds = track.seconds + running;
+  return track.duration ? Math.min(track.duration, seconds) : seconds;
 }
 
 /** A stable, friendly colour for a tile without a cover. */
 export function placeholderColour(id) {
-  const colours = ["#e76f51", "#2a9d8f", "#e9c46a", "#f4a261", "#8ab17d", "#9b5de5", "#00bbf9"];
-  let hash = 0;
-  for (const char of String(id)) hash = (hash * 31 + char.codePointAt(0)) >>> 0;
-  return colours[hash % colours.length];
+  const colours = ["#e76f51", "#2a9d8f", "#e9c46a", "#f4a261", "#457b9d", "#a8dadc", "#f1c6b0"];
+  return colours[hash(id, 0) % colours.length];
 }

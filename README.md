@@ -20,10 +20,13 @@ that need little screen.
 
 ## Features
 
-- **Kids view:** large cover tiles; tapping one starts it; the playing tile
-  is highlighted. Play/pause, previous/next, louder/quieter with a volume bar
-  (a full bar means the maximum volume). A picture instead of text when the
-  speaker or the server cannot be reached; the UI never hangs.
+- **Kids view in two layouts:** *Klein* (0–6 years) shows six big tiles per
+  page (swipe or tap the arrows to turn the page), only quieter, louder and
+  play/pause, and the volume as growing dots that end at the limit. *Groß*
+  (7–14 years) shows titles under the tiles and, on the left, what is
+  playing with its chapter and progress. Tiles without a cover show an
+  animal picture. A picture instead of text when the speaker or the server
+  cannot be reached; the UI never hangs.
 - **Content from your Sonos favorites:** anything saved as a favorite in the
   Sonos app can become a tile: Apple Music, Spotify and other services,
   radio stations, audiobooks, podcasts and your own music library on a NAS.
@@ -210,8 +213,14 @@ limit also applies when Muckebox is not running.
 
 ### Parents' page (`/admin`)
 
-- **Status:** connection, room, volume limit, corrections of the volume
-  guard, the Muckebox's clock and anything that needs your attention.
+The page has a navigation on the left (a row of buttons on phones) and shows
+one part at a time.
+
+- **Übersicht:** whether everything works, today's usage time as a bar with
+  the current time, buttons to allow more time, the volume limit, today's
+  game minutes, the sleep timer, what the kids see, and the status
+  (connection, room, corrections of the volume guard, the Muckebox's clock
+  and anything that needs your attention).
 - **Einrichtung:** shows the chosen room and finds the others; choosing one
   tests the connection first and applies the volume limit to it at once.
 - **Kacheln** and **Sonos-Favoriten:** the favorites list shows every
@@ -223,13 +232,13 @@ limit also applies when Muckebox is not running.
   renamed, moved and removed, and you can upload your own picture (JPEG or
   PNG, up to 10 MB). For album tiles, *Weiterhören* shows where the album
   stopped; *Von vorn* starts it from the beginning next time.
-- **Lautstärke:** the limit (1–100) and the step of the louder/quieter
-  buttons.
-- **Bedienung:** how many seconds the other tiles wait after a tile starts
-  (0–30, 0 = off), and after how many minutes without a tap on the tablet a
-  playing tile fades and pauses (0–240, 0 = off). Only tiles are paused, never
-  music started from the Sonos app, and paused time does not count. The
-  status shows when this last happened.
+- **Lautstärke & Bedienung:** the limit (1–100) with a preview of the
+  tablet, the step of the louder/quieter buttons, how many seconds the other
+  tiles wait after a tile starts (0–30, 0 = off), and after how many minutes
+  without a tap on the tablet a playing tile fades and pauses (0–240,
+  0 = off; only tiles are paused, never music started from the Sonos app,
+  and paused time does not count). Here you also choose the layout of the
+  kids view, *Klein* or *Groß*, and whether *Klein* shows previous/next.
 - **Nutzungszeiten:** switch them on and set one window per weekday (or
   "ganzer Tag frei"), and how many minutes before the end the music fades.
   The status line says what applies right now. *+15/+30/+60 Min.* and *Bis
@@ -238,12 +247,19 @@ limit also applies when Muckebox is not running.
   until when the tiles rest on days without a usage window.
 - **Spiele:** enable each game and pick its level (small 2–3, middle 4–5,
   big 6+ years), the minutes per day for all games together, and the tile
-  that plays the freeze-dance music. *Quellen der Klänge und Bilder* lists
-  where the sounds and pictures come from.
+  that plays the freeze-dance music. *Quellen der Klänge, Bilder und
+  Schriften* lists where the sounds, pictures and fonts come from.
 - **PIN ändern:** all other devices are logged out afterwards.
 
 ### Kids view (`/`)
 
+- **Klein:** six tiles per page; swipe or tap the arrows on the sides, the
+  dots below show the page. When a tile starts, the page turns to it. The
+  playing tile grows, gets a yellow ring and a little equalizer below.
+- **Groß:** all tiles with their titles in a grid that scrolls; the panel on
+  the left shows the cover and title of what is playing, the chapter
+  ("Titel 4 von 9") and how far it got, with previous, play/pause and next,
+  and the volume as a wide bar. Albums show how far they got on their tile.
 - Tapping a tile starts it; tapping the playing tile again does nothing,
   tapping it while paused continues. Albums continue where they stopped
   (*Weiterhören*); audiobooks and podcast episodes do so on their own.

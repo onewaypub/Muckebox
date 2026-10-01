@@ -65,7 +65,7 @@ To delete everything, stop the container and delete the data folder.
 
 | Connection | When | What is sent |
 |---|---|---|
-| Tablet/phone → Muckebox | While the pages are open | Taps and page requests, within your home network. The pages load nothing from third parties: no web fonts, no CDNs, no trackers. The games' sounds and pictures are part of Muckebox and come from it too. |
+| Tablet/phone → Muckebox | While the pages are open | Taps and page requests, within your home network. The pages load nothing from third parties: no web fonts from the internet, no CDNs, no trackers. The fonts, the games' sounds and the pictures are part of Muckebox and come from it too. |
 | The tablet's own text-to-speech | While a game speaks | The games' short sentences ("Richtig, die Kuh!") are spoken by the tablet's system voice. On iPads this runs on the device. Some Android voices may use an online service of the voice's provider, depending on the tablet's settings. No microphone and no camera are used. |
 | Muckebox → Sonos speakers | Continuously while running | Control commands and status queries within your home network. |
 | Sonos speakers → music services | When music plays | Sonos itself streams from the services you linked in the Sonos app, under their terms. Muckebox only tells the speaker what to play. |

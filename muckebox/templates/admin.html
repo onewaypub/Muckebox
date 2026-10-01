@@ -8,206 +8,395 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="robots" content="noindex">
-  <meta name="theme-color" content="#1d3557">
+  <meta name="theme-color" content="#f4f1ec">
   <title>Muckebox</title>
   <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
+  <link rel="stylesheet" href="/static/css/fonts.css?v={{ asset_version }}">
   <link rel="stylesheet" href="/static/css/admin.css?v={{ asset_version }}">
   <script type="module" src="/static/js/admin.js?v={{ asset_version }}"></script>
 </head>
 <body class="admin">
   <script id="i18n" type="application/json">{{ messages|tojson }}</script>
-  <header>
-    <h1 data-i18n="admin.title"></h1>
-    <nav>
-      <a href="/" data-i18n="admin.kids_view"></a>
+
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="#overview">
+        <span class="brand-mark"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3z"/></svg></span>
+        <span class="brand-name">Muckebox</span>
+        <span class="brand-sub" data-i18n="admin.parents"></span>
+      </a>
+      <span class="spacer"></span>
+      <span id="room-pill" class="room-pill" hidden><i id="room-dot" class="dot"></i><span id="room-name"></span></span>
+      <a class="kids-link" href="/"><span data-i18n="admin.kids_view"></span>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3zm5 16H5V5h7V3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7h-2z"/></svg>
+      </a>
       <button id="logout" type="button" class="link" data-i18n="admin.logout" hidden></button>
-    </nav>
+    </div>
   </header>
 
-  <div id="flash" class="flash" role="status" hidden></div>
+  <div id="flash" class="flash" role="status" hidden>
+    <span class="flash-icon" aria-hidden="true"></span><span id="flash-text"></span>
+  </div>
 
   <form id="login" class="card login" hidden>
+    <span class="brand-mark big"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3z"/></svg></span>
+    <h1 data-i18n="admin.title"></h1>
     <label for="pin" data-i18n="admin.pin"></label>
     <input id="pin" name="pin" type="password" autocomplete="current-password" required>
-    <button type="submit" data-i18n="admin.login"></button>
+    <button type="submit" class="primary" data-i18n="admin.login"></button>
     <p class="hint"><span data-i18n="admin.login_hint"></span>
       <code class="command">python -m muckebox.admin reset-pin</code></p>
   </form>
 
-  <main id="app" hidden>
-    <p id="pin-banner" class="card banner" hidden>
-      <span data-i18n="admin.pin_banner"></span>
-      <a href="#pin-section" data-i18n="admin.pin_banner_link"></a>
-    </p>
+  <div id="app" class="layout" hidden>
+    <nav id="nav" class="nav" aria-label="">
+      <a href="#overview" data-page="overview"><i></i><span data-i18n="admin.nav_overview"></span><b></b></a>
+      <a href="#tiles" data-page="tiles"><i></i><span data-i18n="admin.tiles"></span><b id="nav-tiles"></b></a>
+      <a href="#add" data-page="add"><i></i><span data-i18n="admin.nav_add"></span><b></b></a>
+      <a href="#schedule" data-page="schedule"><i></i><span data-i18n="admin.schedule"></span><b></b></a>
+      <a href="#sleep" data-page="sleep"><i></i><span data-i18n="admin.sleep_timer"></span><b></b></a>
+      <a href="#volume" data-page="volume"><i></i><span data-i18n="admin.nav_volume"></span><b></b></a>
+      <a href="#games" data-page="games"><i></i><span data-i18n="admin.games"></span><b id="nav-games"></b></a>
+      <a href="#setup" data-page="setup"><i></i><span data-i18n="admin.setup"></span><b></b></a>
+      <a href="#pin" data-page="pin" id="nav-pin"><i></i><span data-i18n="admin.pin_change"></span><b></b></a>
+    </nav>
 
-    <section class="card">
-      <h2 data-i18n="admin.status"></h2>
-      <dl id="status" class="status"></dl>
-      <ul id="problems" class="problems"></ul>
-      <p id="zone-hint" class="zone-hint" hidden>
-        <span id="zone-text"></span>
-        <button id="zone-adopt" type="button" class="secondary"></button>
-      </p>
-    </section>
+    <main class="pages">
+      <div id="pin-banner" class="banner" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1 3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5zm1 16h-2v-2h2zm0-4h-2V7h2z"/></svg>
+        <p data-i18n="admin.pin_banner"></p>
+        <a href="#pin" class="banner-button" data-i18n="admin.pin_banner_link"></a>
+      </div>
 
-    <section id="setup" class="card">
-      <h2 data-i18n="admin.setup"></h2>
-      <p id="room-current"></p>
-      <form id="room-search" class="room-search">
-        <label for="seed-ip" data-i18n="admin.seed_ip"></label>
-        <p class="hint" data-i18n="admin.seed_ip_hint"></p>
-        <div class="inline">
-          <input id="seed-ip" name="seed_ip" inputmode="url" autocapitalize="off" autocomplete="off" spellcheck="false" data-i18n-placeholder="admin.seed_ip_placeholder">
-          <button type="submit" class="secondary" data-i18n="admin.search_rooms"></button>
+      <!-- Übersicht ------------------------------------------------------------>
+      <section id="page-overview" class="page" data-page="overview">
+        <h1 id="greeting" class="page-title"></h1>
+
+        <section id="today" class="today">
+          <div class="today-head">
+            <div>
+              <p class="eyebrow" data-i18n="admin.today"></p>
+              <p id="schedule-status" class="today-phase"></p>
+              <p id="today-note" class="today-note"></p>
+            </div>
+            <p id="today-clock" class="today-clock"></p>
+          </div>
+          <div id="today-bar" class="day-bar dark">
+            <i class="window"></i><i class="now"></i>
+            <span class="ticks"><span>0</span><span>6</span><span>12</span><span>18</span><span data-i18n="admin.hours_24"></span></span>
+          </div>
+          <div id="override-buttons" class="override-buttons">
+            <span class="override-label" data-i18n="admin.override_label"></span>
+            <button type="button" class="chip" data-override="15" data-i18n="admin.override_15"></button>
+            <button type="button" class="chip" data-override="30" data-i18n="admin.override_30"></button>
+            <button type="button" class="chip" data-override="60" data-i18n="admin.override_60"></button>
+            <button type="button" class="chip" data-override="morning" data-i18n="admin.override_morning"></button>
+            <button id="override-end" type="button" class="chip accent" data-i18n="admin.override_end" hidden></button>
+          </div>
+        </section>
+
+        <div class="stats">
+          <a class="stat" href="#volume">
+            <span class="stat-label" data-i18n="admin.max_volume"></span>
+            <span class="stat-value"><b id="stat-volume"></b><small data-i18n="admin.of_100"></small></span>
+            <span id="stat-corrections" class="stat-note"></span>
+          </a>
+          <a class="stat" href="#games">
+            <span class="stat-label" data-i18n="admin.games_today"></span>
+            <span class="stat-value"><b id="stat-games"></b><small id="stat-games-limit"></small></span>
+            <span class="meter"><i id="stat-games-bar"></i></span>
+          </a>
+          <a class="stat" href="#sleep">
+            <span class="stat-label" data-i18n="admin.sleep_timer"></span>
+            <span class="stat-value"><b id="stat-sleep"></b><small data-i18n="admin.minutes_after_moon"></small></span>
+            <span id="stat-sleep-note" class="stat-note"></span>
+          </a>
         </div>
-      </form>
-      <ul id="rooms" class="rooms" aria-live="polite"></ul>
-      <p class="hint" data-i18n="admin.room_hint"></p>
-    </section>
 
-    <section class="card">
-      <h2 data-i18n="admin.tiles"></h2>
-      <p id="tiles-empty" class="hint" data-i18n="admin.tiles_empty" hidden></p>
-      <ol id="tiles" class="tiles"></ol>
-    </section>
+        <section class="card">
+          <div class="card-head">
+            <h2 data-i18n="admin.kids_see"></h2>
+            <a href="#tiles" class="link" data-i18n="admin.edit_tiles"></a>
+          </div>
+          <div id="preview" class="preview"></div>
+          <p id="preview-empty" class="hint" data-i18n="admin.tiles_empty" hidden></p>
+        </section>
 
-    <section id="favorites-section" class="card">
-      <div class="section-head">
-        <h2 data-i18n="admin.favorites"></h2>
-        <button id="refresh" type="button" class="secondary" data-i18n="admin.refresh"></button>
-      </div>
-      <p class="hint" data-i18n="admin.favorites_hint"></p>
-      <p id="favorites-no-room" class="hint" data-i18n="admin.favorites_no_room" hidden></p>
-      <ul id="favorites" class="favorites"></ul>
-    </section>
+        <section class="card">
+          <h2 data-i18n="admin.status"></h2>
+          <dl id="status" class="status"></dl>
+          <ul id="problems" class="problems"></ul>
+        </section>
+      </section>
 
-    <section class="card">
-      <h2 data-i18n="admin.link"></h2>
-      <p class="hint" data-i18n="admin.link_hint"></p>
-      <form id="link" class="link-form">
-        <input id="link-url" name="url" type="url" required data-i18n-placeholder="admin.link_placeholder">
-        <button type="submit" data-i18n="admin.add"></button>
-      </form>
-    </section>
+      <!-- Kacheln ----------------------------------------------------------------->
+      <section id="page-tiles" class="page" data-page="tiles" hidden>
+        <div class="page-head">
+          <div>
+            <h1 class="page-title" data-i18n="admin.tiles"></h1>
+            <p class="lead" data-i18n="admin.tiles_lead"></p>
+          </div>
+          <a href="#add" class="button primary" data-i18n="admin.add_tile"></a>
+        </div>
+        <p id="tiles-empty" class="card hint" data-i18n="admin.tiles_empty" hidden></p>
+        <ol id="tiles" class="tile-list"></ol>
+      </section>
 
-    <section class="card">
-      <h2 data-i18n="admin.volume"></h2>
-      <form id="volume" class="fields">
-        <label for="max-volume" data-i18n="admin.max_volume"></label>
-        <input id="max-volume" name="max_volume" type="number" min="1" max="100" step="1" inputmode="numeric" required>
-        <label for="volume-step" data-i18n="admin.volume_step"></label>
-        <input id="volume-step" name="volume_step" type="number" min="1" max="100" step="1" inputmode="numeric" required>
-        <p class="hint" data-i18n="admin.volume_hint"></p>
-        <button type="submit" data-i18n="admin.save"></button>
-      </form>
-    </section>
+      <!-- Musik hinzufügen ---------------------------------------------------------->
+      <section id="page-add" class="page" data-page="add" hidden>
+        <h1 class="page-title" data-i18n="admin.nav_add"></h1>
+        <section class="card dark">
+          <h2 data-i18n="admin.link"></h2>
+          <p class="hint" data-i18n="admin.link_hint"></p>
+          <form id="link" class="inline">
+            <input id="link-url" name="url" type="url" required data-i18n-placeholder="admin.link_placeholder">
+            <button type="submit" class="accent" data-i18n="admin.add"></button>
+          </form>
+        </section>
+        <section id="favorites-section" class="card">
+          <div class="card-head">
+            <div>
+              <h2 data-i18n="admin.favorites"></h2>
+              <p class="hint" data-i18n="admin.favorites_hint"></p>
+            </div>
+            <button id="refresh" type="button" class="secondary" data-i18n="admin.refresh"></button>
+          </div>
+          <p id="favorites-no-room" class="hint" data-i18n="admin.favorites_no_room" hidden></p>
+          <ul id="favorites" class="rows"></ul>
+        </section>
+      </section>
 
-    <section class="card">
-      <h2 data-i18n="admin.controls"></h2>
-      <form id="controls" class="fields">
-        <label for="tap-cooldown" data-i18n="admin.tap_cooldown"></label>
-        <input id="tap-cooldown" name="tap_cooldown" type="number" min="0" max="30" step="1" inputmode="numeric" required>
-        <label for="idle-minutes" data-i18n="admin.idle_minutes"></label>
-        <input id="idle-minutes" name="idle_minutes" type="number" min="0" max="240" step="5" inputmode="numeric" required>
-        <p class="hint" data-i18n="admin.controls_hint"></p>
-        <button type="submit" data-i18n="admin.save"></button>
-      </form>
-    </section>
+      <!-- Nutzungszeiten ---------------------------------------------------------------->
+      <section id="page-schedule" class="page" data-page="schedule" hidden>
+        <form id="schedule" class="stack">
+          <div class="page-head">
+            <h1 class="page-title" data-i18n="admin.schedule"></h1>
+            <label class="switch-label"><span data-i18n="admin.enabled"></span>
+              <input id="schedule-enabled" class="switch" type="checkbox" data-i18n-label="admin.schedule_enabled"></label>
+          </div>
+          <section class="card days-card">
+            <div id="days" class="days"></div>
+            <div class="days-foot">
+              <button id="copy-monday" type="button" class="link" data-i18n="admin.copy_monday"></button>
+              <label class="stepper-label"><span data-i18n="admin.fade_minutes"></span>
+                <span class="stepper" data-step="1">
+                  <button type="button" class="dec" aria-hidden="true" tabindex="-1">−</button>
+                  <input id="fade-minutes" type="number" min="0" max="30" step="1" inputmode="numeric" required>
+                  <button type="button" class="inc" aria-hidden="true" tabindex="-1">+</button>
+                </span>
+              </label>
+            </div>
+          </section>
+          <p class="hint" data-i18n="admin.schedule_hint"></p>
+          <div><button type="submit" class="primary" data-i18n="admin.save"></button></div>
+        </form>
+      </section>
 
-    <section id="schedule-section" class="card">
-      <h2 data-i18n="admin.schedule"></h2>
-      <p id="schedule-status" class="schedule-status"></p>
-      <div id="override-buttons" class="override-buttons">
-        <button type="button" class="secondary" data-override="15" data-i18n="admin.override_15"></button>
-        <button type="button" class="secondary" data-override="30" data-i18n="admin.override_30"></button>
-        <button type="button" class="secondary" data-override="60" data-i18n="admin.override_60"></button>
-        <button type="button" class="secondary" data-override="morning" data-i18n="admin.override_morning"></button>
-        <button id="override-end" type="button" class="secondary" data-i18n="admin.override_end" hidden></button>
-      </div>
-      <form id="schedule" class="fields schedule-form">
-        <label class="check"><input id="schedule-enabled" type="checkbox"> <span data-i18n="admin.schedule_enabled"></span></label>
-        <div id="days" class="days"></div>
-        <button id="copy-monday" type="button" class="link" data-i18n="admin.copy_monday"></button>
-        <label for="fade-minutes" data-i18n="admin.fade_minutes"></label>
-        <input id="fade-minutes" type="number" min="0" max="30" step="1" inputmode="numeric" required>
-        <p class="hint" data-i18n="admin.schedule_hint"></p>
-        <button type="submit" data-i18n="admin.save"></button>
-      </form>
-    </section>
+      <!-- Einschlaf-Timer ------------------------------------------------------------------>
+      <section id="page-sleep" class="page" data-page="sleep" hidden>
+        <form id="sleep-timer" class="stack">
+          <h1 class="page-title" data-i18n="admin.sleep_timer"></h1>
+          <section class="card night">
+            <span class="moon-badge"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.34 2.02C6.59 1.82 2 6.42 2 12c0 5.52 4.48 10 10 10 3.71 0 6.93-2.02 8.66-5.02-7.51-.25-12.09-8.43-8.32-14.96"/></svg></span>
+            <div class="grow">
+              <h2 data-i18n="admin.sleep_enabled"></h2>
+              <p data-i18n="admin.sleep_hint"></p>
+            </div>
+            <input id="sleep-enabled" class="switch" type="checkbox" data-i18n-label="admin.sleep_enabled">
+          </section>
+          <p id="sleep-status" class="card status-line" hidden>
+            <span id="sleep-status-text"></span>
+            <button id="sleep-cancel" type="button" class="secondary" data-i18n="admin.sleep_cancel" hidden></button>
+          </p>
+          <section class="card stack">
+            <fieldset class="choices">
+              <legend data-i18n="admin.sleep_duration"></legend>
+              <div id="sleep-choices" class="chips"></div>
+              <input id="sleep-minutes" type="hidden">
+            </fieldset>
+            <label class="field narrow"><span data-i18n="admin.sleep_wake_label"></span>
+              <small data-i18n="admin.sleep_wake_hint"></small>
+              <input id="sleep-wake" type="time" step="300" required></label>
+            <div><button type="submit" class="primary" data-i18n="admin.save"></button></div>
+          </section>
+        </form>
+      </section>
 
-    <section id="sleep-section" class="card">
-      <h2 data-i18n="admin.sleep_timer"></h2>
-      <p id="sleep-status" class="schedule-status" hidden></p>
-      <button id="sleep-cancel" type="button" class="secondary" data-i18n="admin.sleep_cancel" hidden></button>
-      <form id="sleep-timer" class="fields">
-        <label class="check"><input id="sleep-enabled" type="checkbox"> <span data-i18n="admin.sleep_enabled"></span></label>
-        <label for="sleep-minutes" data-i18n="admin.sleep_minutes"></label>
-        <input id="sleep-minutes" type="number" min="5" max="90" step="5" inputmode="numeric" required>
-        <label for="sleep-wake" data-i18n="admin.sleep_wake"></label>
-        <input id="sleep-wake" type="time" step="300" required>
-        <p class="hint" data-i18n="admin.sleep_hint"></p>
-        <button type="submit" data-i18n="admin.save"></button>
-      </form>
-    </section>
+      <!-- Lautstärke & Bedienung ---------------------------------------------------------------->
+      <section id="page-volume" class="page" data-page="volume" hidden>
+        <form id="volume" class="stack">
+          <h1 class="page-title" data-i18n="admin.nav_volume"></h1>
+          <section class="card volume-card">
+            <div class="grow stack">
+              <div class="volume-head">
+                <label for="max-volume" data-i18n="admin.max_volume"></label>
+                <output id="max-volume-value" for="max-volume" class="big-number"></output>
+              </div>
+              <input id="max-volume" name="max_volume" type="range" min="1" max="100" step="1" required>
+              <p class="hint" data-i18n="admin.volume_hint"></p>
+            </div>
+            <div class="tablet-preview">
+              <span class="eyebrow" data-i18n="admin.tablet_preview"></span>
+              <span id="preview-dots" class="preview-dots"></span>
+              <span id="preview-taps" class="preview-taps"></span>
+            </div>
+          </section>
 
-    <section id="games-section" class="card">
-      <h2 data-i18n="admin.games"></h2>
-      <p id="games-status" class="schedule-status"></p>
-      <form id="games" class="fields games-form">
-        <div id="game-rows" class="game-rows"></div>
-        <label for="games-minutes" data-i18n="admin.games_minutes"></label>
-        <input id="games-minutes" type="number" min="5" max="60" step="5" inputmode="numeric" required>
-        <label for="dance-tile" data-i18n="admin.dance_tile"></label>
-        <select id="dance-tile"></select>
-        <p class="hint" data-i18n="admin.games_hint"></p>
-        <button type="submit" data-i18n="admin.save"></button>
-      </form>
-      <details id="credits" class="credits">
-        <summary data-i18n="admin.credits"></summary>
-        <ul id="credits-list"></ul>
-      </details>
-    </section>
+          <section class="card rows-card">
+            <div class="setting">
+              <div class="grow"><label for="volume-step" data-i18n="admin.volume_step"></label>
+                <p class="hint" data-i18n="admin.volume_step_hint"></p></div>
+              <span class="stepper" data-step="1">
+                <button type="button" class="dec" aria-hidden="true" tabindex="-1">−</button>
+                <input id="volume-step" name="volume_step" type="number" min="1" max="100" step="1" inputmode="numeric" required>
+                <button type="button" class="inc" aria-hidden="true" tabindex="-1">+</button>
+              </span>
+            </div>
+            <div class="setting">
+              <div class="grow"><label for="tap-cooldown" data-i18n="admin.tap_cooldown"></label>
+                <p class="hint" data-i18n="admin.tap_cooldown_hint"></p></div>
+              <span class="stepper" data-step="1">
+                <button type="button" class="dec" aria-hidden="true" tabindex="-1">−</button>
+                <input id="tap-cooldown" name="tap_cooldown" type="number" min="0" max="30" step="1" inputmode="numeric" required>
+                <button type="button" class="inc" aria-hidden="true" tabindex="-1">+</button>
+              </span>
+            </div>
+            <div class="setting">
+              <div class="grow"><label for="idle-minutes" data-i18n="admin.idle_minutes"></label>
+                <p class="hint" data-i18n="admin.idle_hint"></p></div>
+              <span class="stepper" data-step="15">
+                <button type="button" class="dec" aria-hidden="true" tabindex="-1">−</button>
+                <input id="idle-minutes" name="idle_minutes" type="number" min="0" max="240" step="1" inputmode="numeric" required>
+                <button type="button" class="inc" aria-hidden="true" tabindex="-1">+</button>
+              </span>
+            </div>
+          </section>
 
-    <section id="pin-section" class="card">
-      <h2 data-i18n="admin.pin_change"></h2>
-      <form id="pin-form" class="fields">
-        <label for="pin-current" data-i18n="admin.pin_current"></label>
-        <input id="pin-current" type="password" autocomplete="current-password" required>
-        <label for="pin-new" data-i18n="admin.pin_new"></label>
-        <input id="pin-new" type="password" autocomplete="new-password" minlength="4" maxlength="64" required>
-        <label for="pin-repeat" data-i18n="admin.pin_repeat"></label>
-        <input id="pin-repeat" type="password" autocomplete="new-password" minlength="4" maxlength="64" required>
-        <p class="hint" data-i18n="admin.pin_hint"></p>
-        <button type="submit" data-i18n="admin.save"></button>
-      </form>
-    </section>
-  </main>
+          <section class="card stack">
+            <h2 data-i18n="admin.kids_layout"></h2>
+            <div class="profiles">
+              <label class="profile">
+                <input type="radio" name="profile" value="small">
+                <span class="profile-art small"><i></i><i></i><i></i><i></i><i></i><i></i></span>
+                <strong data-i18n="admin.profile_small"></strong>
+                <small data-i18n="admin.profile_small_hint"></small>
+              </label>
+              <label class="profile">
+                <input type="radio" name="profile" value="big">
+                <span class="profile-art big"><b></b><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+                <strong data-i18n="admin.profile_big"></strong>
+                <small data-i18n="admin.profile_big_hint"></small>
+              </label>
+            </div>
+            <label class="switch-label wide"><span data-i18n="admin.skip_buttons"></span>
+              <input id="skip-buttons" class="switch" type="checkbox" data-i18n-label="admin.skip_buttons"></label>
+          </section>
+          <div><button type="submit" class="primary" data-i18n="admin.save"></button></div>
+        </form>
+      </section>
 
-  <footer>
-    <span id="version"></span>
-    <a id="source" href="https://github.com/onewaypub/Muckebox" rel="noopener" data-i18n="admin.source"></a>
-  </footer>
+      <!-- Spiele ------------------------------------------------------------------------------>
+      <section id="page-games" class="page" data-page="games" hidden>
+        <form id="games" class="stack">
+          <div class="page-head">
+            <div>
+              <h1 class="page-title" data-i18n="admin.games"></h1>
+              <p class="lead" data-i18n="admin.games_lead"></p>
+            </div>
+            <label class="stepper-label"><span data-i18n="admin.games_per_day"></span>
+              <span class="stepper" data-step="5">
+                <button type="button" class="dec" aria-hidden="true" tabindex="-1">−</button>
+                <input id="games-minutes" type="number" min="5" max="60" step="5" inputmode="numeric" required>
+                <button type="button" class="inc" aria-hidden="true" tabindex="-1">+</button>
+              </span>
+            </label>
+          </div>
+          <p id="games-status" class="hint"></p>
+          <div id="game-rows" class="game-grid"></div>
+          <label class="card setting">
+            <span class="grow strong" data-i18n="admin.dance_tile"></span>
+            <select id="dance-tile"></select>
+          </label>
+          <p class="hint" data-i18n="admin.games_hint"></p>
+          <div><button type="submit" class="primary" data-i18n="admin.save"></button></div>
+        </form>
+        <details id="credits" class="card credits">
+          <summary data-i18n="admin.credits"></summary>
+          <ul id="credits-list"></ul>
+        </details>
+      </section>
+
+      <!-- Einrichtung --------------------------------------------------------------------------->
+      <section id="page-setup" class="page" data-page="setup" hidden>
+        <h1 class="page-title" data-i18n="admin.setup"></h1>
+        <section id="setup" class="card">
+          <p class="eyebrow dark" data-i18n="admin.room_controlled"></p>
+          <p id="room-current" class="strong"></p>
+          <ul id="rooms" class="rows" aria-live="polite"></ul>
+          <p class="hint" data-i18n="admin.room_hint"></p>
+        </section>
+        <section class="card">
+          <form id="room-search" class="stack">
+            <label for="seed-ip" class="strong" data-i18n="admin.seed_ip"></label>
+            <p class="hint" data-i18n="admin.seed_ip_hint"></p>
+            <div class="inline">
+              <input id="seed-ip" name="seed_ip" inputmode="url" autocapitalize="off" autocomplete="off" spellcheck="false" data-i18n-placeholder="admin.seed_ip_placeholder">
+              <button type="submit" class="secondary" data-i18n="admin.search_rooms"></button>
+            </div>
+          </form>
+        </section>
+        <section class="card zone">
+          <span id="zone-text" class="grow"></span>
+          <span id="zone-ok" class="ok" data-i18n="admin.zone_ok" hidden></span>
+          <button id="zone-adopt" type="button" class="secondary" hidden></button>
+        </section>
+      </section>
+
+      <!-- PIN ---------------------------------------------------------------------------------------->
+      <section id="page-pin" class="page" data-page="pin" hidden>
+        <h1 class="page-title" data-i18n="admin.pin_change"></h1>
+        <form id="pin-form" class="card stack narrow-card">
+          <label class="field"><span data-i18n="admin.pin_current"></span>
+            <input id="pin-current" type="password" autocomplete="current-password" required></label>
+          <label class="field"><span data-i18n="admin.pin_new"></span>
+            <input id="pin-new" type="password" autocomplete="new-password" minlength="4" maxlength="64" required></label>
+          <label class="field"><span data-i18n="admin.pin_repeat"></span>
+            <input id="pin-repeat" type="password" autocomplete="new-password" minlength="4" maxlength="64" required></label>
+          <p class="hint" data-i18n="admin.pin_hint"></p>
+          <div><button type="submit" class="primary" data-i18n="admin.pin_save"></button></div>
+        </form>
+      </section>
+
+      <footer class="footer">
+        <span id="version"></span>
+        <a id="source" href="https://github.com/onewaypub/Muckebox" rel="noopener" data-i18n="admin.source"></a>
+      </footer>
+    </main>
+  </div>
 
   <template id="tile-row">
     <li class="tile-row">
-      <img class="thumb" alt="">
-      <form class="rename">
-        <input name="title" maxlength="60" required>
-        <button type="submit" class="secondary" data-i18n="admin.save"></button>
-      </form>
-      <span class="meta"></span>
-      <div class="resume" hidden>
-        <label class="check"><input class="resume-toggle" type="checkbox"> <span data-i18n="admin.resume"></span></label>
-        <span class="resume-position"></span>
-        <button type="button" class="link resume-restart" data-i18n="admin.resume_restart"></button>
+      <span class="number"></span>
+      <span class="thumb"><img class="cover" alt=""><img class="picture" alt=""></span>
+      <div class="tile-main">
+        <form class="rename">
+          <input name="title" maxlength="60" required data-i18n-label="admin.rename">
+        </form>
+        <div class="tile-meta">
+          <span class="meta"></span>
+          <span class="resume" hidden>
+            <label class="pill"><input class="resume-toggle" type="checkbox"><span data-i18n="admin.resume"></span><span class="resume-position"></span></label>
+            <button type="button" class="link resume-restart" data-i18n="admin.resume_restart"></button>
+          </span>
+        </div>
       </div>
       <div class="actions">
-        <button type="button" class="icon up" data-i18n-label="admin.up">▲</button>
-        <button type="button" class="icon down" data-i18n-label="admin.down">▼</button>
-        <label class="upload secondary"><span data-i18n="admin.cover"></span>
+        <button type="button" class="icon up" data-i18n-label="admin.up"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 8-6 6 1.41 1.41L12 10.83l4.59 4.58L18 14z"/></svg></button>
+        <button type="button" class="icon down" data-i18n-label="admin.down"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16.59 8.59 12 13.17 7.41 8.59 6 10l6 6 6-6z"/></svg></button>
+        <label class="upload button secondary"><span data-i18n="admin.cover"></span>
           <input type="file" accept="image/jpeg,image/png" hidden>
         </label>
-        <button type="button" class="danger delete" data-i18n="admin.delete"></button>
+        <button type="button" class="icon danger delete" data-i18n-label="admin.delete"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6zM19 4h-3.5l-1-1h-5l-1 1H5v2h14z"/></svg></button>
       </div>
     </li>
   </template>
@@ -215,27 +404,38 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   <template id="day-row">
     <div class="day-row">
       <span class="day"></span>
-      <input class="from" type="time" step="300" data-i18n-label="admin.from">
-      <span aria-hidden="true">–</span>
-      <input class="to" type="time" step="300" data-i18n-label="admin.to">
-      <label class="check"><input class="free" type="checkbox"> <span data-i18n="admin.day_free"></span></label>
+      <span class="day-bar"><i class="window"></i></span>
+      <span class="day-times">
+        <input class="from" type="time" step="300" data-i18n-label="admin.from">
+        <span aria-hidden="true">–</span>
+        <input class="to" type="time" step="300" data-i18n-label="admin.to">
+        <label class="free-chip"><input class="free" type="checkbox"><span data-i18n="admin.free"></span></label>
+      </span>
     </div>
   </template>
 
   <template id="game-row">
-    <div class="game-row">
-      <label class="check"><input class="game-enabled" type="checkbox"> <span class="game-name"></span></label>
-      <select class="game-level" data-i18n-label="admin.game_level">
-        <option value="1" data-i18n="admin.level_1"></option>
-        <option value="2" data-i18n="admin.level_2"></option>
-        <option value="3" data-i18n="admin.level_3"></option>
-      </select>
-      <p class="hint game-about"></p>
+    <div class="card game-card">
+      <div class="game-head">
+        <span class="game-picture"><img alt=""></span>
+        <div class="grow">
+          <strong class="game-name"></strong>
+          <small class="game-tag"></small>
+        </div>
+        <input class="game-enabled switch" type="checkbox">
+      </div>
+      <p class="game-about"></p>
+      <div class="levels" role="radiogroup">
+        <label><input class="game-level" type="radio" value="1"><span><b data-i18n="admin.level_small"></b><small data-i18n="admin.level_small_age"></small></span></label>
+        <label><input class="game-level" type="radio" value="2"><span><b data-i18n="admin.level_middle"></b><small data-i18n="admin.level_middle_age"></small></span></label>
+        <label><input class="game-level" type="radio" value="3"><span><b data-i18n="admin.level_big"></b><small data-i18n="admin.level_big_age"></small></span></label>
+      </div>
     </div>
   </template>
 
   <template id="room-row">
     <li class="room-row">
+      <span class="room-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2m-5 2a2 2 0 1 1 0 4 2 2 0 0 1 0-4m0 16a5 5 0 1 1 0-10 5 5 0 0 1 0 10"/></svg></span>
       <span class="name"><strong></strong><small></small></span>
       <button type="button" class="choose"></button>
     </li>
