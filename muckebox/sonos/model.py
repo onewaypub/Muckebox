@@ -110,6 +110,8 @@ class Position:
     seconds: int  # within that track
     duration: int | None
     track_uri: str
+    #: Title of the track, if the speaker knows it.
+    title: str | None = None
 
 
 @dataclass(frozen=True)

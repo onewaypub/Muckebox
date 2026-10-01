@@ -58,6 +58,19 @@ class ResumeStore:
             return None
         return StartAt(track=saved.track, seconds=saved.seconds, track_uri=saved.track_uri)
 
+    def progress(self) -> dict[str, float]:
+        """How far each album got (0..1), for the bar on its tile."""
+        with self._lock:
+            positions = dict(self._positions)
+        result = {}
+        for tile_id, saved in positions.items():
+            if not saved.queue_length:
+                continue
+            within = saved.seconds / saved.duration if saved.duration else 0.0
+            done = (saved.track - 1 + min(1.0, within)) / saved.queue_length
+            result[tile_id] = round(max(0.0, min(1.0, done)), 2)
+        return result
+
     def saved(self, tile_id: str) -> Saved | None:
         with self._lock:
             return self._positions.get(tile_id)

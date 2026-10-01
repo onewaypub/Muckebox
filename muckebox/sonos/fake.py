@@ -186,7 +186,13 @@ class FakeSonos:
         self._enter("position")
         if not self.queue or not self.media_uri.startswith("x-rincon-queue:"):
             return None
-        return Position(self.track, self.seconds, self.track_seconds, self.queue[self.track - 1])
+        return Position(
+            self.track,
+            self.seconds,
+            self.track_seconds,
+            self.queue[self.track - 1],
+            title=f"Kapitel {self.track}",
+        )
 
     def transport(self, action: str) -> None:
         self._enter("transport", action)
