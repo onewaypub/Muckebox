@@ -99,6 +99,25 @@ Import rules (enforced by a test): `soco` is imported only inside
 - **No frontend build step.** Pages use native ES modules and modern CSS
   (grid, custom properties) within the supported browser baseline.
 
+## The two kids layouts
+
+The parents choose the layout of the kids view: `small` (0–6 years) or `big`
+(7–14 years). The page is rendered with the chosen one (no flash of the
+other), and `/api/state` carries it in `view`, so a tablet switches without
+a reload. The buttons exist once; `kids.js` moves them into the slots of the
+current layout (the bar for `small`, the "what is playing" panel and the
+header for `big`). `small` pages its tiles six at a time with CSS scroll
+snapping; the tile size comes from container query units, so six tiles
+always fit without scrolling in both orientations. Tiles without a cover show
+an animal picture chosen from the tile's id, on a colour from the same id.
+
+For `big`, the transport lane reads the position about every 10 s while a tile
+with a queue plays (the same read that "Weiterhören" uses) and publishes the
+track's number, title and seconds; the tablet counts the seconds on locally.
+
+The pages use two typefaces shipped in `muckebox/static/fonts/` (Bricolage
+Grotesque and Figtree, SIL OFL 1.1), so no page loads anything from outside.
+
 ## Browser baseline
 
 The kids view and the admin page support **iOS/iPadOS 16.4+ (Safari)** and

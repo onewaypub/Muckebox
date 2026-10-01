@@ -2,6 +2,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
 // Kids view: shows the tiles, polls the state, sends taps to the server.
+//
+// Two layouts, chosen by the parents: "small" (0-6 years: six big tiles per
+// page, three big buttons) and "big" (7-14 years: titles, what is playing
+// with its chapter and progress, a denser grid). The buttons exist once and
+// are moved into the slots of the current layout.
 
 import { ApiError, get, post } from "./api.js";
 import { initBedtime, padIsOpen, renderBedtime } from "./bedtime.js";
@@ -9,7 +14,7 @@ import { gameIsOpen, initGames, renderGames } from "./games.js";
 import { loadMessages, t, translatePage } from "./i18n.js";
 import {
   cooldownGroup,
-  initial,
+  formatTime,
   isBedtime,
   isCooling,
   isPlaying,
@@ -17,76 +22,141 @@ import {
   nextDelay,
   overlayKind,
   overlayTextKey,
+  pageOf,
+  paginate,
   placeholderColour,
+  placeholderPicture,
   tileState,
   tileTappable,
+  trackSeconds,
   volumeSegments,
 } from "./logic.js";
 
 const TOAST_MS = 4000;
-const VOLUME_SEGMENTS = 10;
+const DOTS = 5; // volume of the "small" layout: five growing dots
+const PICTURES = "/static/pictures";
+const $ = (id) => document.getElementById(id);
 
 const view = {
-  tiles: document.getElementById("tiles"),
-  empty: document.getElementById("empty"),
-  template: document.getElementById("tile-template"),
-  toggle: document.getElementById("toggle"),
-  prev: document.getElementById("prev"),
-  next: document.getElementById("next"),
-  louder: document.getElementById("louder"),
-  quieter: document.getElementById("quieter"),
-  volume: document.getElementById("volume"),
-  overlay: document.getElementById("overlay"),
-  overlayText: document.getElementById("overlay-text"),
-  toast: document.getElementById("toast"),
-  toastText: document.getElementById("toast-text"),
+  body: document.body,
+  tiles: $("tiles"),
+  empty: $("empty"),
+  template: $("tile-template"),
+  toggle: $("toggle"),
+  prev: $("prev"),
+  next: $("next"),
+  louder: $("louder"),
+  quieter: $("quieter"),
+  volume: $("volume"),
+  moon: $("small-moon"),
+  games: $("games-button"),
+  pagePrev: $("page-prev"),
+  pageNext: $("page-next"),
+  pageDots: $("page-dots"),
+  now: {
+    cover: $("now-cover"),
+    picture: $("now-picture"),
+    art: $("now-art"),
+    label: $("now-label"),
+    title: $("now-title"),
+    sub: $("now-sub"),
+    progress: $("now-progress"),
+    bar: $("now-bar"),
+    position: $("now-position"),
+    duration: $("now-duration"),
+  },
+  overlay: $("overlay"),
+  overlayText: $("overlay-text"),
+  toast: $("toast"),
+  toastText: $("toast-text"),
 };
 
 const model = {
   state: null,
   etag: null,
   libraryRev: null,
-  tileCount: 0,
+  tiles: [],
+  pages: [],
+  page: 0,
+  shownPlaying: null, // the playing tile the pages last turned to
   failures: 0,
   localPending: null,
   // "Anti disco": until when (performance.now()) taps of a group wait.
   cooldowns: {},
+  track: null, // the last track reading and when it arrived
+  trackReceived: 0,
   shownErrorAt: null,
   pollTimer: null,
   toastTimer: null,
 };
 
-// -- rendering ------------------------------------------------------------------
+const profile = () => view.body.dataset.profile;
+
+// -- layout ---------------------------------------------------------------------
+
+function applyLayout(state) {
+  const wanted = (state && state.view) || {};
+  if (wanted.profile && wanted.profile !== profile()) view.body.dataset.profile = wanted.profile;
+  if (wanted.skip_buttons !== undefined) view.body.dataset.skip = wanted.skip_buttons ? "on" : "off";
+  const big = profile() === "big";
+  const target = big
+    ? { left: $("head-slot"), play: $("now-buttons"), volume: $("now-volume") }
+    : { left: $("bar-left"), play: $("bar-play"), volume: $("bar-volume") };
+  if (view.toggle.parentElement === target.play) return;
+  target.left.append(view.moon, view.games);
+  target.play.append(view.prev, view.toggle, view.next);
+  target.volume.append(view.quieter, view.volume, view.louder);
+  view.volume.replaceChildren(); // rebuilt for the layout by renderVolume
+  renderTiles(model.tiles);
+}
+
+// -- tiles --------------------------------------------------------------------------
 
 function renderTiles(tiles) {
-  view.tiles.replaceChildren();
-  for (const tile of tiles) {
-    const node = view.template.content.firstElementChild.cloneNode(true);
-    node.dataset.id = tile.id;
-    node.setAttribute("aria-label", tile.title);
-    node.querySelector(".title").textContent = tile.title;
-    const cover = node.querySelector(".cover");
-    if (tile.cover) {
-      loadCover(node, cover, tile);
-    } else {
-      showPlaceholder(node, tile);
-    }
-    node.addEventListener("click", () => playTile(tile.id));
-    view.tiles.append(node);
-  }
-  model.tileCount = tiles.length;
+  model.tiles = tiles;
+  model.pages = paginate(tiles);
+  const pages = model.pages.map((page) => {
+    const node = document.createElement("div");
+    node.className = "page";
+    node.append(...page.map(tileNode));
+    return node;
+  });
+  view.tiles.replaceChildren(...pages);
+  view.pageDots.replaceChildren(...model.pages.map(() => document.createElement("i")));
+  model.page = Math.min(model.page, Math.max(0, model.pages.length - 1));
+  model.shownPlaying = null;
+  scrollToPage(model.page, false);
   renderState();
 }
 
+function tileNode(tile) {
+  const node = view.template.content.firstElementChild.cloneNode(true);
+  node.dataset.id = tile.id;
+  node.setAttribute("aria-label", tile.title);
+  node.querySelector(".title").textContent = tile.title;
+  node.querySelector(".art").style.background = placeholderColour(tile.id);
+  node.querySelector(".picture").src = `${PICTURES}/${placeholderPicture(tile.id)}.svg`;
+  if (tile.cover) {
+    loadCover(node, tile);
+  } else {
+    node.querySelector(".cover").remove();
+  }
+  node.addEventListener("click", () => playTile(tile.id));
+  return node;
+}
+
 // A cover that fails to load (e.g. while the Wi-Fi reconnects) is tried
-// again a few times; meanwhile the tile shows its letter.
+// again a few times; meanwhile the tile shows its picture.
 const COVER_RETRIES = 6;
 
-function loadCover(node, cover, tile) {
+function loadCover(node, tile) {
+  const cover = node.querySelector(".cover");
   let tries = 0;
-  cover.addEventListener("load", () => showCover(node));
+  // The cover stays invisible (not hidden: a hidden lazy image never loads)
+  // until it is there; until then the tile shows its picture.
+  cover.addEventListener("load", () => node.classList.add("has-cover"));
   cover.addEventListener("error", () => {
-    showPlaceholder(node, tile);
+    node.classList.remove("has-cover");
     if (tries >= COVER_RETRIES) return;
     const delay = Math.min(60000, 5000 * 2 ** tries++);
     setTimeout(() => {
@@ -98,28 +168,61 @@ function loadCover(node, cover, tile) {
   cover.src = tile.cover;
 }
 
-function showCover(node) {
-  const cover = node.querySelector(".cover");
-  cover.hidden = false;
-  node.classList.remove("no-cover");
-  node.style.background = "";
-  node.querySelector(".placeholder").textContent = "";
+// -- pages ("small") ----------------------------------------------------------------
+
+function scrollToPage(index, smooth = true) {
+  const count = model.pages.length;
+  model.page = Math.max(0, Math.min(index, count - 1));
+  if (profile() === "small" && view.tiles.clientWidth) {
+    view.tiles.scrollTo({ left: model.page * view.tiles.clientWidth, behavior: smooth ? "smooth" : "auto" });
+  }
+  renderPager();
 }
 
-function showPlaceholder(node, tile) {
-  node.querySelector(".cover").hidden = true;
-  node.classList.add("no-cover");
-  node.style.background = placeholderColour(tile.id);
-  node.querySelector(".placeholder").textContent = initial(tile.title);
+function renderPager() {
+  const count = model.pages.length;
+  const paged = profile() === "small" && count > 1 && !isBedtime(model.state);
+  view.pagePrev.hidden = !paged;
+  view.pageNext.hidden = !paged;
+  view.pageDots.hidden = !paged;
+  view.pagePrev.disabled = model.page <= 0;
+  view.pageNext.disabled = model.page >= count - 1;
+  [...view.pageDots.children].forEach((dot, index) => dot.classList.toggle("on", index === model.page));
 }
+
+function onScroll() {
+  if (profile() !== "small" || !view.tiles.clientWidth) return;
+  const page = Math.round(view.tiles.scrollLeft / view.tiles.clientWidth);
+  if (page !== model.page) {
+    model.page = page;
+    renderPager();
+  }
+}
+
+// Turn to the playing tile once, when it starts (not while the kid browses).
+function followPlaying(state) {
+  const id = state && state.playback ? state.playback.tile_id : null;
+  if (!id || id === model.shownPlaying) return;
+  model.shownPlaying = id;
+  const page = pageOf(model.pages, id);
+  if (page >= 0 && page !== model.page) scrollToPage(page);
+}
+
+// -- state ---------------------------------------------------------------------------
 
 function renderState() {
   const state = model.state;
-  for (const node of view.tiles.children) {
-    const current = tileState(node.dataset.id, state, model.localPending);
+  applyLayout(state);
+  const progress = (state && state.progress) || {};
+  for (const node of view.tiles.querySelectorAll(".tile")) {
+    const id = node.dataset.id;
+    const current = tileState(id, state, model.localPending);
     node.classList.toggle("playing", current === "playing" || current === "paused");
     node.classList.toggle("paused", current === "paused");
     node.classList.toggle("pending", current === "pending");
+    const bar = node.querySelector(".progress");
+    bar.hidden = !(id in progress) || progress[id] <= 0;
+    bar.firstElementChild.style.width = `${Math.round((progress[id] || 0) * 100)}%`;
   }
   const locked = Boolean((state && state.pending) || model.localPending);
   view.tiles.classList.toggle("locked", locked);
@@ -138,28 +241,21 @@ function renderState() {
   const bedtime = renderBedtime(state);
   renderGames(state);
   view.tiles.hidden = bedtime;
-  view.empty.hidden = bedtime || model.tileCount > 0;
+  view.empty.hidden = bedtime || model.tiles.length > 0;
   renderVolume(state ? state.volume : null, bedtime);
+  renderNow(state);
+  renderPager();
+  followPlaying(state);
   renderOverlay();
   renderError(state);
 }
 
 function renderVolume(volume, bedtime = isBedtime(model.state)) {
-  if (view.volume.children.length !== VOLUME_SEGMENTS) {
-    view.volume.replaceChildren(
-      ...Array.from({ length: VOLUME_SEGMENTS }, (_, i) => {
-        const segment = document.createElement("i");
-        segment.style.height = `${30 + (70 * (i + 1)) / VOLUME_SEGMENTS}%`;
-        return segment;
-      }),
-    );
+  if (profile() === "small") {
+    renderDots(volume);
+  } else {
+    renderSlider(volume);
   }
-  const lit = volume ? volumeSegments(volume.value, volume.max, VOLUME_SEGMENTS) : 0;
-  const allowed = volume ? limitSegments(volume.limit, volume.max, VOLUME_SEGMENTS) : VOLUME_SEGMENTS;
-  [...view.volume.children].forEach((segment, index) => {
-    segment.classList.toggle("on", index < lit);
-    segment.classList.toggle("over", index >= allowed); // above the limit while fading
-  });
   if (volume) {
     view.volume.setAttribute("aria-valuemax", String(volume.max));
     view.volume.setAttribute("aria-valuenow", String(volume.value ?? 0));
@@ -167,6 +263,97 @@ function renderVolume(volume, bedtime = isBedtime(model.state)) {
   const known = Boolean(volume && volume.value !== null);
   view.louder.disabled = !known || bedtime || volume.value >= (volume.limit ?? volume.max);
   view.quieter.disabled = !known || volume.value <= 0;
+}
+
+// Five dots that grow: lit up to the volume, dimmed above the limit.
+function renderDots(volume) {
+  if (view.volume.children.length !== DOTS || view.volume.dataset.kind !== "dots") {
+    view.volume.dataset.kind = "dots";
+    view.volume.replaceChildren(
+      ...Array.from({ length: DOTS }, (_, i) => {
+        const dot = document.createElement("i");
+        dot.style.setProperty("--size", `${18 + 6 * i}px`);
+        return dot;
+      }),
+    );
+  }
+  const lit = volume ? volumeSegments(volume.value, volume.max, DOTS) : 0;
+  const allowed = volume ? limitSegments(volume.limit, volume.max, DOTS) : DOTS;
+  [...view.volume.children].forEach((dot, index) => {
+    dot.classList.toggle("on", index < lit);
+    dot.classList.toggle("over", index >= allowed);
+  });
+}
+
+// A wide bar; the part above the limit (while fading) is hatched.
+function renderSlider(volume) {
+  if (view.volume.dataset.kind !== "slider") {
+    view.volume.dataset.kind = "slider";
+    const fill = document.createElement("i");
+    fill.className = "fill";
+    const over = document.createElement("i");
+    over.className = "over-limit";
+    view.volume.replaceChildren(fill, over);
+  }
+  const [fill, over] = view.volume.children;
+  const max = volume && volume.max ? volume.max : 1;
+  const value = volume && volume.value ? volume.value : 0;
+  const limit = volume && volume.limit !== null && volume.limit !== undefined ? volume.limit : max;
+  fill.style.width = `${Math.min(100, (value / max) * 100)}%`;
+  over.style.left = `${Math.min(100, (limit / max) * 100)}%`;
+}
+
+// "Groß": what is playing, its chapter and how far it got.
+function renderNow(state) {
+  if (profile() !== "big") return;
+  const id = state && state.playback ? state.playback.tile_id : null;
+  const tile = model.tiles.find((item) => item.id === id);
+  const playing = isPlaying(state);
+  const { now } = view;
+  if (!tile) {
+    now.label.textContent = "";
+    now.title.textContent = t("kids.now_idle");
+    now.sub.textContent = "";
+    now.cover.hidden = true;
+    now.picture.hidden = false;
+    now.picture.src = `${PICTURES}/moon.svg`;
+    now.art.style.background = "";
+    now.progress.hidden = true;
+    return;
+  }
+  now.label.textContent = t(playing ? "kids.now_playing" : "kids.now_paused");
+  now.title.textContent = tile.title;
+  now.art.style.background = placeholderColour(tile.id);
+  const coverUrl = tile.cover || "";
+  if (coverUrl && now.cover.getAttribute("src") !== coverUrl) now.cover.src = coverUrl;
+  now.cover.hidden = !coverUrl;
+  now.picture.hidden = Boolean(coverUrl);
+  now.picture.src = `${PICTURES}/${placeholderPicture(tile.id)}.svg`;
+  const track = state.track;
+  if (track && (!model.track || track.at !== model.track.at || track.seconds !== model.track.seconds)) {
+    model.track = track;
+    model.trackReceived = performance.now();
+  }
+  if (!track) model.track = null;
+  const parts = [];
+  if (track && track.count > 1) parts.push(t("kids.track_of", { number: track.number, count: track.count }));
+  if (track && track.title && track.title !== tile.title) parts.push(track.title);
+  now.sub.textContent = parts.join(" · ");
+  renderProgress();
+}
+
+function renderProgress() {
+  const track = model.track;
+  const { now } = view;
+  if (!track || !track.duration) {
+    now.progress.hidden = true;
+    return;
+  }
+  const seconds = trackSeconds(track, model.trackReceived, performance.now());
+  now.progress.hidden = false;
+  now.bar.style.width = `${Math.min(100, (seconds / track.duration) * 100)}%`;
+  now.position.textContent = formatTime(seconds);
+  now.duration.textContent = formatTime(track.duration);
 }
 
 function renderOverlay() {
@@ -291,6 +478,7 @@ function playTile(id) {
   // The loaded tile again resumes it, like the play button.
   const group = state && state.playback && state.playback.tile_id === id ? "toggle" : "tile";
   model.localPending = id;
+  model.shownPlaying = id; // tapped here: the page stays where it is
   renderState();
   command(() => post(`/api/tiles/${encodeURIComponent(id)}/play`), group).then((data) => {
     if (!data || data.result !== "accepted") model.localPending = null;
@@ -331,6 +519,14 @@ function bindControls() {
   view.next.addEventListener("click", () => transport("next"));
   view.louder.addEventListener("click", () => changeVolume("up"));
   view.quieter.addEventListener("click", () => changeVolume("down"));
+  view.pagePrev.addEventListener("click", () => scrollToPage(model.page - 1));
+  view.pageNext.addEventListener("click", () => scrollToPage(model.page + 1));
+  view.tiles.addEventListener("scroll", onScroll, { passive: true });
+  window.addEventListener("resize", () => scrollToPage(model.page, false));
+  // The progress of the "big" layout moves on between two polls.
+  setInterval(() => {
+    if (profile() === "big" && model.track && model.track.playing) renderProgress();
+  }, 1000);
   // Come back quickly after the tablet wakes up or the network returns.
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") pollSoon();

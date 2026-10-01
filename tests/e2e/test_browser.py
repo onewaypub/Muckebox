@@ -171,9 +171,9 @@ def test_louder_stops_at_the_maximum(page, server):
     server.fake.volume = 22
     page.goto(server.url)
     louder = page.locator("#louder")
-    expect(page.locator("#volume i.on")).to_have_count(9)
+    expect(page.locator("#volume i.on")).to_have_count(4)  # five dots: 22 of 25
     louder.tap()
-    expect(page.locator("#volume i.on")).to_have_count(10)
+    expect(page.locator("#volume i.on")).to_have_count(5)
     expect(louder).to_be_disabled()
     assert server.fake.volume == 25
 
@@ -214,21 +214,74 @@ def test_layout_fits_the_screen_with_big_targets(page, server, size):
     louder = page.locator("#louder").bounding_box()
     assert louder["x"] + louder["width"] <= page.viewport_size["width"]
     assert louder["width"] >= 40 and louder["height"] >= 40
-    boxes = [tiles.nth(i).bounding_box() for i in range(14)]
-    assert all(box["width"] >= 100 for box in boxes)
+    assert_tiles_fit(page, [tiles.nth(i).bounding_box() for i in range(6)])  # the first page
+
+
+def assert_tiles_fit(page, boxes, minimum=100):
+    viewport = page.viewport_size
+    for box in boxes:
+        assert box["width"] >= minimum
+        assert box["x"] >= 0 and box["x"] + box["width"] <= viewport["width"]
+        assert box["y"] >= 0 and box["y"] + box["height"] <= viewport["height"]
     for a, b in itertools.combinations(boxes, 2):  # no two tiles may overlap
         overlap_x = min(a["x"] + a["width"], b["x"] + b["width"]) - max(a["x"], b["x"])
         overlap_y = min(a["y"] + a["height"], b["y"] + b["height"]) - max(a["y"], b["y"])
         assert overlap_x <= 0 or overlap_y <= 0
 
 
+def test_small_layout_turns_pages_and_follows_the_playing_tile(page, server):
+    tiles = server.add_tiles(*[i % 5 for i in range(8)])
+    page.goto(server.url)
+    expect(page.locator(".tile")).to_have_count(8)
+    expect(page.locator("#page-dots i")).to_have_count(2)
+    expect(page.locator("#page-prev")).to_be_disabled()
+    expect(page.locator("#prev")).to_be_hidden()  # previous/next only if the parents want them
+    page.locator("#page-next").tap()
+    expect(page.locator("#page-dots i").nth(1)).to_have_class(re.compile(r"\bon\b"))
+    last = page.locator(".tile").nth(7)
+    expect(last).to_be_in_viewport()
+    last.tap()
+    expect(last).to_have_class(re.compile(r"\bplaying\b"))
+    page.locator("#page-prev").tap()
+    expect(page.locator(".tile").nth(0)).to_be_in_viewport()
+    assert tiles[7].id == last.get_attribute("data-id")
+
+
+def test_big_layout_shows_titles_and_what_is_playing(page, server):
+    server.store.set_controls({"profile": "big"})
+    server.fake.albums[server.fake.favorites[1].ref.uri] = ["x-file:1", "x-file:2", "x-file:3"]
+    server.add_tiles(*[i % 5 for i in range(9)])
+    page.goto(server.url)
+    tiles = page.locator(".tile")
+    expect(tiles).to_have_count(9)
+    expect(tiles.nth(1).locator(".title")).to_have_text("Hörspiel Folge 1")
+    expect(page.locator("#page-next")).to_be_hidden()  # no pages: the grid scrolls
+    expect(page.locator("#now-title")).to_have_text("Tippe auf eine Kachel")
+    tiles.nth(1).tap()
+    expect(page.locator("#now-title")).to_have_text("Hörspiel Folge 1")
+    expect(page.locator("#now-label")).to_have_text("Läuft gerade")
+    expect(page.locator("#now-sub")).to_contain_text("Titel 1 von 3", timeout=15_000)
+    expect(page.locator("#now-progress")).to_be_visible()
+    expect(page.locator("#prev")).to_be_visible()
+    width = page.evaluate("document.documentElement.scrollWidth")
+    assert width <= page.viewport_size["width"]
+
+
+def open_page(page, name):
+    page.locator(f"#nav a[data-page='{name}']").tap()
+    expect(page.locator(f"#page-{name}")).to_be_visible()
+
+
 def test_parents_add_a_favorite_for_the_kids(page, server):
     page.goto(server.url + "/admin")
     page.locator("#pin").fill("2468")
     page.locator("#login button").tap()
+    expect(page.locator("#greeting")).to_contain_text("Alles läuft.")
+    open_page(page, "add")
     row = page.locator(".favorite-row", has_text="Kinderradio")
     row.locator("button").tap()
     expect(row.locator("button")).to_have_text("Schon als Kachel da")
+    open_page(page, "tiles")
     expect(page.locator(".tile-row input[name=title]")).to_have_value("Kinderradio")
     page.goto(server.url)
     expect(page.locator(".tile")).to_have_count(1)
@@ -245,20 +298,29 @@ def test_first_start_setup(page, new_server):
     page.locator("#pin").fill(new_server.store.current().pin.generated)
     page.locator("#login button").tap()
     expect(page.locator("#pin-banner")).to_be_visible()
-    expect(page.locator("#favorites-no-room")).to_be_visible()
+    expect(page.locator("#page-setup")).to_be_visible()  # no room yet: straight to the setup
     rooms = page.locator(".room-row")
     expect(rooms).to_have_count(2)  # searched without asking
     rooms.filter(has_text="Kinderzimmer").locator("button").tap()
     expect(page.locator("#room-current")).to_have_text("Gewählter Raum: Kinderzimmer")
     expect(rooms.filter(has_text="Kinderzimmer").locator("button")).to_have_text("Gewählt")
+    open_page(page, "add")
     expect(page.locator(".favorite-row", has_text="Kinderradio")).to_be_visible()
 
-    page.locator("#max-volume").fill("18")
+    open_page(page, "volume")
+    page.locator("#max-volume").evaluate(
+        "(range) => { range.value = '18';"
+        " range.dispatchEvent(new Event('input', { bubbles: true })); }"
+    )
+    expect(page.locator("#max-volume-value")).to_have_text("18")
     page.locator("#volume-step").fill("2")
-    page.locator("#volume button").tap()
+    page.locator("#page-volume .profile", has_text="7–14 Jahre").tap()
+    page.locator("#volume button[type=submit]").tap()
     expect(page.locator("#flash")).to_have_text("Gespeichert")
     assert new_server.store.current().max_volume == 18
+    assert new_server.store.current().controls.profile == "big"
 
+    open_page(page, "pin")
     page.locator("#pin-current").fill(new_server.store.current().pin.generated)
     page.locator("#pin-new").fill("9753")
     page.locator("#pin-repeat").fill("9753")
@@ -268,14 +330,16 @@ def test_first_start_setup(page, new_server):
 
     page.goto(new_server.url)
     expect(page.locator("#empty")).to_be_visible()
+    expect(page.locator("body")).to_have_attribute("data-profile", "big")
     expect(overlay).to_be_hidden()
 
 
-def log_in(page, server):
+def log_in(page, server, to="setup"):
     page.goto(server.url + "/admin")
     page.locator("#pin").fill("2468")
     page.locator("#login button").tap()
     expect(page.locator("#room-current")).to_have_text("Gewählter Raum: Kinderzimmer")
+    open_page(page, to)
 
 
 def test_the_chosen_room_can_get_a_speaker_address(page, server):
@@ -300,14 +364,18 @@ def test_a_failed_room_search_leaves_a_hint(page, server):
 
 
 def test_parents_set_usage_times_and_allow_more(page, server):
-    log_in(page, server)
+    log_in(page, server, to="schedule")
     page.locator("#schedule-enabled").check()
     monday = page.locator(".day-row").first
     monday.locator(".from").fill("06:30")
     monday.locator(".to").fill("00:00")  # until midnight
     page.locator("#copy-monday").tap()
-    page.locator(".day-row").nth(6).locator(".free").check()  # Sunday is free
-    page.locator("#fade-minutes").fill("5")
+    sunday = page.locator(".day-row").nth(6)
+    sunday.locator(".free-chip").tap()  # Sunday is free
+    expect(sunday.locator(".free")).to_be_checked()
+    expect(sunday.locator(".from")).to_be_disabled()
+    page.locator("#fade-minutes").fill("6")
+    page.locator("#page-schedule .stepper .dec").tap()  # back to 5
     page.locator("#schedule button[type=submit]").tap()
     expect(page.locator("#flash")).to_have_text("Gespeichert")
     schedule = server.store.current().schedule
@@ -315,6 +383,8 @@ def test_parents_set_usage_times_and_allow_more(page, server):
     assert schedule.days[1].start.strftime("%H:%M") == "06:30"
     assert schedule.days[1].end is None  # 24:00
     assert schedule.days[6] is None
+    open_page(page, "overview")
+    expect(page.locator("#today-bar")).to_be_visible()
     expect(page.locator("#override-buttons")).to_be_visible()
     page.locator("[data-override='30']").tap()
     expect(page.locator("#schedule-status")).to_contain_text("Freigabe bis")
@@ -399,7 +469,7 @@ def test_parents_see_and_reset_where_an_album_stopped(page, server):
 
     album, _radio = server.add_tiles(1, 2)
     server.runtime.resume.record(album.id, Position(3, 760, 1200, "x"), 5)
-    log_in(page, server)
+    log_in(page, server, to="tiles")
     row = page.locator(".tile-row").nth(0)  # tiles in the order they were added
     expect(row.locator(".resume-toggle")).to_be_checked()
     expect(row.locator(".resume-position")).to_have_text("Stand: Titel 3, 12:40")

@@ -22,6 +22,13 @@ MESSAGES: dict[str, str] = {
     "kids.games": "Spiele",
     "kids.game_close": "Spiel beenden",
     "kids.replay": "Noch einmal hören",
+    "kids.my_music": "Meine Musik",
+    "kids.page_prev": "Vorherige Seite",
+    "kids.page_next": "Nächste Seite",
+    "kids.now_playing": "Läuft gerade",
+    "kids.now_paused": "Pausiert",
+    "kids.now_idle": "Tippe auf eine Kachel",
+    "kids.track_of": "Titel {number} von {count}",
     "game.done": "Fertig!",
     "game.breathing_intro": "Mach es dir gemütlich. Wir atmen zusammen, ganz langsam.",
     "game.breathe_in": "Einatmen",
@@ -90,16 +97,82 @@ MESSAGES: dict[str, str] = {
         "Das Limit gilt sofort (1 bis 100). Stelle zusätzlich in der Sonos-App ein "
         "Lautstärke-Limit für den Raum ein."
     ),
-    "admin.controls": "Bedienung",
     "admin.tap_cooldown": "Kacheln nach einem Tipp sperren (Sekunden)",
     "admin.idle_minutes": "Ohne Tippen pausieren nach (Minuten)",
-    "admin.controls_hint": (
-        "Gegen Dauertippen: Nach dem Start einer Kachel startet so lange keine andere "
-        "(0 = aus); Vor/Zurück warten immer 3 Sekunden, Pause/Weiter 1 Sekunde. "
-        "Läuft eine Kachel so lange, ohne dass jemand auf dem Tablet tippt, wird sie in "
-        "einer Minute leiser und pausiert (0 = aus). Danach geht alles wie gewohnt weiter."
-    ),
     "admin.idle_paused": "Zuletzt ohne Tippen pausiert",
+    "admin.parents": "Eltern",
+    "admin.nav_overview": "Übersicht",
+    "admin.nav_add": "Musik hinzufügen",
+    "admin.nav_volume": "Lautstärke & Bedienung",
+    "admin.greeting_morning": "Guten Morgen.",
+    "admin.greeting_day": "Guten Tag.",
+    "admin.greeting_evening": "Guten Abend.",
+    "admin.all_good": "Alles läuft.",
+    "admin.needs_attention": "Bitte kurz nachsehen.",
+    "admin.today": "Nutzungszeit heute",
+    "admin.today_note": "Pause und Leiser gehen immer.",
+    "admin.hours_24": "24 Uhr",
+    "admin.override_label": "Länger erlauben:",
+    "admin.of_100": "von 100",
+    "admin.corrections_count": "{count} Korrekturen seit dem Start",
+    "admin.games_today": "Spielzeit heute",
+    "admin.games_limit": "von {limit} Min.",
+    "admin.minutes_after_moon": "Min. nach Mond-Tipp",
+    "admin.sleep_visible": "Mond-Knopf ist sichtbar",
+    "admin.sleep_hidden": "Mond-Knopf ausgeblendet",
+    "admin.kids_see": "Was die Kinder sehen",
+    "admin.edit_tiles": "Kacheln bearbeiten →",
+    "admin.tiles_lead": (
+        "Reihenfolge wie auf dem Tablet. Ohne eigenes Bild zeigt die Kinderansicht ein Tierbild."
+    ),
+    "admin.add_tile": "+ Kachel hinzufügen",
+    "admin.enabled": "Eingeschaltet",
+    "admin.free": "frei",
+    "admin.sleep_duration": "Dauer",
+    "admin.minutes_short": "{minutes} Min.",
+    "admin.sleep_wake_label": "Gesperrt bis",
+    "admin.sleep_wake_hint": "an Tagen ohne Nutzungszeit",
+    "admin.tablet_preview": "So sieht es auf dem Tablet aus",
+    "admin.taps_to_limit": "{taps} Tipps bis zum Limit",
+    "admin.volume_step_hint": "Wie viel ein Tipp auf Lauter oder Leiser ändert.",
+    "admin.tap_cooldown_hint": (
+        "Gegen Dauertippen: So lange startet keine andere Kachel. Vor/Zurück warten immer "
+        "3 Sekunden, Pause/Weiter 1 Sekunde. 0 = aus."
+    ),
+    "admin.idle_hint": (
+        "Läuft eine Kachel so lange, ohne dass jemand auf dem Tablet tippt, wird sie in einer "
+        "Minute leiser und pausiert. Danach geht alles wie gewohnt weiter. 0 = aus."
+    ),
+    "admin.kids_layout": "Kinderansicht",
+    "admin.profile_small": "Klein · 0–6 Jahre",
+    "admin.profile_small_hint": (
+        "Sechs große Bilder pro Seite, Blättern statt Scrollen, nur drei große Knöpfe."
+    ),
+    "admin.profile_big": "Groß · 7–14 Jahre",
+    "admin.profile_big_hint": (
+        "Titel unter den Kacheln; was gerade läuft, mit Kapitel und Fortschritt."
+    ),
+    "admin.skip_buttons": "Vor/Zurück auch bei „Klein“ zeigen",
+    "admin.games_lead": (
+        "Kurze Runden, ruhiges Ende, keine Punkte. Erst nach dem Einschalten sichtbar."
+    ),
+    "admin.games_per_day": "Spielzeit pro Tag (Minuten)",
+    "admin.level_small": "klein",
+    "admin.level_small_age": "2–3 J.",
+    "admin.level_middle": "mittel",
+    "admin.level_middle_age": "4–5 J.",
+    "admin.level_big": "groß",
+    "admin.level_big_age": "ab 6 J.",
+    "admin.game_tag_freeze_dance": "Bewegung · Sonos",
+    "admin.game_tag_sound_quiz": "Zuhören · Tablet",
+    "admin.game_tag_move_like": "Bewegung · Tablet",
+    "admin.game_tag_breathing": "Ruhe · zählt nicht zur Spielzeit",
+    "admin.room_controlled": "Gesteuerter Raum",
+    "admin.zone_same": (
+        "Die Muckebox rechnet mit {zone}, dieses Gerät auch. Uhrzeit der Box: {time}."
+    ),
+    "admin.zone_ok": "✓ Zeitzone stimmt",
+    "admin.pin_save": "PIN speichern",
     "admin.resume": "Weiterhören",
     "admin.resume_position": "Stand: Titel {track}, {time}",
     "admin.resume_restart": "Von vorn",
@@ -114,7 +187,6 @@ MESSAGES: dict[str, str] = {
     "admin.day_sun": "Sonntag",
     "admin.from": "Von",
     "admin.to": "Bis",
-    "admin.day_free": "ganzer Tag frei",
     "admin.copy_monday": "Zeiten vom Montag für alle Tage übernehmen",
     "admin.fade_minutes": "Vor dem Ende leiser werden (Minuten)",
     "admin.schedule_hint": (
@@ -123,13 +195,13 @@ MESSAGES: dict[str, str] = {
         "Ein Tag ohne Zeitfenster ist frei; „Bis 00:00“ heißt bis Mitternacht. "
         "Für einen langen Abend gibt es die Freigabe."
     ),
-    "admin.phase_off": "Keine Nutzungszeiten eingestellt: Muckebox ist immer erlaubt.",
-    "admin.phase_open": "Jetzt erlaubt bis {time}.",
-    "admin.phase_open_free": "Jetzt erlaubt.",
-    "admin.phase_fading": "Klingt gerade aus, Ende um {time}.",
-    "admin.phase_closed": "Schlafenszeit bis {time}.",
-    "admin.phase_closed_open_end": "Schlafenszeit.",
-    "admin.override_until": "Freigabe bis {time}.",
+    "admin.phase_off": "Keine Nutzungszeiten: immer erlaubt",
+    "admin.phase_open": "Erlaubt bis {time}",
+    "admin.phase_open_free": "Den ganzen Tag erlaubt",
+    "admin.phase_fading": "Klingt aus, Ende um {time}",
+    "admin.phase_closed": "Schlafenszeit bis {time}",
+    "admin.phase_closed_open_end": "Schlafenszeit",
+    "admin.override_until": "· Freigabe bis {time}",
     "admin.override_15": "+15 Min.",
     "admin.override_30": "+30 Min.",
     "admin.override_60": "+1 Std.",
@@ -137,8 +209,6 @@ MESSAGES: dict[str, str] = {
     "admin.override_end": "Freigabe beenden",
     "admin.sleep_timer": "Einschlaf-Timer",
     "admin.sleep_enabled": "Mond-Knopf für die Kinder zeigen",
-    "admin.sleep_minutes": "Dauer (Minuten)",
-    "admin.sleep_wake": "Gesperrt bis (an Tagen ohne Nutzungszeit)",
     "admin.sleep_hint": (
         "Das Kind tippt auf den Mond und die Musik läuft noch so lange. Zum Schluss wird sie "
         "leiser und pausiert; danach bleiben die Kacheln bis zur nächsten erlaubten Zeit "
@@ -148,7 +218,6 @@ MESSAGES: dict[str, str] = {
     "admin.sleep_cancel": "Timer beenden",
     "admin.games": "Spiele",
     "admin.games_status": "Heute gespielt: {used} von {limit} Minuten.",
-    "admin.games_minutes": "Spielzeit pro Tag für alle Spiele (Minuten)",
     "admin.dance_tile": "Musik für den Stopptanz",
     "admin.dance_current": "– die Musik, die gerade läuft –",
     "admin.games_hint": (
@@ -157,11 +226,10 @@ MESSAGES: dict[str, str] = {
         "zur Schlafenszeit."
     ),
     "admin.game_level": "Schwierigkeit",
-    "admin.credits": "Quellen der Klänge und Bilder",
+    "admin.credits": "Quellen der Klänge, Bilder und Schriften",
     "admin.credit_pictures": "Bilder",
-    "admin.level_1": "klein (2–3 Jahre)",
-    "admin.level_2": "mittel (4–5 Jahre)",
-    "admin.level_3": "groß (ab 6 Jahren)",
+    "admin.credit_font_bricolage": "Schrift Bricolage Grotesque",
+    "admin.credit_font_figtree": "Schrift Figtree",
     "admin.game_about_freeze_dance": (
         "Musik läuft auf dem Sonos und stoppt immer wieder: alle erstarren. Der Bildschirm "
         "zeigt nur eine ruhige Farbe."
