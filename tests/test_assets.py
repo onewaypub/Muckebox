@@ -74,7 +74,7 @@ def test_the_game_catalogue_has_files_and_names():
 
 def test_credits_for_the_parents_page():
     items = assets.credits()
-    assert len(items) == len(assets.SOUNDS) + 1
+    assert len(items) == len(assets.SOUNDS) + 1 + len(assets.FONTS)
     assert all(item["license_url"].startswith("https://") for item in items)
 
 
@@ -84,6 +84,10 @@ def test_reuse_annotations_name_existing_files():
         paths = annotation["path"] if isinstance(annotation["path"], list) else [annotation["path"]]
         for path in paths:
             assert list(ROOT.glob(path)), f"REUSE.toml names a missing file: {path}"
-    used = {sound.license for sound in assets.SOUNDS.values()} | {assets.TWEMOJI_LICENSE, "CC0-1.0"}
+    used = {sound.license for sound in assets.SOUNDS.values()} | {
+        assets.TWEMOJI_LICENSE,
+        assets.FONT_LICENSE,
+        "CC0-1.0",
+    }
     texts = {path.stem for path in (ROOT / "LICENSES").glob("*.txt")}
     assert texts - {"AGPL-3.0-or-later"} == used  # no licence text without a file using it

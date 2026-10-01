@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Muckebox contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Where the games' sounds and pictures come from, and under which licence.
+"""Where the games' sounds and pictures and the fonts come from, and under
+which licence.
 
 The sounds are short excerpts of recordings from Wikimedia Commons,
 converted to MP3 (mono, faded, loudness-normalised); the pictures are
@@ -15,6 +16,15 @@ from dataclasses import dataclass
 TWEMOJI_AUTHOR = "Twitter, Inc and other contributors (Twemoji)"
 TWEMOJI_LICENSE = "CC-BY-4.0"
 TWEMOJI_SOURCE = "https://github.com/jdecked/twemoji"
+FONT_LICENSE = "OFL-1.1"
+#: The two typefaces in muckebox/static/fonts/ (Latin subsets, as is).
+FONTS = {
+    "font_bricolage": (
+        "The Bricolage Grotesque Project Authors",
+        "https://github.com/ateliertriay/bricolage",
+    ),
+    "font_figtree": ("The Figtree Project Authors", "https://github.com/erikdkennedy/figtree"),
+}
 
 
 @dataclass(frozen=True)
@@ -147,6 +157,7 @@ LICENCES = {
     "LicenseRef-Public-Domain": ("gemeinfrei", "https://en.wikipedia.org/wiki/Public_domain"),
     "CC-BY-4.0": ("CC BY 4.0", "https://creativecommons.org/licenses/by/4.0/"),
     "CC-BY-SA-3.0": ("CC BY-SA 3.0", "https://creativecommons.org/licenses/by-sa/3.0/"),
+    "OFL-1.1": ("SIL OFL 1.1", "https://openfontlicense.org/"),
 }
 
 
@@ -170,5 +181,15 @@ def credits() -> list[dict[str, str]]:
             "license_url": LICENCES[TWEMOJI_LICENSE][1],
             "source": TWEMOJI_SOURCE,
         }
+    )
+    items.extend(
+        {
+            "name": key,
+            "author": author,
+            "license": LICENCES[FONT_LICENSE][0],
+            "license_url": LICENCES[FONT_LICENSE][1],
+            "source": source,
+        }
+        for key, (author, source) in FONTS.items()
     )
     return items
