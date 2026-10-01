@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Muckebox contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Applies the usage times, the parents' override and the kids' sleep timer.
+"""Applies the usage times, the parents' override and the kids' sleep timer,
+and pauses music that plays on and on without a tap on the tablet.
 
 The time logic itself is pure (:mod:`muckebox.schedule`); this class feeds
 it with the settings, the stored timers and the clock, and answers the
@@ -11,10 +12,19 @@ the fade, and is there an end that still needs a pause.
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Any
 
 from muckebox.localtime import Zone, ZoneResolver, local_time
-from muckebox.schedule import Lock, Phase, evaluate, extend_override, fade_factor, next_morning
+from muckebox.schedule import (
+    FADE_FLOOR,
+    Lock,
+    Phase,
+    evaluate,
+    extend_override,
+    fade_factor,
+    next_morning,
+)
 from muckebox.settings import SettingsStore
 
 from .clock import Clock
@@ -27,6 +37,8 @@ log = logging.getLogger(__name__)
 PAUSE_GRACE = 15 * 60
 #: Commands that stay possible when the usage time is over.
 ALLOWED_WHEN_CLOSED = frozenset({"pause", "volume_down", "favorites"})
+#: Seconds of fading before the pause without a tap.
+IDLE_FADE = 60.0
 
 
 class Refused(Exception):
@@ -45,6 +57,13 @@ class TimeKeeper:
         self.timers = timers
         self.clock = clock
         self.zones = zones
+        # Monotonic time of the last tap (or of the last moment nothing of
+        # ours played); in memory only: after a restart, the start counts.
+        self._idle_lock = threading.Lock()
+        self._idle_from = clock.monotonic()
+        self._idle_done: float | None = None
+        #: Wall clock time of the last pause without a tap (for the parents).
+        self.idle_paused_at: float | None = None
 
     def zone(self) -> Zone:
         return self.zones.zone(self.store.current().time_zone)
@@ -75,31 +94,40 @@ class TimeKeeper:
         during the fade, a sleep timer), so it is never replaced by an
         already faded volume.
         """
-        now = self.clock.time()
-        phase = self.phase(now)
-        if phase.kind != "fading":
+        factor = self._fade_factor()
+        if factor is None:
             return None
         with self.timers.change() as state:
             if state.pre_fade is None:
                 state.pre_fade = observed
             base = state.pre_fade
-        return max(1, round(base * fade_factor(phase, now)))
+        return max(1, round(base * factor))
 
     def current_limit(self) -> int | None:
         """The fade limit right now, if a fade has started (no speaker access)."""
-        now = self.clock.time()
-        phase = self.phase(now)
-        if phase.kind != "fading":
+        factor = self._fade_factor()
+        if factor is None:
             return None
         with self.timers.read() as state:
             base = state.pre_fade
-        return None if base is None else max(1, round(base * fade_factor(phase, now)))
+        return None if base is None else max(1, round(base * factor))
+
+    def _fade_factor(self) -> float | None:
+        """How far the volume is faded now (the end of the usage time or the
+        pause without a tap, whichever is further); None when not fading."""
+        now = self.clock.time()
+        phase = self.phase(now)
+        factors = [fade_factor(phase, now)] if phase.kind == "fading" else []
+        idle = self._idle_factor()
+        if idle is not None:
+            factors.append(idle)
+        return min(factors) if factors else None
 
     def fade_released(self) -> int | None:
         """The volume before a fade that stopped without an end (e.g. more time
         was allowed, or the usage times were switched off): restore it now."""
         phase = self.phase()
-        if phase.kind not in ("open", "off"):
+        if phase.kind not in ("open", "off") or self._idle_factor() is not None:
             return None
         with self.timers.read() as state:
             if state.pre_fade is None:
@@ -126,6 +154,50 @@ class TimeKeeper:
         """Remember that ``end`` is handled; returns the volume before its fade."""
         with self.timers.change() as state:
             state.done_end = end
+            volume, state.pre_fade = state.pre_fade, None
+            return volume
+
+    # -- no tap for a long time ------------------------------------------------
+
+    def touch(self) -> None:
+        """A tap on the tablet: the time without a tap starts again."""
+        with self._idle_lock:
+            self._idle_from = self.clock.monotonic()
+
+    def idle_quiet(self) -> None:
+        """Nothing that Muckebox started is playing: nothing to pause, so the
+        time without a tap only counts while a tile plays."""
+        self.touch()
+
+    def _idle_end(self) -> float | None:
+        """When the music pauses without a tap (monotonic), or None (off or done)."""
+        minutes = self.store.current().controls.idle_minutes
+        if not minutes:
+            return None
+        with self._idle_lock:
+            end = self._idle_from + minutes * 60
+            return None if end == self._idle_done else end
+
+    def _idle_factor(self) -> float | None:
+        end = self._idle_end()
+        if end is None:
+            return None
+        progress = (self.clock.monotonic() - (end - IDLE_FADE)) / IDLE_FADE
+        if progress < 0:
+            return None
+        return 1.0 - (1.0 - FADE_FLOOR) * min(1.0, progress)
+
+    def due_idle_pause(self) -> float | None:
+        """The end without a tap that still needs a pause, or None."""
+        end = self._idle_end()
+        return end if end is not None and self.clock.monotonic() >= end else None
+
+    def mark_idle_done(self, end: float) -> int | None:
+        """The music paused without a tap; returns the volume before the fade."""
+        with self._idle_lock:
+            self._idle_done = end
+        self.idle_paused_at = self.clock.time()
+        with self.timers.change() as state:
             volume, state.pre_fade = state.pre_fade, None
             return volume
 

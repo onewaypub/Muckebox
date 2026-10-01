@@ -39,8 +39,8 @@ changes increase the `api` number reported by `/api/state`.
 | `GET /api/health` | Liveness of the web server (also used by the Docker health check). Independent of Sonos. | `200 {"ok": true, "version": "…"}` |
 | `GET /api/state` | Current state from the server's cache; never waits for Sonos. Supports `ETag` / `If-None-Match`. | `200` (below), `304` |
 | `GET /api/tiles` | Tiles in display order. | `200 {"ok": true, "rev": 7, "tiles": [{"id": "…", "title": "…", "cover": "/covers/….jpg" or null}]}` |
-| `POST /api/tiles/<id>/play` | Start a tile, only in the kids room (a grouped kids room leaves its group first). Tapping the tile that is already playing is a no-op; tapping it while paused resumes. | `202 {"ok": true, "result": "accepted", "pending": {…}}`, `200 {"ok": true, "result": "noop" \| "resumed", "pending": null}`, `404 tile_not_found`, `409 busy`, `503 <code>` |
-| `POST /api/transport/play`, `…/pause`, `…/toggle`, `…/next`, `…/previous` | Transport control of the kids room: if it is grouped, it leaves the group first (the other rooms play on). `play` and `pause` do nothing if the speaker is already in that state. | `200 {"ok": true, "playback": {…}}`, `409 busy`, `503 <code>` |
+| `POST /api/tiles/<id>/play` | Start a tile, only in the kids room (a grouped kids room leaves its group first). Tapping the tile that is already playing is a no-op; tapping it while paused resumes. | `202 {"ok": true, "result": "accepted", "pending": {…}}`, `200 {"ok": true, "result": "noop" \| "resumed", "pending": null}`, `404 tile_not_found`, `409 busy`, `409 cooling_down` (with `retry_in`; see `cooldown`), `503 <code>` |
+| `POST /api/transport/play`, `…/pause`, `…/toggle`, `…/next`, `…/previous` | Transport control of the kids room: if it is grouped, it leaves the group first (the other rooms play on). `play` and `pause` do nothing if the speaker is already in that state. | `200 {"ok": true, "playback": {…}}`, `409 busy`, `409 cooling_down` (with `retry_in`), `503 <code>` |
 | `POST /api/volume/up`, `POST /api/volume/down` | Change the volume of the kids room by the step set on the parents' page, clamped to `0…limit`. One change at a time. | `200 {"ok": true, "volume": {…}}`, `409 busy`, `503 volume_unknown` (the volume could not be read or set) or `503 <code>` |
 | `GET /covers/<hash>.jpg` | Cover image (600×600 JPEG, immutable). | `200`, `404` |
 | `GET /api/credits` | Sources and licences of the games' sounds and pictures. | `200 {"ok": true, "credits": [{"name", "author", "license", "license_url", "source"}]}` |
@@ -76,6 +76,7 @@ code such as `service_unavailable`.
   },
   "volume": {"value": 12, "max": 25, "limit": 25, "step": 3},
   "pending": null,
+  "cooldown": {"tile": 5, "skip": 3, "toggle": 1},
   "last_error": null,
   "schedule": {"phase": "open", "ends_at": 1790013600, "opens_at": null,
                "fade_from": 1790013000, "override_until": null},
@@ -105,6 +106,10 @@ code such as `service_unavailable`.
 - `sleep_timer.ends_at` is set while the kids' sleep timer runs. When it ends,
   the music fades and pauses, and `schedule.phase` stays `closed` until the
   next morning.
+- `cooldown`: seconds that taps of the same kind wait after an accepted tap
+  ("anti disco"): `tile` after a tile start (a setting, `0` = off), `skip`
+  after next/previous, `toggle` after play/pause or resuming the loaded tile.
+  The server enforces them; the tablet only dims the buttons meanwhile.
 - `pending`: `null` or `{"action": "start", "tile_id": "…", "since": <unix time>}`.
 - `last_error`: `null` or `{"code": "…", "tile_id": "…", "at": <unix time>}`;
   cleared after a successful start or after 60 seconds.
@@ -129,9 +134,10 @@ require a same-origin `Origin` header when the browser sends one
 | `POST /api/admin/login` `{"pin": "…"}` | Start a session. `401 pin_wrong`, `429 pin_rate_limited` (with `retry_in`). Failed attempts are counted per client (5) and in total (20) for 15 minutes, checks still running included; a new PIN clears the counters. |
 | `POST /api/admin/logout` | End the session. |
 | `POST /api/admin/pin` `{"current": "…", "new": "…"}` | Change the PIN. Ends all other sessions; this one stays logged in. `403 pin_wrong` (counted like a failed login), `429 pin_rate_limited`, `422 pin_too_short` / `pin_placeholder` / `pin_invalid`, `409 pin_changed` (the PIN was changed elsewhere, e.g. with `reset-pin`, while this request ran). Answers like `GET /api/admin/settings`. |
-| `GET /api/admin/settings` | `{"ok": true, "settings": {"room": "Kids room" \| null, "seed_ip": "192.0.2.10" \| null, "max_volume": 25, "volume_step": 3, "pin_generated": false, "time_zone": null, "schedule": {…}, "sleep_timer": {…}, "games": {…}}, "sonos": {…}}`. Never contains PIN data. `pin_generated` is true while the PIN is still the one Muckebox created and printed in its log. |
+| `GET /api/admin/settings` | `{"ok": true, "settings": {"room": "Kids room" \| null, "seed_ip": "192.0.2.10" \| null, "max_volume": 25, "volume_step": 3, "pin_generated": false, "time_zone": null, "schedule": {…}, "sleep_timer": {…}, "games": {…}, "controls": {"tap_cooldown": 5, "idle_minutes": 60}}, "sonos": {…}}`. Never contains PIN data. `pin_generated` is true while the PIN is still the one Muckebox created and printed in its log. |
 | `PUT /api/admin/settings/schedule` `{"enabled": true, "fade_minutes": 10, "days": {"mon": {"from": "07:00", "to": "19:00"}, "tue": null, …}}` | Usage times: one window per weekday (`to` after `from` on the same day, `"24:00"` = midnight; `null` = no limit that day), fade 0–30 minutes. `422 schedule_invalid` / `schedule_order_invalid`. |
 | `PUT /api/admin/settings/games` `{"daily_minutes": 15, "dance_tile": "t…" \| null, "items": {"sound_quiz": {"enabled": true, "level": 2}, …}}` | Games: each off by default, level 1 (2–3 years), 2 (4–5) or 3 (6+), one daily limit for all counted games (5–60 minutes), the tile that plays the freeze-dance music (null: whatever plays). `422 games_invalid`. The status adds `games {used_today, daily_seconds}`. |
+| `PUT /api/admin/settings/controls` `{"tap_cooldown": 5, "idle_minutes": 60}` | Seconds the other tiles wait after a tile tap (0–30, 0 = off) and minutes a tile may play without any tap on the tablet before it fades for a minute and pauses (0–240, 0 = off). `422 controls_invalid`. The status adds `idle {minutes, paused_at}` (local time of the last such pause, or null). |
 | `PUT /api/admin/settings/sleep-timer` `{"enabled": true, "minutes": 30, "wake": "07:00"}` | The kids' sleep timer: shown as a moon button when enabled; 5–90 minutes; afterwards the tiles stay locked until the next window, or until `wake` on days without one. `422 sleep_timer_invalid`. |
 | `DELETE /api/admin/sleep-timer` | End a running sleep timer before it runs out. Answers with `schedule` and `sleep_timer`. |
 | `POST /api/admin/override` `{"minutes": 15\|30\|60}` or `{"until": "morning"}`, `DELETE /api/admin/override` | Allow more time now, or end the override (the music fades and pauses again). `{"ok": true, "schedule": {…}}`; `409 schedule_off`. |

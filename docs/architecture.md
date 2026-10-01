@@ -329,6 +329,16 @@ No personal data about the children is stored. See
 - **Fading** is a soft limit in the volume guard: from the volume when the
   fade began down to 20 %. It is not counted as a correction. After the
   confirmed pause the earlier volume is restored.
+- **No tap for a long time:** every tap on the tablet (tile, transport,
+  volume, game) calls `TimeKeeper.touch()`; while no tile of ours plays, the
+  transport lane touches it too, so only uninterrupted tile playback counts.
+  After `idle_minutes` the same soft limit fades for one minute and the
+  transport lane pauses once and restores the volume. This end lives in
+  memory only (a restart counts as a tap) and never locks the tiles.
+- **"Anti disco":** `Cooldown` closes a group of taps (tile, next/previous,
+  play/pause) for a few seconds after an accepted tap; refused taps get
+  `409 cooling_down`. Only kids' taps (`tap=True`) are checked, never the
+  runtime's own starts (e.g. the freeze-dance music).
 - **Commands** pass `TimeKeeper.check()` (the former `CommandPolicy` seam):
   while closed only pause and quieter are allowed; others get `409 bedtime`.
 - **Resume** (`ResumeStore`): positions are read every 10 s while an album

@@ -430,10 +430,27 @@ def test_new_sections_have_defaults_and_round_trip(tmp_path):
 
 def test_a_file_without_the_new_sections_still_loads(tmp_path):
     store(tmp_path).set_volume(20, 2)
-    edit(tmp_path, lambda d: [d.pop(key) for key in ("schedule", "sleep_timer", "games", "time")])
+    sections = ("schedule", "sleep_timer", "games", "time", "controls")
+    edit(tmp_path, lambda d: [d.pop(key) for key in sections])
     st = store(tmp_path)
     assert st.load_problem is None
     assert st.current().max_volume == 20
+    assert (st.current().controls.tap_cooldown, st.current().controls.idle_minutes) == (5, 60)
+
+
+def test_controls_round_trip_and_zero_means_off(tmp_path):
+    st = store(tmp_path)
+    assert (st.current().controls.tap_cooldown, st.current().controls.idle_minutes) == (5, 60)
+    st.set_controls({"tap_cooldown": 0, "idle_minutes": 0})
+    reread = SettingsStore(tmp_path, scrypt=CHEAP).current().controls
+    assert (reread.tap_cooldown, reread.idle_minutes) == (0, 0)
+
+
+def test_a_hand_edited_controls_section_is_checked(tmp_path):
+    store(tmp_path)
+    edit(tmp_path, lambda d: d.update(controls={"tap_cooldown": 999}))
+    st = store(tmp_path)
+    assert st.load_problem == "settings_corrupt"
 
 
 def test_reset_pin_keeps_the_new_sections(tmp_path):
@@ -460,6 +477,12 @@ def test_reset_pin_keeps_the_new_sections(tmp_path):
         ("set_games", {"dance_tile": "../x"}, "games_invalid"),
         ("set_games", {"items": {"chess": {"enabled": True}}}, "games_invalid"),
         ("set_games", {"items": {"sound_quiz": {"enabled": True, "level": 4}}}, "games_invalid"),
+        ("set_controls", {"tap_cooldown": 31}, "controls_invalid"),
+        ("set_controls", {"tap_cooldown": -1}, "controls_invalid"),
+        ("set_controls", {"tap_cooldown": 5.0}, "controls_invalid"),
+        ("set_controls", {"idle_minutes": 241}, "controls_invalid"),
+        ("set_controls", {"idle_minutes": True}, "controls_invalid"),
+        ("set_controls", None, "controls_invalid"),
     ],
 )
 def test_invalid_new_settings(tmp_path, setter, data, code):

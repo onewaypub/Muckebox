@@ -477,7 +477,8 @@ def test_settings_never_contain_pin_data(admin, services):
         "pin_generated": False,
         "time_zone": None,
     }
-    assert set(settings) - {"schedule", "sleep_timer", "games"} == set(list(settings)[:6])
+    sections = {"schedule", "sleep_timer", "games", "controls"}
+    assert set(settings) - sections == set(list(settings)[:6])
     assert data["sonos"]["status"] == "ok"
     text = admin.get("/api/admin/settings").get_data(as_text=True)
     pin = services.store.current().pin
@@ -896,3 +897,14 @@ def test_the_pin_pad_and_the_login_share_one_total(admin, client, services):
         login(client, "1111", environ_base=address)
     response = login(client, environ_base={"REMOTE_ADDR": "198.51.100.7"})
     assert error_code(response) == (429, "pin_rate_limited")  # 20 wrong PINs in total
+
+
+def test_parents_set_the_tap_wait_and_the_pause_without_taps(admin, services):
+    body = {"tap_cooldown": 8, "idle_minutes": 90}
+    response = admin.put("/api/admin/settings/controls", json=body, headers=POST)
+    assert response.get_json()["settings"]["controls"] == body
+    assert services.store.current().controls.idle_minutes == 90
+    status = admin.get("/api/admin/status").get_json()
+    assert status["idle"] == {"minutes": 90, "paused_at": None}
+    response = admin.put("/api/admin/settings/controls", json={"tap_cooldown": 60}, headers=POST)
+    assert error_code(response) == (422, "controls_invalid")

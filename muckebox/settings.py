@@ -64,6 +64,10 @@ DEFAULT_SLEEP_MINUTES = 30
 SLEEP_MINUTES = (5, 90)
 DEFAULT_GAME_MINUTES = 15
 GAME_MINUTES = (5, 60)
+DEFAULT_TAP_COOLDOWN = 5
+TAP_COOLDOWN = (0, 30)  # seconds; 0 = off
+DEFAULT_IDLE_MINUTES = 60
+IDLE_MINUTES = (0, 240)  # 0 = off
 _TILE_ID_RE = re.compile(r"^t[0-9a-f]{8,32}$")
 
 # RFC 1123 host name: dot-separated labels of letters, digits and hyphens.
@@ -133,6 +137,15 @@ class GameSettings:
 
 
 @dataclass(frozen=True)
+class ControlSettings:
+    #: Seconds after a tile start during which no other tile starts.
+    tap_cooldown: int = DEFAULT_TAP_COOLDOWN
+    #: Minutes of playback without a tap on the tablet before Muckebox fades
+    #: and pauses.
+    idle_minutes: int = DEFAULT_IDLE_MINUTES
+
+
+@dataclass(frozen=True)
 class StoredSettings:
     room: str | None
     room_uid: str | None
@@ -145,6 +158,7 @@ class StoredSettings:
     schedule: Schedule = field(default_factory=Schedule)
     sleep_timer: SleepTimerSettings = field(default_factory=lambda: SleepTimerSettings())
     games: GameSettings = field(default_factory=lambda: GameSettings())
+    controls: ControlSettings = field(default_factory=lambda: ControlSettings())
 
     @property
     def configured(self) -> bool:
@@ -255,6 +269,25 @@ def validate_games(data: object) -> GameSettings:
     return GameSettings(minutes, tile, settings)
 
 
+def validate_controls(data: object) -> ControlSettings:
+    if not isinstance(data, dict):
+        raise SettingsError("controls_invalid")
+    cooldown = data.get("tap_cooldown", DEFAULT_TAP_COOLDOWN)
+    idle = data.get("idle_minutes", DEFAULT_IDLE_MINUTES)
+    if (
+        type(cooldown) is not int
+        or not TAP_COOLDOWN[0] <= cooldown <= TAP_COOLDOWN[1]
+        or type(idle) is not int
+        or not IDLE_MINUTES[0] <= idle <= IDLE_MINUTES[1]
+    ):
+        raise SettingsError("controls_invalid")
+    return ControlSettings(cooldown, idle)
+
+
+def controls_to_json(settings: ControlSettings) -> dict[str, Any]:
+    return {"tap_cooldown": settings.tap_cooldown, "idle_minutes": settings.idle_minutes}
+
+
 def sleep_timer_to_json(settings: SleepTimerSettings) -> dict[str, Any]:
     return {
         "enabled": settings.enabled,
@@ -335,7 +368,7 @@ def generate_pin() -> str:
 # -- reading the file ---------------------------------------------------------------
 
 _KNOWN_SECTIONS = frozenset(
-    {"schema", "sonos", "volume", "admin", "time", "schedule", "sleep_timer", "games"}
+    {"schema", "sonos", "volume", "admin", "time", "schedule", "sleep_timer", "games", "controls"}
 )
 
 
@@ -375,6 +408,7 @@ def _parse(data: dict[str, Any]) -> StoredSettings:
         schedule = validate_schedule(data.get("schedule"))
         sleep_timer = validate_sleep_timer(data.get("sleep_timer", {}))
         games = validate_games(data.get("games", {}))
+        controls = validate_controls(data.get("controls", {}))
     except SettingsError as exc:
         raise ValueError(f"invalid settings ({exc})") from None
     return StoredSettings(
@@ -388,6 +422,7 @@ def _parse(data: dict[str, Any]) -> StoredSettings:
         schedule=schedule,
         sleep_timer=sleep_timer,
         games=games,
+        controls=controls,
     )
 
 
@@ -498,6 +533,10 @@ class SettingsStore:
     def set_games(self, data: object) -> StoredSettings:
         games = validate_games(data)
         return self._update(lambda s: replace(s, games=games))
+
+    def set_controls(self, data: object) -> StoredSettings:
+        controls = validate_controls(data)
+        return self._update(lambda s: replace(s, controls=controls))
 
     def set_volume(self, max_volume: object, step: object) -> StoredSettings:
         max_volume, step = validate_volume(max_volume, step)
@@ -613,6 +652,7 @@ class SettingsStore:
             "schedule": schedule_to_json(settings.schedule),
             "sleep_timer": sleep_timer_to_json(settings.sleep_timer),
             "games": games_to_json(settings.games),
+            "controls": controls_to_json(settings.controls),
         }
         owner = self._owner()
         payload = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
