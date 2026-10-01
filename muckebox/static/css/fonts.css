@@ -1,0 +1,23 @@
+/*
+SPDX-FileCopyrightText: 2026 Muckebox contributors
+SPDX-License-Identifier: AGPL-3.0-or-later
+
+The two typefaces, shipped with Muckebox (never loaded from the internet).
+Both are variable fonts: one file covers all weights.
+*/
+
+@font-face {
+  font-family: "Bricolage Grotesque";
+  font-style: normal;
+  font-weight: 200 800;
+  font-display: swap;
+  src: url("../fonts/bricolage-grotesque-latin.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: Figtree;
+  font-style: normal;
+  font-weight: 300 900;
+  font-display: swap;
+  src: url("../fonts/figtree-latin.woff2") format("woff2");
+}

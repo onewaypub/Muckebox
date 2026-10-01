@@ -46,10 +46,23 @@ other contributors, licensed under
 [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). They are used
 unchanged.
 
+## Fonts
+
+The pages use two typefaces, shipped with Muckebox in
+`muckebox/static/fonts/` (the Latin subsets, unchanged), so that no page
+ever loads anything from the internet:
+
+- [Bricolage Grotesque](https://github.com/ateliertriay/bricolage) for
+  headings, © 2022 The Bricolage Grotesque Project Authors,
+- [Figtree](https://github.com/erikdkennedy/figtree) for text, © 2022 The
+  Figtree Project Authors,
+
+both licensed under the [SIL Open Font License 1.1](https://openfontlicense.org/).
+
 ## Licence texts and checks
 
 The licence texts are in [`LICENSES/`](../LICENSES), and
 [`REUSE.toml`](../REUSE.toml) states the licence of every file.
 `muckebox/assets.py` lists the same sources for the parents' page
-("Quellen der Klänge und Bilder"); a test keeps the files, this list and
+("Quellen der Klänge, Bilder und Schriften"); a test keeps the files, this list and
 `REUSE.toml` in step.
