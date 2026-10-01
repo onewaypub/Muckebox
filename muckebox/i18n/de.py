@@ -90,6 +90,16 @@ MESSAGES: dict[str, str] = {
         "Das Limit gilt sofort (1 bis 100). Stelle zusätzlich in der Sonos-App ein "
         "Lautstärke-Limit für den Raum ein."
     ),
+    "admin.controls": "Bedienung",
+    "admin.tap_cooldown": "Kacheln nach einem Tipp sperren (Sekunden)",
+    "admin.idle_minutes": "Ohne Tippen pausieren nach (Minuten)",
+    "admin.controls_hint": (
+        "Gegen Dauertippen: Nach dem Start einer Kachel startet so lange keine andere "
+        "(0 = aus); Vor/Zurück warten immer 3 Sekunden, Pause/Weiter 1 Sekunde. "
+        "Läuft eine Kachel so lange, ohne dass jemand auf dem Tablet tippt, wird sie in "
+        "einer Minute leiser und pausiert (0 = aus). Danach geht alles wie gewohnt weiter."
+    ),
+    "admin.idle_paused": "Zuletzt ohne Tippen pausiert",
     "admin.resume": "Weiterhören",
     "admin.resume_position": "Stand: Titel {track}, {time}",
     "admin.resume_restart": "Von vorn",
@@ -360,6 +370,10 @@ MESSAGES: dict[str, str] = {
         "Der Einschlaf-Timer braucht eine Dauer von 5 bis 90 Minuten und eine Aufwachzeit."
     ),
     "error.games_invalid": "Die Einstellungen der Spiele sind ungültig.",
+    "error.controls_invalid": (
+        "Die Kachel-Sperre darf 0 bis 30 Sekunden dauern, die Pause ohne Tippen 0 bis 240 Minuten."
+    ),
+    "error.cooling_down": "Einen Moment, gleich geht es wieder.",
     "error.time_zone_invalid": "Diese Zeitzone kennt die Muckebox nicht.",
     "error.pin_changed": "Die PIN wurde gerade woanders geändert. Bitte neu anmelden.",
     "error.settings_save_failed": (

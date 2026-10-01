@@ -11,6 +11,7 @@ from flask import Blueprint, abort, current_app, jsonify, request, send_file
 
 from muckebox import __version__, assets
 from muckebox.library import TileNotFound
+from muckebox.runtime.cooldown import CoolingDown
 from muckebox.runtime.games import UnknownGame
 from muckebox.runtime.service import Busy, Unavailable
 
@@ -69,9 +70,11 @@ def tiles():
 def play(tile_id: str):
     runtime = _services().runtime
     try:
-        result = runtime.play_tile(tile_id)
+        result = runtime.play_tile(tile_id, tap=True)
     except TileNotFound as exc:
         raise ApiError(404, "tile_not_found") from exc
+    except CoolingDown as exc:
+        raise ApiError(409, exc.code, exc.retry_in) from exc
     except Busy as exc:
         raise ApiError(409, "busy") from exc
     except Unavailable as exc:
@@ -84,9 +87,11 @@ def play(tile_id: str):
 @bp.post("/api/transport/<action>")
 def transport(action: str):
     try:
-        playback = _services().runtime.transport(action)
+        playback = _services().runtime.transport(action, tap=True)
     except ValueError as exc:
         raise ApiError(404, "not_found") from exc
+    except CoolingDown as exc:
+        raise ApiError(409, exc.code, exc.retry_in) from exc
     except Busy as exc:
         raise ApiError(409, "busy") from exc
     except Unavailable as exc:

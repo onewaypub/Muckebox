@@ -235,3 +235,16 @@ def test_credits_of_the_game_assets(client):
         response = client.get(path)
         assert response.status_code == 200
         response.close()  # static files are streamed from an open file
+
+
+def test_hammering_tiles_and_skip_is_refused_with_a_wait(client, connected):
+    first, second = add_tile(connected, 0), add_tile(connected, 2)
+    assert client.post(f"/api/tiles/{first.id}/play", headers=POST).status_code == 202
+    response = client.post(f"/api/tiles/{second.id}/play", headers=POST)
+    assert response.status_code == 409
+    assert response.get_json()["error"] == {"code": "cooling_down", "retry_in": 5}
+    assert client.post("/api/transport/next", headers=POST).status_code == 200
+    response = client.post("/api/transport/next", headers=POST)
+    assert response.get_json()["error"] == {"code": "cooling_down", "retry_in": 3}
+    state = client.get("/api/state").get_json()
+    assert state["cooldown"] == {"tile": 5, "skip": 3, "toggle": 1}

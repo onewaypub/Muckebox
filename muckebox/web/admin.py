@@ -20,6 +20,7 @@ from muckebox.schedule import schedule_to_json
 from muckebox.settings import (
     SettingsError,
     SettingsFileError,
+    controls_to_json,
     games_to_json,
     sleep_timer_to_json,
     validate_seed_ip,
@@ -169,6 +170,7 @@ def _settings_response():
             "schedule": schedule_to_json(current.schedule),
             "sleep_timer": sleep_timer_to_json(current.sleep_timer),
             "games": games_to_json(current.games),
+            "controls": controls_to_json(current.controls),
         },
         sonos=services.runtime.state.get("sonos"),
     )
@@ -206,6 +208,13 @@ def set_games():
         except TileNotFound as exc:
             raise ApiError(422, "games_invalid") from exc
     _settings_call(_services().store.set_games, body)
+    return _settings_response()
+
+
+@bp.put("/settings/controls")
+@auth.require_admin
+def set_controls():
+    _settings_call(_services().store.set_controls, _body())
     return _settings_response()
 
 

@@ -37,6 +37,13 @@ that need little screen.
   on the kids tablet with a hidden 3-second press on the moon and the PIN.
 - **Sleep timer:** the kids start it themselves with a moon button; after
   the chosen time the music fades out and the tiles rest until morning.
+- **Calm against button mashing:** after a tile starts, the other tiles wait
+  a few seconds (default 5); next/previous wait 3 seconds and play/pause one,
+  so twenty taps in a row do not turn the room into a disco.
+- **Pause when nobody taps:** if a tile plays for a long time (default 60
+  minutes) without any tap on the tablet, the music fades for a minute and
+  pauses, so a playlist or the radio does not play on for hours in an empty
+  room. The next tap simply starts again.
 - **"Weiterhören":** albums (usually audio plays) continue at the episode
   and second where they stopped, even after other tiles played.
 - **Games with little screen:** a freeze dance with the Sonos music, a sound
@@ -45,9 +52,9 @@ that need little screen.
   kids of different ages; one daily time limit; short rounds with a calm
   end, no points, no endless mode, no microphone.
 - **Parents' page** at `/admin`, protected by a PIN: choose the room, set the
-  volume limit, usage times, sleep timer, games and your PIN, add favorites
-  and share links as tiles, rename, reorder, remove, upload your own cover
-  pictures. No restart needed.
+  volume limit, button waits, usage times, sleep timer, games and your PIN,
+  add favorites and share links as tiles, rename, reorder, remove, upload
+  your own cover pictures. No restart needed.
 - **Self-hosted and private:** one Docker container, no cloud accounts, no API
   keys, no telemetry. See [PRIVACY.md](PRIVACY.md).
 
@@ -218,6 +225,11 @@ limit also applies when Muckebox is not running.
   stopped; *Von vorn* starts it from the beginning next time.
 - **Lautstärke:** the limit (1–100) and the step of the louder/quieter
   buttons.
+- **Bedienung:** how many seconds the other tiles wait after a tile starts
+  (0–30, 0 = off), and after how many minutes without a tap on the tablet a
+  playing tile fades and pauses (0–240, 0 = off). Only tiles are paused, never
+  music started from the Sonos app, and paused time does not count. The
+  status shows when this last happened.
 - **Nutzungszeiten:** switch them on and set one window per weekday (or
   "ganzer Tag frei"), and how many minutes before the end the music fades.
   The status line says what applies right now. *+15/+30/+60 Min.* and *Bis
@@ -248,6 +260,9 @@ limit also applies when Muckebox is not running.
   Parents allow more time by holding the moon for 3 seconds and typing the
   PIN (digits only; with a PIN that contains letters, use the parents'
   page).
+- **Waiting a moment:** right after a tile starts, the other tiles are dimmed
+  for a few seconds and do not react; next/previous and play/pause are
+  briefly dimmed too. The tile that is loaded can always be continued.
 - **The moon button** (if enabled) starts the sleep timer; a ring shows the
   time left. At the end the music fades and pauses, and the tiles rest until
   the next window (or the wake time).

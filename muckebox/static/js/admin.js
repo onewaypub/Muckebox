@@ -106,6 +106,10 @@ function renderStatus(status) {
     ["admin.corrections", String(status.volume_guard.corrections)],
     ["admin.clock", `${status.time.now.slice(11, 16)} (${status.time.zone})`],
   ];
+  if (status.idle.paused_at) {
+    const at = status.idle.paused_at; // local ISO time of the Muckebox
+    rows.push(["admin.idle_paused", `${at.slice(8, 10)}.${at.slice(5, 7)}. ${at.slice(11, 16)}`]);
+  }
   list.replaceChildren(
     ...rows.flatMap(([key, value]) => {
       const term = document.createElement("dt");
@@ -229,6 +233,8 @@ function renderSettings(data) {
   for (const [id, value] of [
     ["max-volume", settings.max_volume],
     ["volume-step", settings.volume_step],
+    ["tap-cooldown", settings.controls.tap_cooldown],
+    ["idle-minutes", settings.controls.idle_minutes],
   ]) {
     if (document.activeElement !== $(id)) $(id).value = String(value);
   }
@@ -631,6 +637,21 @@ function bind() {
     const result = await busy(
       event.target.querySelector("button"),
       guarded(() => request("PUT", "/api/admin/settings/volume", { body }), { success: t("admin.saved") }),
+    );
+    if (result) {
+      renderSettings(result.data);
+      loadStatus();
+    }
+  });
+  $("controls").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const body = {
+      tap_cooldown: $("tap-cooldown").valueAsNumber,
+      idle_minutes: $("idle-minutes").valueAsNumber,
+    };
+    const result = await busy(
+      event.target.querySelector("button"),
+      guarded(() => request("PUT", "/api/admin/settings/controls", { body }), { success: t("admin.saved") }),
     );
     if (result) {
       renderSettings(result.data);

@@ -47,6 +47,7 @@ from muckebox.storage import atomic_write
 
 from .breaker import CircuitBreaker
 from .clock import Clock, SystemClock
+from .cooldown import SKIP, SKIP_SECONDS, TILE, TOGGLE, TOGGLE_SECONDS, Cooldown
 from .games import MUTE_LEASE, ActiveGame, Games
 from .lanes import Lane
 from .resume import ResumeStore
@@ -109,6 +110,10 @@ class CommandPolicy:
         """Raise :class:`Unavailable` to refuse ``command``."""
 
 
+def _iso(epoch: float | None, zone: Zone) -> str | None:
+    return None if epoch is None else local_time(epoch, zone).isoformat(timespec="seconds")
+
+
 def _strip_query(uri: str) -> str:
     return uri.split("?", 1)[0]
 
@@ -166,6 +171,7 @@ class Runtime:
         self._pruned_rev: int | None = None
         self.keeper = TimeKeeper(store, self.timers, self.clock, self.zones)
         self.games = Games(store, self.timers, self.keeper, self.clock)
+        self.cooldown = Cooldown(self.clock)
         self._mute_owner: RoomSession | None = None  # the room a game muted
         self._muted = False
         self._dance_owns_music = False
@@ -291,6 +297,11 @@ class Runtime:
                 "step": self.volume_step(),
             },
             "pending": data["pending"],
+            "cooldown": {
+                "tile": self.store.current().controls.tap_cooldown,
+                "skip": SKIP_SECONDS,
+                "toggle": TOGGLE_SECONDS,
+            },
             "last_error": last_error,
             **times,
             "games": self.games.document(),
@@ -298,37 +309,67 @@ class Runtime:
 
     # -- commands from the kids view ----------------------------------------
 
-    def play_tile(self, tile_id: str) -> str:
-        """Start a tile. Returns "accepted", "resumed" or "noop"."""
+    def play_tile(self, tile_id: str, *, tap: bool = False) -> str:
+        """Start a tile. Returns "accepted", "resumed" or "noop".
+
+        ``tap``: a kid tapped it on the tablet; counts as activity and is
+        subject to the cooldown (internal starts, e.g. a game's music, are not).
+        """
         tile = self.library.get(tile_id)  # raises TileNotFound
+        if tap:
+            self.keeper.touch()
         session = self._check_available("play_tile")
         playback = self.state.get("playback")
         if playback["tile_id"] == tile.id:
             if playback["state"] in ("playing", "transitioning"):
                 return "noop"
+            # The paused tile again: just like the play button.
+            if tap:
+                self.cooldown.check(TOGGLE)
             self._submit_exclusive(lambda: self._resume_job(session, tile.id), pending=None)
+            if tap:
+                self.cooldown.arm(TOGGLE, TOGGLE_SECONDS)
             return "resumed"
+        if tap:
+            self.cooldown.check(TILE)
         pending = {"action": "start", "tile_id": tile.id, "since": int(self.clock.time())}
         self._submit_exclusive(lambda: self._start_tile(session, tile), pending=pending)
+        if tap:
+            self.cooldown.arm(TILE, self.store.current().controls.tap_cooldown)
         return "accepted"
 
-    def transport(self, action: str) -> dict[str, Any]:
+    def transport(self, action: str, *, tap: bool = False) -> dict[str, Any]:
         if action not in (*TRANSPORT_ACTIONS, "toggle"):
             raise ValueError(action)
         playing = self.state.get("playback")["state"] in ("playing", "transitioning")
         if action == "toggle":
             action = "pause" if playing else "play"
+        if tap:
+            self.keeper.touch()
         session = self._check_available(action)
         if (action == "pause" and not playing) or (action == "play" and playing):
             # Already done: a double tap must not undo the first tap.
             return self.state_document()["playback"]
+        group, seconds = (
+            (SKIP, SKIP_SECONDS)
+            if action in ("next", "previous")
+            else (
+                TOGGLE,
+                TOGGLE_SECONDS,
+            )
+        )
+        if tap:
+            self.cooldown.check(group)
         future = self._submit_exclusive(lambda: self._transport_job(session, action), pending=None)
+        if tap:
+            self.cooldown.arm(group, seconds)
         self._wait(future, COMMAND_WAIT, session)
         return self.state_document()["playback"]
 
     def change_volume(self, direction: str) -> dict[str, Any]:
         if direction not in ("up", "down"):
             raise ValueError(direction)
+        self.keeper.touch()  # only the kids' louder/quieter buttons call this
         session = self._check_available(f"volume_{direction}")
         with self._volume_lock:
             # One tap at a time: taps must not pile up while the speaker is slow.
@@ -383,6 +424,10 @@ class Runtime:
                 "source": zone.source,
             },
             **self.keeper.document(),
+            "idle": {
+                "minutes": current.controls.idle_minutes,
+                "paused_at": _iso(self.keeper.idle_paused_at, zone),
+            },
             "games": {
                 "used_today": int(self.games.used_today()),
                 "daily_seconds": current.games.daily_minutes * 60,
@@ -514,7 +559,10 @@ class Runtime:
         try:
             self._ensure_room(session)
             playback = self._refresh_playback(session)
-            self._enforce_time(session, playback)
+            ours = playback.state in ("playing", "transitioning") and bool(self._current_tile())
+            self._enforce_time(session, playback, ours)
+            if not ours:
+                self.keeper.idle_quiet()
             self._record_position(session, playback)
             session.transport_breaker.success()
         except SonosError as exc:
@@ -572,11 +620,19 @@ class Runtime:
             self._pruned_rev = self.library.rev
             self.resume.prune({tile.id for tile in self.library.tiles()})
 
-    def _enforce_time(self, session: RoomSession, playback: Playback) -> None:
-        """Pause once at the end of the usage time or the sleep timer."""
+    def _current_tile(self) -> str | None:
+        return self.state.get("playback")["tile_id"]
+
+    def _enforce_time(self, session: RoomSession, playback: Playback, ours: bool) -> None:
+        """Pause once at the end of the usage time or the sleep timer, and
+        after a long time without a tap (only a tile; ``ours``: one plays)."""
         if not self._current(session):
             return
-        end = self.keeper.due_pause()
+        end, mark_done, reason = self.keeper.due_pause(), self.keeper.mark_done, "Usage time over"
+        playing = playback.state in ("playing", "transitioning")
+        if end is None and (ours or not playing):
+            end, mark_done = self.keeper.due_idle_pause(), self.keeper.mark_idle_done
+            reason = "No tap on the tablet for a long time"
         if end is None:
             released = self.keeper.fade_released()
             if released is not None:
@@ -586,7 +642,7 @@ class Runtime:
             # In a group the kids room leaves it (and is silent); the other
             # rooms play on.
             if self._pause_sent != end:
-                log.info("Usage time over: pausing")
+                log.info("%s: pausing", reason)
                 self._pause_sent = end
             try:
                 session.backend.transport("pause")
@@ -595,7 +651,7 @@ class Runtime:
             return  # confirmed by the next poll
         if playback.state == "unknown":
             return
-        volume = self.keeper.mark_done(end)
+        volume = mark_done(end)
         if volume is not None:
             self._restore_volume(session, volume)
 
@@ -636,6 +692,7 @@ class Runtime:
     def start_game(self, game_id: str) -> ActiveGame:
         """Start a game: music for the freeze dance, silence for the others."""
         game = self.games.start(game_id)
+        self.keeper.touch()
         try:
             if game.id == "freeze_dance":
                 self._start_dance_music()

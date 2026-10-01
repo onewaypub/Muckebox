@@ -11,6 +11,7 @@ from muckebox.library import Library, favorite_source, sharelink_source
 from muckebox.localtime import ZoneResolver
 from muckebox.runtime.breaker import CircuitBreaker
 from muckebox.runtime.clock import FakeClock
+from muckebox.runtime.cooldown import CoolingDown
 from muckebox.runtime.lanes import InlineLane, Lane
 from muckebox.runtime.service import Busy, Runtime, Unavailable
 from muckebox.runtime.volume_guard import VolumeGuard
@@ -1178,3 +1179,167 @@ def test_ending_an_override_inside_the_window_just_drops_it(runtime, clock, even
     phase = runtime.keeper.end_override()
     assert phase.kind == "open"
     assert runtime.timers.state.override is None
+
+
+# -- "anti disco": taps of the same kind wait a moment ------------------------------------
+
+
+def test_after_a_tile_tap_other_tiles_wait(runtime, fake, library, clock):
+    first, second = add_favorite(library, fake, 0), add_favorite(library, fake, 2)
+    assert runtime.play_tile(first.id, tap=True) == "accepted"
+    with pytest.raises(CoolingDown) as info:
+        runtime.play_tile(second.id, tap=True)
+    assert info.value.retry_in == 5
+    assert runtime.state_document()["playback"]["tile_id"] == first.id
+    clock.advance(4)
+    with pytest.raises(CoolingDown) as info:
+        runtime.play_tile(second.id, tap=True)
+    assert info.value.retry_in == 1
+    clock.advance(1)
+    assert runtime.play_tile(second.id, tap=True) == "accepted"
+    assert runtime.state_document()["cooldown"] == {"tile": 5, "skip": 3, "toggle": 1}
+
+
+def test_the_tile_wait_is_a_setting_and_zero_switches_it_off(runtime, fake, library):
+    runtime.store.set_controls({"tap_cooldown": 0, "idle_minutes": 60})
+    first, second = add_favorite(library, fake, 0), add_favorite(library, fake, 2)
+    runtime.play_tile(first.id, tap=True)
+    assert runtime.play_tile(second.id, tap=True) == "accepted"
+
+
+def test_the_paused_tile_resumes_during_the_tile_wait(runtime, fake, library, clock):
+    tile = add_favorite(library, fake, 0)
+    runtime.play_tile(tile.id, tap=True)
+    clock.advance(1)
+    runtime.transport("pause", tap=True)
+    clock.advance(1)
+    assert runtime.play_tile(tile.id, tap=True) == "resumed"
+
+
+def test_next_and_previous_wait_three_seconds_play_and_pause_one(runtime, fake, library, clock):
+    runtime.play_tile(add_favorite(library, fake, 0).id)
+    runtime.transport("next", tap=True)
+    with pytest.raises(CoolingDown):
+        runtime.transport("previous", tap=True)
+    runtime.transport("pause", tap=True)  # another group
+    with pytest.raises(CoolingDown):
+        runtime.transport("play", tap=True)
+    clock.advance(1)
+    runtime.transport("play", tap=True)
+    clock.advance(2)
+    runtime.transport("previous", tap=True)
+
+
+def test_refused_taps_do_not_start_a_wait(runtime, fake, library, clock):
+    tile = add_favorite(library, fake, 0)
+    runtime.play_tile(tile.id)
+    runtime.transport("pause", tap=True)
+    clock.advance(1)
+    runtime.transport("pause", tap=True)  # already the state: nothing sent ...
+    runtime.transport("play", tap=True)  # ... and nothing to wait for
+
+
+def test_internal_starts_never_wait(runtime, fake, library):
+    first, second = add_favorite(library, fake, 0), add_favorite(library, fake, 2)
+    runtime.play_tile(first.id, tap=True)
+    assert runtime.play_tile(second.id) == "accepted"  # e.g. the freeze dance music
+
+
+# -- no tap for a long time: fade and pause --------------------------------------------
+
+
+@pytest.fixture
+def listening(runtime, fake, library, clock):
+    """A tile tapped on the tablet, playing at volume 20; pause after 60 minutes."""
+    tile = add_favorite(library, fake, 0)
+    runtime.play_tile(tile.id, tap=True)
+    fake.volume = 20
+    runtime.poll_volume()
+    runtime.poll_transport()
+    return tile
+
+
+def test_without_a_tap_the_music_fades_and_pauses_once(runtime, fake, clock, listening):
+    clock.advance(59 * 60 - 1)
+    runtime.poll_volume()
+    runtime.poll_transport()
+    assert (fake.volume, fake.state) == (20, "playing")
+    clock.advance(31)  # halfway through the one-minute fade
+    runtime.poll_volume()
+    assert fake.volume == 12  # 20 x (1 - 0.8 / 2)
+    assert runtime.state_document()["volume"]["limit"] == 12
+    assert runtime.status()["volume_guard"]["corrections"] == 0
+    clock.advance(30)
+    runtime.poll_transport()
+    assert fake.state == "paused"
+    runtime.poll_transport()  # confirmed: the volume for the next start comes back
+    assert fake.volume == 20
+    assert runtime.status()["idle"]["paused_at"] is not None
+    # No lock: the next tap plays as usual and is not paused again at once.
+    assert runtime.state_document()["schedule"]["phase"] == "off"
+    assert runtime.transport("play", tap=True)["state"] == "playing"
+    clock.advance(30 * 60)
+    runtime.poll_volume()
+    runtime.poll_transport()
+    assert (fake.volume, fake.state) == (20, "playing")
+
+
+def test_any_tap_starts_the_time_again(runtime, fake, clock, listening):
+    clock.advance(50 * 60)
+    runtime.change_volume("down")  # a tap on the tablet
+    volume = fake.volume
+    clock.advance(50 * 60)
+    runtime.poll_volume()
+    runtime.poll_transport()
+    assert (fake.volume, fake.state) == (volume, "playing")
+
+
+def test_a_tap_during_the_fade_brings_the_volume_back(runtime, fake, clock, listening):
+    clock.advance(59 * 60 + 30)
+    runtime.poll_volume()
+    assert fake.volume == 12
+    runtime.transport("next", tap=True)
+    runtime.poll_transport()
+    assert fake.volume == 20
+    assert fake.state == "playing"
+
+
+def test_only_tiles_are_paused_not_music_from_the_sonos_app(runtime, fake, clock, listening):
+    fake.media_uri = "x-sonosapi-stream:something-else"  # an adult plays other music
+    runtime.poll_transport()
+    assert runtime.state_document()["playback"]["tile_id"] is None
+    clock.advance(2 * 60 * 60)
+    runtime.poll_transport()
+    runtime.poll_volume()
+    runtime.poll_transport()
+    assert (fake.volume, fake.state) == (20, "playing")
+
+
+def test_paused_time_does_not_count(runtime, fake, clock, listening):
+    runtime.transport("pause")  # e.g. from the Sonos app
+    runtime.poll_transport()
+    clock.advance(59 * 60)
+    runtime.poll_transport()
+    fake.state = "playing"
+    runtime.poll_transport()
+    clock.advance(30 * 60)
+    runtime.poll_volume()
+    runtime.poll_transport()
+    assert (fake.volume, fake.state) == (20, "playing")
+
+
+def test_zero_minutes_switch_the_pause_off(runtime, fake, clock, listening):
+    runtime.store.set_controls({"tap_cooldown": 5, "idle_minutes": 0})
+    clock.advance(5 * 60 * 60)
+    runtime.poll_volume()
+    runtime.poll_transport()
+    assert (fake.volume, fake.state) == (20, "playing")
+
+
+def test_other_music_lowered_by_a_late_fade_gets_its_volume_back(runtime, fake, clock, listening):
+    fake.media_uri = "x-sonosapi-stream:something-else"
+    clock.advance(2 * 60 * 60)  # the guard runs before the transport poll noticed
+    runtime.poll_volume()
+    runtime.poll_transport()
+    runtime.poll_transport()
+    assert (fake.volume, fake.state) == (20, "playing")

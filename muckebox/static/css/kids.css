@@ -205,7 +205,8 @@ svg {
   }
 }
 
-.tiles.locked .tile:not(.pending) {
+.tiles.locked .tile:not(.pending),
+.tiles.cooling .tile:not(.playing) {
   opacity: 0.55;
 }
 

@@ -8,9 +8,11 @@ import { test } from "node:test";
 
 import {
   PAD_MAX,
+  cooldownGroup,
   POLL_MS,
   initial,
   isBedtime,
+  isCooling,
   isPlaying,
   limitSegments,
   nextDelay,
@@ -18,6 +20,7 @@ import {
   overlayTextKey,
   padPress,
   padReady,
+  tileTappable,
   placeholderColour,
   moonMode,
   sleepLeft,
@@ -127,4 +130,20 @@ test("PIN pad: digits only, a delete key, a minimum length", () => {
   assert.equal(padReady("123"), false);
   assert.equal(padReady(pin), true);
   assert.equal(padPress("9".repeat(PAD_MAX), "1").length, PAD_MAX);
+});
+
+test("anti disco: the tap groups wait, the loaded tile can always be resumed", () => {
+  assert.equal(cooldownGroup("next"), "skip");
+  assert.equal(cooldownGroup("previous"), "skip");
+  assert.equal(cooldownGroup("play"), "toggle");
+  assert.equal(cooldownGroup("pause"), "toggle");
+  const cooldowns = { tile: 5000 };
+  assert.equal(isCooling(cooldowns, "tile", 4999), true);
+  assert.equal(isCooling(cooldowns, "tile", 5000), false);
+  assert.equal(isCooling(cooldowns, "skip", 0), false);
+  const state = { playback: { state: "paused", tile_id: "ta" } };
+  assert.equal(tileTappable("ta", state, cooldowns, 1000), true);
+  assert.equal(tileTappable("tb", state, cooldowns, 1000), false);
+  assert.equal(tileTappable("tb", state, cooldowns, 6000), true);
+  assert.equal(tileTappable("tb", null, {}, 0), true);
 });

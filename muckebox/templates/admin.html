@@ -102,6 +102,18 @@ SPDX-License-Identifier: AGPL-3.0-or-later
       </form>
     </section>
 
+    <section class="card">
+      <h2 data-i18n="admin.controls"></h2>
+      <form id="controls" class="fields">
+        <label for="tap-cooldown" data-i18n="admin.tap_cooldown"></label>
+        <input id="tap-cooldown" name="tap_cooldown" type="number" min="0" max="30" step="1" inputmode="numeric" required>
+        <label for="idle-minutes" data-i18n="admin.idle_minutes"></label>
+        <input id="idle-minutes" name="idle_minutes" type="number" min="0" max="240" step="5" inputmode="numeric" required>
+        <p class="hint" data-i18n="admin.controls_hint"></p>
+        <button type="submit" data-i18n="admin.save"></button>
+      </form>
+    </section>
+
     <section id="schedule-section" class="card">
       <h2 data-i18n="admin.schedule"></h2>
       <p id="schedule-status" class="schedule-status"></p>

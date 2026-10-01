@@ -8,8 +8,10 @@ import { initBedtime, padIsOpen, renderBedtime } from "./bedtime.js";
 import { gameIsOpen, initGames, renderGames } from "./games.js";
 import { loadMessages, t, translatePage } from "./i18n.js";
 import {
+  cooldownGroup,
   initial,
   isBedtime,
+  isCooling,
   isPlaying,
   limitSegments,
   nextDelay,
@@ -17,6 +19,7 @@ import {
   overlayTextKey,
   placeholderColour,
   tileState,
+  tileTappable,
   volumeSegments,
 } from "./logic.js";
 
@@ -46,6 +49,8 @@ const model = {
   tileCount: 0,
   failures: 0,
   localPending: null,
+  // "Anti disco": until when (performance.now()) taps of a group wait.
+  cooldowns: {},
   shownErrorAt: null,
   pollTimer: null,
   toastTimer: null,
@@ -118,14 +123,18 @@ function renderState() {
   }
   const locked = Boolean((state && state.pending) || model.localPending);
   view.tiles.classList.toggle("locked", locked);
+  const now = performance.now();
+  view.tiles.classList.toggle("cooling", !locked && isCooling(model.cooldowns, "tile", now));
 
   const playing = isPlaying(state);
   view.toggle.classList.toggle("is-playing", playing);
   view.toggle.setAttribute("aria-label", t(playing ? "kids.pause" : "kids.play"));
   const playback = state ? state.playback : null;
-  view.toggle.disabled = !playback || (!playback.can_toggle && !playing);
-  view.prev.disabled = !playback || !playback.can_prev;
-  view.next.disabled = !playback || !playback.can_next;
+  view.toggle.disabled =
+    !playback || (!playback.can_toggle && !playing) || isCooling(model.cooldowns, "toggle", now);
+  const skipping = isCooling(model.cooldowns, "skip", now);
+  view.prev.disabled = !playback || !playback.can_prev || skipping;
+  view.next.disabled = !playback || !playback.can_next || skipping;
   const bedtime = renderBedtime(state);
   renderGames(state);
   view.tiles.hidden = bedtime;
@@ -239,12 +248,29 @@ function pollSoon() {
   model.pollTimer = setTimeout(poll, 150);
 }
 
-async function command(action) {
+// The same kind of tap waits a moment ("anti disco"); the server enforces it,
+// the tablet only shows it.
+function startCooldown(group, seconds) {
+  if (!seconds) return;
+  model.cooldowns[group] = Math.max(model.cooldowns[group] || 0, performance.now() + seconds * 1000);
+  setTimeout(renderState, seconds * 1000 + 50);
+  renderState();
+}
+
+function cooldownSeconds(group) {
+  const cooldown = model.state && model.state.cooldown;
+  return cooldown ? cooldown[group] : 0;
+}
+
+async function command(action, group = null) {
   try {
     const { data } = await action();
     return data;
   } catch (error) {
-    if (error instanceof ApiError && error.status === 409) return null; // busy: ignore
+    if (error instanceof ApiError && error.status === 409) {
+      if (error.code === "cooling_down" && group) startCooldown(group, error.retryIn || 1);
+      return null; // busy or waiting: ignore
+    }
     if (error instanceof ApiError && error.status === 503) {
       pollSoon();
       return null;
@@ -261,16 +287,24 @@ async function command(action) {
 function playTile(id) {
   const state = model.state;
   if (model.localPending || (state && state.pending)) return;
+  if (!tileTappable(id, state, model.cooldowns, performance.now())) return;
+  // The loaded tile again resumes it, like the play button.
+  const group = state && state.playback && state.playback.tile_id === id ? "toggle" : "tile";
   model.localPending = id;
   renderState();
-  command(() => post(`/api/tiles/${encodeURIComponent(id)}/play`)).then((data) => {
+  command(() => post(`/api/tiles/${encodeURIComponent(id)}/play`), group).then((data) => {
     if (!data || data.result !== "accepted") model.localPending = null;
+    if (data && data.result === "accepted") startCooldown("tile", cooldownSeconds("tile"));
+    if (data && data.result === "resumed") startCooldown("toggle", cooldownSeconds("toggle"));
     renderState();
   });
 }
 
 function transport(action) {
-  command(() => post(`/api/transport/${action}`)).then((data) => {
+  const group = cooldownGroup(action);
+  if (isCooling(model.cooldowns, group, performance.now())) return;
+  command(() => post(`/api/transport/${action}`), group).then((data) => {
+    if (data) startCooldown(group, cooldownSeconds(group));
     if (data && data.playback && model.state) {
       model.state.playback = data.playback;
       renderState();

@@ -104,6 +104,22 @@ export function tileState(tileId, state, localPendingId = null) {
   return "";
 }
 
+/** The group of taps a transport action belongs to ("anti disco" lock). */
+export function cooldownGroup(action) {
+  return action === "next" || action === "previous" ? "skip" : "toggle";
+}
+
+/** Whether taps of ``group`` still wait: ``cooldowns`` maps groups to an end in ms. */
+export function isCooling(cooldowns, group, now) {
+  return (cooldowns[group] || 0) > now;
+}
+
+/** May a tile be tapped now? The tile that is loaded can always be resumed. */
+export function tileTappable(tileId, state, cooldowns, now) {
+  const loaded = Boolean(state && state.playback && state.playback.tile_id === tileId);
+  return loaded || !isCooling(cooldowns, "tile", now);
+}
+
 /** First letter of a title, for tiles without a cover. */
 export function initial(title) {
   const match = String(title || "").trim().match(/\p{L}|\p{N}/u);
