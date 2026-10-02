@@ -156,10 +156,12 @@ svg {
   border-radius: var(--tile-radius);
   overflow: hidden;
   box-shadow: 0 0 0 6px rgb(255 255 255 / 12%);
-  transition: box-shadow 160ms ease;
+  transition: box-shadow 160ms ease, transform 120ms ease;
 }
 
-.tile:active {
+/* Pressed: only the picture shrinks, so the tile itself never moves away
+   from a finger on its edge. */
+.tile.pressed .art {
   transform: scale(0.96);
 }
 
@@ -298,6 +300,10 @@ svg {
 /* -- "small": six tiles per page, turn the page ------------------------------ */
 
 [data-profile="small"] .tiles {
+  /* Swipes and taps are recognised in kids.js (generous for small children);
+     the browser does not pan here. */
+  touch-action: none;
+
   /* The tiles are as big as fits: the smaller of a column's width and a row's
      height (container units: the size of this scroller). */
   --cols: 3;
@@ -361,6 +367,14 @@ svg {
 [data-profile="small"] .tile {
   width: var(--cell);
   height: var(--cell);
+}
+
+/* A press in the gap counts for the nearest tile: each tile reaches half the
+   gap into it. */
+[data-profile="small"] .tile::before {
+  content: "";
+  position: absolute;
+  inset: calc(var(--gap) / -2);
 }
 
 [data-profile="small"] .tile .art {

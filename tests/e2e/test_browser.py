@@ -623,3 +623,66 @@ def test_a_failed_sleep_timer_start_can_be_tried_again(page, server):
     page.unroute("**/api/sleep-timer/start")
     moon.tap()
     expect(moon).to_have_attribute("data-mode", "running")
+
+
+# -- toddler taps: long, wobbly, slightly beside the tile -------------------------------------
+
+
+def touch(page, points, hold_ms=0, wobble=0):
+    """A real touch through the browser's input pipeline (Chromium only): put
+    a finger down at the first point, wobble while holding, lift it at the last."""
+    cdp = page.context.new_cdp_session(page)
+    send = lambda kind, at: cdp.send(  # noqa: E731
+        "Input.dispatchTouchEvent",
+        {"type": kind, "touchPoints": [] if at is None else [{"x": at[0], "y": at[1]}]},
+    )
+    x, y = points[0]
+    send("touchStart", (x, y))
+    for step in range(max(1, hold_ms // 100)):
+        page.wait_for_timeout(100)
+        if wobble:
+            sign = 1 if step % 2 else -1
+            send("touchMove", (x + sign * wobble, y - sign * wobble))
+    for point in points[1:]:
+        page.wait_for_timeout(16)
+        send("touchMove", point)
+    send("touchEnd", None)
+
+
+def chromium_only(page):
+    if page.context.browser.browser_type.name != "chromium":
+        pytest.skip("real touch input is emulated through Chromium's DevTools protocol")
+
+
+def middle(box):
+    return box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+
+
+@pytest.mark.parametrize("how", ["long_wobbly", "in_the_gap"])
+def test_toddler_taps_start_the_tile(page, server, how):
+    chromium_only(page)
+    server.add_tiles(0, 2, 3, 1, 4, 0)
+    server.store.set_controls({"tap_cooldown": 0})
+    page.goto(server.url)
+    tiles = page.locator(".tile")
+    expect(tiles).to_have_count(6)
+    first, second = tiles.nth(0).bounding_box(), tiles.nth(1).bounding_box()
+    x, y = middle(first)
+    if how == "long_wobbly":
+        touch(page, [(x, y)], hold_ms=1500, wobble=12)
+    else:  # just right of the tile, in the gap before the next one
+        gap_x = first["x"] + first["width"] + (second["x"] - first["x"] - first["width"]) * 0.3
+        touch(page, [(gap_x, y)])
+    expect(tiles.nth(0)).to_have_class(re.compile(r"\bplaying\b"))
+
+
+def test_a_swipe_turns_the_page_and_starts_nothing(page, server):
+    chromium_only(page)
+    server.add_tiles(*[i % 5 for i in range(8)])
+    page.goto(server.url)
+    tiles = page.locator(".tile")
+    expect(tiles).to_have_count(8)
+    x, y = middle(tiles.nth(4).bounding_box())
+    touch(page, [(x, y), (x - 100, y), (x - 250, y)])
+    expect(page.locator("#page-dots i").nth(1)).to_have_class(re.compile(r"\bon\b"))
+    assert server.fake.state != "playing"
