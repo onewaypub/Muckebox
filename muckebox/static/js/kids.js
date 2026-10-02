@@ -34,6 +34,10 @@ import {
 
 const TOAST_MS = 4000;
 const DOTS = 5; // volume of the "small" layout: five growing dots
+// Taps of small children: the finger may stay down as long as it likes and
+// wobble this far (px); only a clear sideways move is a swipe.
+const TAP_SLOP = 40;
+const SWIPE = 80;
 const PICTURES = "/static/pictures";
 const $ = (id) => document.getElementById(id);
 
@@ -141,7 +145,11 @@ function tileNode(tile) {
   } else {
     node.querySelector(".cover").remove();
   }
-  node.addEventListener("click", () => playTile(tile.id));
+  // Touch and mouse are handled by the press below; a click without a
+  // pointer press (detail 0) comes from the keyboard.
+  node.addEventListener("click", (event) => {
+    if (event.detail === 0) playTile(tile.id);
+  });
   return node;
 }
 
@@ -188,6 +196,43 @@ function renderPager() {
   view.pagePrev.disabled = model.page <= 0;
   view.pageNext.disabled = model.page >= count - 1;
   [...view.pageDots.children].forEach((dot, index) => dot.classList.toggle("on", index === model.page));
+}
+
+// -- presses: our own tap and swipe ----------------------------------------------------
+//
+// The browser's "click" is made for adults: it is dropped after a long press
+// (Android treats it as a long-press gesture), when the finger moves a few
+// pixels, and between two tiles. Small children press long, roll their finger
+// and hit the edge, so the tiles recognise a tap themselves: on lifting the
+// finger, however long it was down, if it moved less than TAP_SLOP.
+
+let press = null;
+
+function onPressStart(event) {
+  if (!event.isPrimary || (event.pointerType === "mouse" && event.button !== 0)) return;
+  const node = event.target.closest(".tile");
+  press = { id: node ? node.dataset.id : null, node, x: event.clientX, y: event.clientY };
+  if (node) node.classList.add("pressed");
+  // The finger may slide off the tile: its release still belongs to this press.
+  view.tiles.setPointerCapture(event.pointerId);
+}
+
+function onPressEnd(event) {
+  if (!press || !event.isPrimary) return;
+  const { id, node } = press;
+  const dx = event.clientX - press.x;
+  const dy = event.clientY - press.y;
+  endPress();
+  if (profile() === "small" && Math.abs(dx) >= SWIPE && Math.abs(dx) > Math.abs(dy)) {
+    scrollToPage(model.page + (dx < 0 ? 1 : -1));
+  } else if (id && Math.hypot(dx, dy) < TAP_SLOP && node.isConnected) {
+    playTile(id);
+  }
+}
+
+function endPress() {
+  if (press && press.node) press.node.classList.remove("pressed");
+  press = null;
 }
 
 function onScroll() {
@@ -522,6 +567,11 @@ function bindControls() {
   view.pagePrev.addEventListener("click", () => scrollToPage(model.page - 1));
   view.pageNext.addEventListener("click", () => scrollToPage(model.page + 1));
   view.tiles.addEventListener("scroll", onScroll, { passive: true });
+  view.tiles.addEventListener("pointerdown", onPressStart);
+  view.tiles.addEventListener("pointerup", onPressEnd);
+  // The browser took over (scrolling the "big" grid): no tap.
+  view.tiles.addEventListener("pointercancel", endPress);
+  view.tiles.addEventListener("lostpointercapture", endPress);
   window.addEventListener("resize", () => scrollToPage(model.page, false));
   // The progress of the "big" layout moves on between two polls.
   setInterval(() => {

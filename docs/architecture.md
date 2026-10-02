@@ -111,6 +111,13 @@ snapping; the tile size comes from container query units, so six tiles
 always fit without scrolling in both orientations. Tiles without a cover show
 an animal picture chosen from the tile's id, on a colour from the same id.
 
+Tiles do not rely on the browser's `click`: it is dropped after a long press
+(Android's long-press gesture), after a few pixels of movement and between two
+tiles, which is exactly how small children press. `kids.js` recognises the
+tap itself with pointer events: on release, however long the finger was down,
+if it moved less than 40 px; on `small` each tile's hit area reaches into half
+of the gap, and a sideways move of 80 px or more turns the page instead.
+
 For `big`, the transport lane reads the position about every 10 s while a tile
 with a queue plays (the same read that "Weiterhören" uses) and publishes the
 track's number, title and seconds; the tablet counts the seconds on locally.
