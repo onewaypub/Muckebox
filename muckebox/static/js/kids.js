@@ -38,6 +38,8 @@ const DOTS = 5; // volume of the "small" layout: five growing dots
 // wobble this far (px); only a clear sideways move is a swipe.
 const TAP_SLOP = 40;
 const SWIPE = 80;
+// A finger that rests this long (ms) starts the tile without being lifted.
+const HOLD_MS = 250;
 const PICTURES = "/static/pictures";
 const $ = (id) => document.getElementById(id);
 
@@ -203,35 +205,56 @@ function renderPager() {
 // The browser's "click" is made for adults: it is dropped after a long press
 // (Android treats it as a long-press gesture), when the finger moves a few
 // pixels, and between two tiles. Small children press long, roll their finger
-// and hit the edge, so the tiles recognise a tap themselves: on lifting the
-// finger, however long it was down, if it moved less than TAP_SLOP.
+// and hit the edge, so the tiles recognise a tap themselves: as soon as the
+// finger has rested for HOLD_MS (it need not be lifted), or when it is lifted
+// earlier, as long as it moved less than TAP_SLOP. A move beyond that first
+// is a swipe (or the "big" grid scrolling) and starts nothing.
 
 let press = null;
 
 function onPressStart(event) {
   if (!event.isPrimary || (event.pointerType === "mouse" && event.button !== 0)) return;
   const node = event.target.closest(".tile");
-  press = { id: node ? node.dataset.id : null, node, x: event.clientX, y: event.clientY };
-  if (node) node.classList.add("pressed");
+  endPress();
+  press = { id: node ? node.dataset.id : null, node, x: event.clientX, y: event.clientY, moved: 0 };
+  if (node) {
+    node.classList.add("pressed");
+    press.timer = setTimeout(() => firePress(), HOLD_MS);
+  }
   // The finger may slide off the tile: its release still belongs to this press.
   view.tiles.setPointerCapture(event.pointerId);
 }
 
+function onPressMove(event) {
+  if (!press || !event.isPrimary) return;
+  press.moved = Math.max(press.moved, Math.hypot(event.clientX - press.x, event.clientY - press.y));
+  if (press.moved >= TAP_SLOP) clearTimeout(press.timer); // a swipe, not a tap
+}
+
+// The tile starts once per press: after resting, or on lifting the finger.
+function firePress() {
+  if (!press || press.fired || press.moved >= TAP_SLOP || !press.node.isConnected) return;
+  press.fired = true;
+  playTile(press.id);
+}
+
 function onPressEnd(event) {
   if (!press || !event.isPrimary) return;
-  const { id, node } = press;
   const dx = event.clientX - press.x;
   const dy = event.clientY - press.y;
-  endPress();
+  press.moved = Math.max(press.moved, Math.hypot(dx, dy));
   if (profile() === "small" && Math.abs(dx) >= SWIPE && Math.abs(dx) > Math.abs(dy)) {
     scrollToPage(model.page + (dx < 0 ? 1 : -1));
-  } else if (id && Math.hypot(dx, dy) < TAP_SLOP && node.isConnected) {
-    playTile(id);
+  } else if (press.id) {
+    firePress();
   }
+  endPress();
 }
 
 function endPress() {
-  if (press && press.node) press.node.classList.remove("pressed");
+  if (!press) return;
+  clearTimeout(press.timer);
+  if (press.node) press.node.classList.remove("pressed");
   press = null;
 }
 
@@ -568,6 +591,7 @@ function bindControls() {
   view.pageNext.addEventListener("click", () => scrollToPage(model.page + 1));
   view.tiles.addEventListener("scroll", onScroll, { passive: true });
   view.tiles.addEventListener("pointerdown", onPressStart);
+  view.tiles.addEventListener("pointermove", onPressMove);
   view.tiles.addEventListener("pointerup", onPressEnd);
   // The browser took over (scrolling the "big" grid): no tap.
   view.tiles.addEventListener("pointercancel", endPress);
