@@ -686,3 +686,19 @@ def test_a_swipe_turns_the_page_and_starts_nothing(page, server):
     touch(page, [(x, y), (x - 100, y), (x - 250, y)])
     expect(page.locator("#page-dots i").nth(1)).to_have_class(re.compile(r"\bon\b"))
     assert server.fake.state != "playing"
+
+
+def test_a_finger_resting_on_the_tile_starts_it_before_it_is_lifted(page, server):
+    chromium_only(page)
+    server.add_tiles(0, 2)
+    page.goto(server.url)
+    tile = page.locator(".tile").nth(0)
+    expect(tile).to_be_visible()
+    cdp = page.context.new_cdp_session(page)
+    x, y = middle(tile.bounding_box())
+    cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": x, "y": y}]})
+    expect(tile).to_have_class(re.compile(r"\bplaying\b"))  # the finger is still down
+    cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+    page.wait_for_timeout(500)
+    plays = [call for call in server.fake.calls if call[0] == "play_favorite"]
+    assert len(plays) == 1  # lifting the finger does not start it again
