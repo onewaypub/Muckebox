@@ -27,7 +27,7 @@ TYPES = frozenset(
         "pointerdown", "pointermove", "pointerup", "pointercancel", "lostpointercapture",
         "touchstart", "touchend", "touchcancel", "contextmenu", "click",
         "tile-hold", "tile-release", "press-moved", "press-swipe", "press-cancel",
-        "light", "page",
+        "light", "playing", "page",
     }
 )  # fmt: skip
 _WORD_RE = re.compile(r"^[a-z0-9:_-]{1,40}$")

@@ -900,7 +900,14 @@ def test_the_pin_pad_and_the_login_share_one_total(admin, client, services):
 
 
 def test_parents_set_the_tap_wait_and_the_pause_without_taps(admin, services):
-    body = {"tap_cooldown": 8, "idle_minutes": 90, "profile": "big", "skip_buttons": True}
+    body = {
+        "tap_cooldown": 8,
+        "idle_minutes": 90,
+        "profile": "big",
+        "skip_buttons": True,
+        "now_view": False,
+        "tap_sound": False,
+    }
     response = admin.put("/api/admin/settings/controls", json=body, headers=POST)
     assert response.get_json()["settings"]["controls"] == body
     assert services.store.current().controls.idle_minutes == 90

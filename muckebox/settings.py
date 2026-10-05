@@ -159,6 +159,10 @@ class ControlSettings:
     profile: str = "small"
     #: Previous/next on the "small" layout ("big" always has them).
     skip_buttons: bool = False
+    #: "small": after a tile starts, show it big with a home button.
+    now_view: bool = True
+    #: A soft "plop" from the tablet when a tap starts something.
+    tap_sound: bool = True
 
 
 @dataclass(frozen=True)
@@ -321,6 +325,8 @@ def validate_controls(data: object) -> ControlSettings:
     idle = data.get("idle_minutes", DEFAULT_IDLE_MINUTES)
     profile = data.get("profile", "small")
     skip = data.get("skip_buttons", False)
+    now_view = data.get("now_view", True)
+    tap_sound = data.get("tap_sound", True)
     if (
         type(cooldown) is not int
         or not TAP_COOLDOWN[0] <= cooldown <= TAP_COOLDOWN[1]
@@ -328,9 +334,11 @@ def validate_controls(data: object) -> ControlSettings:
         or not IDLE_MINUTES[0] <= idle <= IDLE_MINUTES[1]
         or profile not in PROFILES
         or type(skip) is not bool
+        or type(now_view) is not bool
+        or type(tap_sound) is not bool
     ):
         raise SettingsError("controls_invalid")
-    return ControlSettings(cooldown, idle, profile, skip)
+    return ControlSettings(cooldown, idle, profile, skip, now_view, tap_sound)
 
 
 def controls_to_json(settings: ControlSettings) -> dict[str, Any]:
@@ -339,6 +347,8 @@ def controls_to_json(settings: ControlSettings) -> dict[str, Any]:
         "idle_minutes": settings.idle_minutes,
         "profile": settings.profile,
         "skip_buttons": settings.skip_buttons,
+        "now_view": settings.now_view,
+        "tap_sound": settings.tap_sound,
     }
 
 

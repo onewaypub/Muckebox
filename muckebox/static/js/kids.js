@@ -10,6 +10,7 @@
 
 import { ApiError, get, post } from "./api.js";
 import { initBedtime, padIsOpen, renderBedtime } from "./bedtime.js";
+import { hop, plop, setTapSound, unlockFeedback } from "./feedback.js";
 import { gameIsOpen, initGames, renderGames } from "./games.js";
 import { loadMessages, t, translatePage } from "./i18n.js";
 import { diagNote, setTouchDiag, targetName } from "./touchdiag.js";
@@ -61,6 +62,12 @@ const view = {
   pageNext: $("page-next"),
   pageDots: $("page-dots"),
   lights: $("lights"),
+  pager: document.querySelector(".pager"),
+  playing: $("playing"),
+  playingArt: $("playing-art"),
+  playingCover: $("playing-cover"),
+  playingPicture: $("playing-picture"),
+  home: $("home"),
   now: {
     cover: $("now-cover"),
     picture: $("now-picture"),
@@ -87,6 +94,7 @@ const model = {
   pages: [],
   page: 0,
   shownPlaying: null, // the playing tile the pages last turned to
+  browsing: false, // "small": the house was tapped, the tiles show although one plays
   failures: 0,
   localPending: null,
   // "Anti disco": until when (performance.now()) taps of a group wait.
@@ -232,6 +240,7 @@ function onPressStart(event) {
   };
   if (node) {
     node.classList.add("pressed");
+    unlockFeedback(); // inside the touch: tablets allow sound only then
     press.timer = setTimeout(() => firePress("tile-hold"), HOLD_MS);
   }
   // The finger may slide off the tile: its release still belongs to this press.
@@ -257,6 +266,8 @@ function firePress(how) {
   if (!press || !press.id || press.fired || press.moved >= TAP_SLOP || !press.node.isConnected) return;
   press.fired = true;
   note(how);
+  plop();
+  hop(press.node.querySelector(".art"));
   playTile(press.id);
 }
 
@@ -300,6 +311,7 @@ function followPlaying(state) {
   const id = state && state.playback ? state.playback.tile_id : null;
   if (!id || id === model.shownPlaying) return;
   model.shownPlaying = id;
+  model.browsing = false; // started elsewhere (e.g. a game): show it big
   const page = pageOf(model.pages, id);
   if (page >= 0 && page !== model.page) scrollToPage(page);
 }
@@ -340,6 +352,7 @@ function renderState() {
   view.empty.hidden = bedtime || model.tiles.length > 0;
   renderVolume(state ? state.volume : null, bedtime);
   renderLights(state);
+  renderPlaying(state, bedtime);
   renderNow(state);
   renderPager();
   followPlaying(state);
@@ -420,7 +433,10 @@ function renderLights(state) {
         img.alt = "";
         button.append(img);
         button.addEventListener("pointerdown", (event) => {
-          if (event.isPrimary && (event.pointerType !== "mouse" || event.button === 0)) toggleLight(slot.slot);
+          if (event.isPrimary && (event.pointerType !== "mouse" || event.button === 0)) {
+            unlockFeedback();
+            toggleLight(slot.slot);
+          }
         });
         // A click without a pointer press (detail 0) comes from the keyboard.
         button.addEventListener("click", (event) => {
@@ -446,6 +462,8 @@ function slotsKey(slots) {
 function toggleLight(slot) {
   if (isCooling(model.cooldowns, "light", performance.now())) return;
   diagNote("light", { target: `light:${slot}` });
+  plop();
+  hop(view.lights.querySelector(`[data-slot="${slot}"]`));
   const seconds = (model.state && model.state.lights && model.state.lights.cooldown) || 3;
   startCooldown("light", seconds);
   command(() => post(`/api/lights/${slot}/toggle`), "light").then((data) => {
@@ -454,6 +472,45 @@ function toggleLight(slot) {
       renderState();
     }
   });
+}
+
+// "Klein": the tile that plays, big, like a picture book page; a tap on it
+// pauses or continues, the house goes back to all tiles. Shown at once on the
+// tap (the tile still starting), gone when nothing of ours is loaded.
+function renderPlaying(state, bedtime) {
+  const wanted = Boolean(state && state.view && state.view.now_view !== false);
+  const loaded = state && state.playback ? state.playback.tile_id : null;
+  const id = model.localPending || loaded;
+  const tile = model.tiles.find((item) => item.id === id);
+  const show = profile() === "small" && wanted && Boolean(tile) && !model.browsing && !bedtime;
+  view.playing.hidden = !show;
+  view.pager.classList.toggle("now-playing", show);
+  if (!show) return;
+  const playing = isPlaying(state) || Boolean(model.localPending);
+  view.playing.classList.toggle("paused", !playing);
+  view.playingArt.setAttribute("aria-label", t(playing ? "kids.pause" : "kids.play"));
+  view.playingArt.style.background = placeholderColour(tile.id);
+  view.playingPicture.src = `${PICTURES}/${placeholderPicture(tile.id)}.svg`;
+  const cover = tile.cover || "";
+  if (view.playingCover.getAttribute("src") !== cover) {
+    view.playingCover.hidden = true;
+    if (cover) view.playingCover.src = cover;
+    else view.playingCover.removeAttribute("src");
+  }
+}
+
+function onPlayingPress(event) {
+  if (!event.isPrimary || (event.pointerType === "mouse" && event.button !== 0)) return;
+  unlockFeedback();
+  pressPlaying();
+}
+
+function pressPlaying() {
+  if (model.localPending || isCooling(model.cooldowns, "toggle", performance.now())) return;
+  diagNote("playing", { target: "control:playing-art" });
+  plop();
+  hop(view.playingArt);
+  togglePlayback();
 }
 
 // "Groß": what is playing, its chapter and how far it got.
@@ -580,6 +637,7 @@ function applyState(state) {
   }
   model.state = state;
   setTouchDiag(Boolean(state.diag));
+  setTapSound(!state.view || state.view.tap_sound !== false);
   if (!state.pending) model.localPending = null;
   renderState();
 }
@@ -633,6 +691,7 @@ function playTile(id) {
   const group = state && state.playback && state.playback.tile_id === id ? "toggle" : "tile";
   model.localPending = id;
   model.shownPlaying = id; // tapped here: the page stays where it is
+  model.browsing = false; // a new tile: show it big ("small")
   renderState();
   command(() => post(`/api/tiles/${encodeURIComponent(id)}/play`), group).then((data) => {
     if (!data || data.result !== "accepted") model.localPending = null;
@@ -673,6 +732,20 @@ function bindControls() {
   view.next.addEventListener("click", () => transport("next"));
   view.louder.addEventListener("click", () => changeVolume("up"));
   view.quieter.addEventListener("click", () => changeVolume("down"));
+  view.playingArt.addEventListener("pointerdown", onPlayingPress);
+  view.playingArt.addEventListener("click", (event) => {
+    if (event.detail === 0) pressPlaying(); // the keyboard
+  });
+  view.playingCover.addEventListener("load", () => {
+    view.playingCover.hidden = false;
+  });
+  view.playingCover.addEventListener("error", () => {
+    view.playingCover.hidden = true;
+  });
+  view.home.addEventListener("click", () => {
+    model.browsing = true;
+    renderState();
+  });
   view.pagePrev.addEventListener("click", () => scrollToPage(model.page - 1));
   view.pageNext.addEventListener("click", () => scrollToPage(model.page + 1));
   view.tiles.addEventListener("scroll", onScroll, { passive: true });

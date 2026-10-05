@@ -245,6 +245,9 @@ def test_small_layout_turns_pages_and_follows_the_playing_tile(page, server):
     expect(last).to_be_in_viewport()
     last.tap()
     expect(last).to_have_class(re.compile(r"\bplaying\b"))
+    expect(page.locator("#playing")).to_be_visible()  # the tile big
+    page.locator("#home").tap()  # back to all tiles, still on the second page
+    expect(last).to_be_in_viewport()
     page.locator("#page-prev").tap()
     expect(page.locator(".tile").nth(0)).to_be_in_viewport()
     assert tiles[7].id == last.get_attribute("data-id")
@@ -806,3 +809,33 @@ def test_touch_diagnosis_shows_what_the_tablet_receives(page, server):
     page.locator("#touch-stop").tap()
     expect(page.locator("#touch-status")).to_have_text("Aus")
     assert not server.runtime.touchlog.active()
+
+
+def test_the_playing_tile_shows_big_and_pauses_on_a_tap(page, server):
+    server.add_tiles(0, 2)
+    page.goto(server.url)
+    tiles = page.locator(".tile")
+    expect(tiles).to_have_count(2)
+    playing = page.locator("#playing")
+    expect(playing).to_be_hidden()
+    tiles.nth(1).tap()
+    expect(tiles.nth(1).locator(".art")).to_have_class(re.compile(r"\bhop\b"))  # instant hop
+    expect(playing).to_be_visible()
+    expect(playing).not_to_have_class(re.compile(r"\bpaused\b"))
+    expect(page.locator(".tile").first).to_be_hidden()  # the tiles are behind it
+    page.wait_for_timeout(1100)  # play/pause wait 1 s after a tap
+    page.locator("#playing-art").tap()
+    expect(playing).to_have_class(re.compile(r"\bpaused\b"))
+    assert server.fake.state == "paused"
+    page.locator("#home").tap()
+    expect(playing).to_be_hidden()
+    expect(tiles.nth(0)).to_be_visible()
+
+
+def test_parents_can_switch_off_the_big_picture(page, server):
+    server.store.set_controls({"now_view": False})
+    server.add_tiles(0, 2)
+    page.goto(server.url)
+    page.locator(".tile").nth(1).tap()
+    expect(page.locator(".tile").nth(1)).to_have_class(re.compile(r"\bplaying\b"))
+    expect(page.locator("#playing")).to_be_hidden()

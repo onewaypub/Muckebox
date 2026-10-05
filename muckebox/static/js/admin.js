@@ -546,6 +546,8 @@ function renderVolumeForm(current) {
     radio.checked = radio.value === current.controls.profile;
   }
   $("skip-buttons").checked = current.controls.skip_buttons;
+  $("now-view").checked = current.controls.now_view;
+  $("tap-sound").checked = current.controls.tap_sound;
   renderVolumePreview();
 }
 
@@ -566,6 +568,7 @@ function renderVolumePreview() {
   $("preview-taps").textContent = t("admin.taps_to_limit", { taps: Math.ceil(max / step) });
   const small = document.querySelector("input[name=profile][value=small]");
   $("skip-buttons").closest("label").hidden = !small.checked;
+  $("now-view").closest("label").hidden = !small.checked;
 }
 
 async function saveVolume(event) {
@@ -578,6 +581,8 @@ async function saveVolume(event) {
     idle_minutes: $("idle-minutes").valueAsNumber,
     profile: profile ? profile.value : "small",
     skip_buttons: $("skip-buttons").checked,
+    now_view: $("now-view").checked,
+    tap_sound: $("tap-sound").checked,
   };
   const result = await busy(
     button,
@@ -810,7 +815,7 @@ function pressesOf(events) {
         press.extra.push("pointercancel");
         if (press.result === "nothing") press.result = "cancelled";
       }
-    } else if (["tile-hold", "tile-release", "light"].includes(event.type) && last) {
+    } else if (["tile-hold", "tile-release", "light", "playing"].includes(event.type) && last) {
       last.result = "started";
       last.extra.push(event.type);
     } else if (event.type === "press-moved" && last) {
