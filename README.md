@@ -410,6 +410,7 @@ into the Docker image (kept in sync with `requirements.txt` by a test).
 | [certifi](https://github.com/certifi/python-certifi) | MPL-2.0 |
 | [lxml](https://lxml.de/) | BSD-3-Clause (its binary wheels bundle libxml2 and libxslt, MIT; libiconv, LGPL-2.1; zlib, Zlib) |
 | [xmltodict](https://github.com/martinblech/xmltodict) | MIT |
+| [zeroconf](https://github.com/python-zeroconf/python-zeroconf) | LGPL-2.1-or-later (used unchanged as a library) |
 | [ifaddr](https://github.com/ifaddr/ifaddr) | MIT |
 | [appdirs](https://github.com/ActiveState/appdirs) | MIT |
 | [tzdata](https://github.com/python/tzdata) | Apache-2.0 (the time zone data itself is public domain) |
