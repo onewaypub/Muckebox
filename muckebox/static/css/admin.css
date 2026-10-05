@@ -1730,6 +1730,116 @@ input[type="range"] {
   max-width: 440px;
 }
 
+/* -- lights ----------------------------------------------------------------------------- */
+
+.pairing {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: #fff4dc;
+  color: #5c3d0a;
+  font-weight: 600;
+}
+
+.pairing-count {
+  min-width: 44px;
+  font-family: var(--heading);
+  font-size: 28px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.bridge-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+}
+
+.bridge-card .grow {
+  display: flex;
+  flex-direction: column;
+}
+
+.bridge-card .bad {
+  color: var(--danger);
+}
+
+.room-icon.on {
+  background: var(--navy);
+}
+
+.room-icon.on svg {
+  fill: var(--sun);
+}
+
+.bridge-row .choose {
+  border: 0;
+  background: var(--navy);
+  color: #fff;
+}
+
+.slots {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 14px;
+}
+
+.slot {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+}
+
+.slot-title {
+  padding: 0 4px;
+  font-weight: 700;
+}
+
+.slot-pictures {
+  display: flex;
+  gap: 6px;
+}
+
+.slot-pictures label {
+  position: relative;
+  flex: 1;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  max-width: 52px;
+  border-radius: 12px;
+  background: var(--soft);
+  cursor: pointer;
+}
+
+.slot-pictures input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.slot-pictures img {
+  width: 64%;
+  height: 64%;
+}
+
+.slot-pictures label:has(input:checked) {
+  background: var(--navy);
+  box-shadow: 0 0 0 3px var(--sun);
+}
+
+.slot-pictures label:has(input:focus-visible) {
+  outline: 3px solid rgb(29 53 87 / 35%);
+}
+
 /* -- flash -------------------------------------------------------------------------------- */
 
 .flash {

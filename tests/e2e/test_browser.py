@@ -24,6 +24,7 @@ from waitress import create_server  # noqa: E402
 
 from muckebox.config import load_settings  # noqa: E402
 from muckebox.covers import CoverStore  # noqa: E402
+from muckebox.hue.fake import FakeHue  # noqa: E402
 from muckebox.library import Library, favorite_source  # noqa: E402
 from muckebox.runtime.service import Runtime  # noqa: E402
 from muckebox.settings import SettingsStore  # noqa: E402
@@ -58,6 +59,7 @@ class Server:
     def __init__(self, tmp_path, set_up=True, clock=None):
         household = self.household = FakeHousehold()
         self.fake = household.speaker("Kinderzimmer")
+        self.hue = FakeHue()
         settings = load_settings({"DATA_DIR": str(tmp_path)})
         store = self.store = SettingsStore(tmp_path, scrypt={"n": 2**4, "r": 8, "p": 1})
         if set_up:
@@ -71,6 +73,7 @@ class Server:
             backend_factory=household.backend,
             room_finder=household.find_rooms,
             clock=clock,
+            hue=self.hue,
         )
         services = Services(
             settings=settings,
@@ -702,3 +705,69 @@ def test_a_finger_resting_on_the_tile_starts_it_before_it_is_lifted(page, server
     page.wait_for_timeout(500)
     plays = [call for call in server.fake.calls if call[0] == "play_favorite"]
     assert len(plays) == 1  # lifting the finger does not start it again
+
+
+# -- lights -------------------------------------------------------------------------------------
+
+
+def set_up_lights(server):
+    bridge = server.hue.bridge
+    from muckebox.settings import HueBridge
+
+    server.store.set_hue_bridge(
+        HueBridge(bridge.ip, bridge.id, bridge.name, bridge.key, bridge.fingerprint)
+    )
+    server.store.set_hue(
+        {
+            "room": "room-kids",
+            "slots": [
+                {"scene": "scene-bright", "picture": "sun"},
+                {"scene": "scene-night", "picture": "moon"},
+            ],
+        }
+    )
+
+
+@pytest.mark.parametrize("layout", ["small", "big"])
+def test_kids_switch_the_lights(page, server, layout):
+    server.store.set_controls({"profile": layout})
+    set_up_lights(server)
+    server.add_tiles(0, 2)
+    page.goto(server.url)
+    buttons = page.locator("#lights .light")
+    expect(buttons).to_have_count(2)
+    expect(buttons.nth(1)).to_be_enabled(timeout=10_000)  # after the first poll
+    buttons.nth(1).tap()
+    expect(buttons.nth(1)).to_have_class(re.compile(r"\bactive\b"))
+    assert "group-kids" in server.hue.bridge.lit
+    expect(buttons.nth(1)).to_be_enabled(timeout=5000)  # after the 3 s wait
+    buttons.nth(1).tap()
+    expect(buttons.nth(1)).not_to_have_class(re.compile(r"\bactive\b"))
+    assert "group-kids" not in server.hue.bridge.lit
+
+
+def test_parents_connect_the_bridge_and_choose_buttons(page, server):
+    server.hue.bridge.button_pressed = False
+    log_in(page, server, to="lights")
+    page.locator("#hue-search button").tap()
+    row = page.locator(".bridge-row", has_text="Hue Bridge")
+    row.locator("button").tap()
+    expect(page.locator("#hue-pairing")).to_be_visible()
+    server.hue.bridge.button_pressed = True  # the parent pressed the button
+    expect(page.locator("#hue-paired")).to_be_visible(timeout=10_000)
+    expect(page.locator("#hue-bridge-name")).to_contain_text("Hue Bridge")
+    page.locator("#hue-room").select_option("room-kids")
+    first = page.locator("#hue-slots .slot").nth(0)
+    first.locator(".slot-scene").select_option("scene-night")
+    first.locator(".slot-pictures label").nth(3).tap()  # the moon
+    page.locator("#hue-form button[type=submit]").tap()
+    expect(page.locator("#flash")).to_have_text("Gespeichert")
+    hue = server.store.current().hue
+    assert hue.room == "room-kids"
+    assert [(s.scene, s.picture) for s in hue.slots] == [("scene-night", "moon")]
+    open_page(page, "sleep")
+    expect(page.locator("#sleep-lights-field")).to_be_visible()
+    page.locator("#sleep-lights").select_option("off")
+    page.locator("#sleep-timer button[type=submit]").tap()
+    expect(page.locator("#flash")).to_have_text("Gespeichert")
+    assert server.store.current().sleep_timer.lights == "off"

@@ -55,6 +55,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
       <a href="#add" data-page="add"><i></i><span data-i18n="admin.nav_add"></span><b></b></a>
       <a href="#schedule" data-page="schedule"><i></i><span data-i18n="admin.schedule"></span><b></b></a>
       <a href="#sleep" data-page="sleep"><i></i><span data-i18n="admin.sleep_timer"></span><b></b></a>
+      <a href="#lights" data-page="lights"><i></i><span data-i18n="admin.lights"></span><b></b></a>
       <a href="#volume" data-page="volume"><i></i><span data-i18n="admin.nav_volume"></span><b></b></a>
       <a href="#games" data-page="games"><i></i><span data-i18n="admin.games"></span><b id="nav-games"></b></a>
       <a href="#setup" data-page="setup"><i></i><span data-i18n="admin.setup"></span><b></b></a>
@@ -217,8 +218,53 @@ SPDX-License-Identifier: AGPL-3.0-or-later
             <label class="field narrow"><span data-i18n="admin.sleep_wake_label"></span>
               <small data-i18n="admin.sleep_wake_hint"></small>
               <input id="sleep-wake" type="time" step="300" required></label>
+            <label id="sleep-lights-field" class="field narrow" hidden><span data-i18n="admin.sleep_lights"></span>
+              <small data-i18n="admin.sleep_lights_hint"></small>
+              <select id="sleep-lights"></select></label>
             <div><button type="submit" class="primary" data-i18n="admin.save"></button></div>
           </section>
+        </form>
+      </section>
+
+      <!-- Licht ------------------------------------------------------------------------------>
+      <section id="page-lights" class="page" data-page="lights" hidden>
+        <div class="page-head">
+          <div>
+            <h1 class="page-title" data-i18n="admin.lights"></h1>
+            <p class="lead" data-i18n="admin.lights_lead"></p>
+          </div>
+        </div>
+
+        <section id="hue-connect" class="card stack">
+          <h2 data-i18n="admin.hue_connect"></h2>
+          <p class="hint" data-i18n="admin.hue_connect_hint"></p>
+          <form id="hue-search" class="inline">
+            <input id="hue-ip" inputmode="url" autocapitalize="off" autocomplete="off" spellcheck="false" data-i18n-placeholder="admin.hue_ip_placeholder" data-i18n-label="admin.hue_ip">
+            <button type="submit" class="secondary" data-i18n="admin.hue_search"></button>
+          </form>
+          <ul id="hue-bridges" class="rows" aria-live="polite"></ul>
+          <p id="hue-pairing" class="pairing" role="status" hidden>
+            <span class="pairing-count" id="hue-countdown"></span>
+            <span data-i18n="admin.hue_press_button"></span>
+            <button id="hue-pair-cancel" type="button" class="link" data-i18n="admin.cancel"></button>
+          </p>
+        </section>
+
+        <section id="hue-paired" class="card bridge-card" hidden>
+          <span class="room-icon on"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 21c0 .55.45 1 1 1h4c.55 0 1-.45 1-1v-1H9zm3-19C8.14 2 5 5.14 5 9c0 2.38 1.19 4.47 3 5.74V17c0 .55.45 1 1 1h6c.55 0 1-.45 1-1v-2.26c1.81-1.27 3-3.36 3-5.74 0-3.86-3.14-7-7-7"/></svg></span>
+          <span class="grow"><strong id="hue-bridge-name"></strong><small id="hue-bridge-state" class="hint"></small></span>
+          <button id="hue-reconnect" type="button" class="secondary" data-i18n="admin.hue_reconnect"></button>
+          <button id="hue-forget" type="button" class="secondary" data-i18n="admin.hue_forget"></button>
+        </section>
+
+        <form id="hue-form" class="stack" hidden>
+          <section class="card stack">
+            <label class="field"><span data-i18n="admin.hue_room"></span>
+              <select id="hue-room"></select></label>
+            <div id="hue-slots" class="slots"></div>
+            <p class="hint" data-i18n="admin.hue_slots_hint"></p>
+          </section>
+          <div><button type="submit" class="primary" data-i18n="admin.save"></button></div>
         </form>
       </section>
 
@@ -431,6 +477,14 @@ SPDX-License-Identifier: AGPL-3.0-or-later
         <label><input class="game-level" type="radio" value="3"><span><b data-i18n="admin.level_big"></b><small data-i18n="admin.level_big_age"></small></span></label>
       </div>
     </div>
+  </template>
+
+  <template id="hue-slot">
+    <fieldset class="slot">
+      <legend class="slot-title"></legend>
+      <select class="slot-scene" data-i18n-label="admin.hue_scene"></select>
+      <div class="slot-pictures" role="radiogroup"></div>
+    </fieldset>
   </template>
 
   <template id="room-row">
