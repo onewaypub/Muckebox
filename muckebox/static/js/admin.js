@@ -14,7 +14,10 @@ const FLASH_MS = 5000;
 const STATUS_MS = 15000; // the overview refreshes itself while it is shown
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 const SETUP_TIMEOUT_MS = 30000; // the server gives a room search or test 20 s
-const PAGES = ["overview", "tiles", "add", "schedule", "sleep", "volume", "games", "setup", "pin"];
+const PAGES = ["overview", "tiles", "add", "schedule", "sleep", "lights", "volume", "games", "setup", "pin"];
+const LIGHT_PICTURES = ["sun", "book", "star", "moon", "bulb"];
+const LIGHT_SLOTS = 3;
+const PAIR_SECONDS = 30;
 const PICTURES = "/static/pictures";
 const SLEEP_CHOICES = [10, 15, 20, 30, 45, 60];
 const PREVIEW_DOTS = 5;
@@ -138,7 +141,9 @@ function showPage() {
     if (current) link.setAttribute("aria-current", "page");
     else link.removeAttribute("aria-current");
   }
-  if (page === "overview" && !$("app").hidden) loadStatus();
+  if ($("app").hidden) return;
+  if (page === "overview") loadStatus();
+  if (page === "lights" || page === "sleep") loadHue();
 }
 
 function showOnly(id) {
@@ -218,6 +223,10 @@ function renderStatus(status) {
     ["admin.corrections", String(status.volume_guard.corrections)],
     ["admin.clock", `${now.slice(11, 16)} (${status.time.zone})`],
   ];
+  if (status.lights.bridge) {
+    const state = status.lights.available ? t("admin.hue_ok") : t(`error.${status.lights.problem || "hue_unreachable"}`);
+    rows.push(["admin.lights", `${status.lights.bridge} · ${state}`]);
+  }
   if (status.idle.paused_at) {
     const at = status.idle.paused_at;
     rows.push(["admin.idle_paused", `${at.slice(8, 10)}.${at.slice(5, 7)}. ${at.slice(11, 16)}`]);
@@ -729,6 +738,168 @@ async function loadCredits() {
   );
 }
 
+// -- lights (Hue) ---------------------------------------------------------------------------------------
+
+let hueView = null; // rooms and scenes read from the bridge
+let pairing = null; // the running pairing attempt
+
+async function loadHue() {
+  const result = await guarded(() => get("/api/admin/hue", { timeout: 15000 }));
+  if (!result) return;
+  hueView = result.data;
+  renderHue();
+}
+
+function renderHue() {
+  const hue = settings.hue;
+  const paired = Boolean(hue.bridge);
+  $("hue-connect").hidden = paired;
+  $("hue-paired").hidden = !paired;
+  $("hue-form").hidden = !paired;
+  $("sleep-lights-field").hidden = !paired;
+  if (!paired) return;
+  $("hue-bridge-name").textContent = `${hue.bridge.name} (${hue.bridge.ip})`;
+  const problem = hueView && hueView.problem;
+  $("hue-bridge-state").textContent = problem ? t(`error.${problem}`) : t("admin.hue_ok");
+  $("hue-bridge-state").classList.toggle("bad", Boolean(problem));
+  $("hue-reconnect").hidden = problem !== "hue_certificate_changed";
+  const rooms = (hueView && hueView.rooms) || [];
+  const room = $("hue-room");
+  const chosen = document.activeElement === room ? room.value : hue.room || "";
+  room.replaceChildren(
+    element("option", { value: "", textContent: t("admin.hue_room_none") }),
+    ...rooms.map((item) => element("option", { value: item.id, textContent: item.name })),
+  );
+  room.value = rooms.some((item) => item.id === chosen) ? chosen : "";
+  renderSlots(hue.slots);
+  renderSleepLights();
+}
+
+function scenesOf(roomId) {
+  return ((hueView && hueView.scenes) || []).filter((scene) => scene.room === roomId);
+}
+
+// Three buttons: a scene of the chosen room and a picture each.
+function renderSlots(saved) {
+  const box = $("hue-slots");
+  const template = $("hue-slot");
+  const scenes = scenesOf($("hue-room").value);
+  box.replaceChildren();
+  for (let index = 0; index < LIGHT_SLOTS; index += 1) {
+    const slot = saved[index] || { scene: "", picture: LIGHT_PICTURES[index] };
+    const row = template.content.firstElementChild.cloneNode(true);
+    translatePage(row);
+    row.querySelector(".slot-title").textContent = t("admin.hue_slot", { number: index + 1 });
+    const select = row.querySelector(".slot-scene");
+    select.replaceChildren(
+      element("option", { value: "", textContent: t("admin.hue_slot_none") }),
+      ...scenes.map((scene) => element("option", { value: scene.id, textContent: scene.name })),
+    );
+    select.value = scenes.some((scene) => scene.id === slot.scene) ? slot.scene : "";
+    const pictures = row.querySelector(".slot-pictures");
+    for (const picture of LIGHT_PICTURES) {
+      const radio = element("input", { type: "radio", name: `slot-picture-${index}`, value: picture });
+      radio.checked = picture === slot.picture;
+      const img = element("img", { src: `${PICTURES}/${picture}.svg`, alt: t(`admin.picture_${picture}`) });
+      pictures.append(element("label", {}, radio, img));
+    }
+    box.append(row);
+  }
+}
+
+function slotsFromForm() {
+  return [...$("hue-slots").children]
+    .map((row) => ({
+      scene: row.querySelector(".slot-scene").value,
+      picture: (row.querySelector("input[type=radio]:checked") || {}).value || "sun",
+    }))
+    .filter((slot) => slot.scene);
+}
+
+// The sleep timer's end: leave the lights, switch them off or to a scene.
+function renderSleepLights() {
+  const select = $("sleep-lights");
+  const current = select.options.length ? select.value : settings.sleep_timer.lights;
+  const scenes = scenesOf(settings.hue.room);
+  select.replaceChildren(
+    element("option", { value: "keep", textContent: t("admin.sleep_lights_keep") }),
+    element("option", { value: "off", textContent: t("admin.sleep_lights_off") }),
+    ...scenes.map((scene) =>
+      element("option", { value: scene.id, textContent: t("admin.sleep_lights_scene", { name: scene.name }) }),
+    ),
+  );
+  const known = [...select.options].some((option) => option.value === current);
+  select.value = known ? current : "keep";
+}
+
+async function searchBridges(event) {
+  event.preventDefault();
+  const button = event.target.querySelector("button");
+  const ip = $("hue-ip").value.trim() || null;
+  $("hue-bridges").replaceChildren(element("li", { className: "hint", textContent: t("admin.searching_short") }));
+  const result = await busy(button, guarded(() => post("/api/admin/hue/search", { ip }, { timeout: 20000 })));
+  const bridges = result ? result.data.bridges : [];
+  if (!bridges.length) {
+    $("hue-bridges").replaceChildren(element("li", { className: "hint", textContent: t("admin.hue_none") }));
+    return;
+  }
+  $("hue-bridges").replaceChildren(
+    ...bridges.map((bridge) => {
+      const connect = element("button", { type: "button", className: "choose", textContent: t("admin.hue_pair") });
+      connect.addEventListener("click", () => startPairing(bridge.ip));
+      const name = element("span", { className: "name" }, element("strong", { textContent: bridge.name }),
+        element("small", { textContent: bridge.ip }));
+      return element("li", { className: "bridge-row" }, name, connect);
+    }),
+  );
+}
+
+// Pairing: the parents press the bridge's button; we ask every 2 s for 30 s.
+function startPairing(ip) {
+  stopPairing();
+  const ends = Date.now() + PAIR_SECONDS * 1000;
+  const run = { stopped: false };
+  pairing = run;
+  $("hue-pairing").hidden = false;
+  const tick = async () => {
+    if (run.stopped) return;
+    const left = Math.max(0, Math.ceil((ends - Date.now()) / 1000));
+    $("hue-countdown").textContent = String(left);
+    if (left <= 0) {
+      stopPairing();
+      flash(t("admin.hue_pair_timeout"), true);
+      return;
+    }
+    try {
+      const result = await post("/api/admin/hue/pair", { ip });
+      if (run.stopped) return;
+      stopPairing();
+      flash(t("admin.hue_paired"));
+      renderSettings(result.data);
+      loadHue();
+    } catch (error) {
+      if (run.stopped) return;
+      if (error instanceof ApiError && error.code === "hue_link_button") {
+        run.timer = setTimeout(tick, 2000);
+        return;
+      }
+      stopPairing();
+      if (error instanceof ApiError && error.status === 401) showLogin();
+      flash(errorText(error), true);
+    }
+  };
+  tick();
+}
+
+function stopPairing() {
+  if (pairing) {
+    pairing.stopped = true;
+    clearTimeout(pairing.timer);
+  }
+  pairing = null;
+  $("hue-pairing").hidden = true;
+}
+
 // -- sleep timer --------------------------------------------------------------------------------------
 
 function renderSleepForm(timer) {
@@ -932,8 +1103,10 @@ function bind() {
         enabled: $("sleep-enabled").checked,
         minutes: Number($("sleep-minutes").value),
         wake: $("sleep-wake").value,
+        lights: $("sleep-lights-field").hidden ? settings.sleep_timer.lights : $("sleep-lights").value,
       },
       (current) => {
+        settings.sleep_timer = current.sleep_timer;
         renderSleepForm(current.sleep_timer);
         loadStatus();
       },
@@ -956,6 +1129,36 @@ function bind() {
       loadStatus();
     }
   });
+  $("hue-search").addEventListener("submit", searchBridges);
+  $("hue-pair-cancel").addEventListener("click", stopPairing);
+  $("hue-room").addEventListener("change", () => renderSlots(slotsFromForm()));
+  $("hue-reconnect").addEventListener("click", async (event) => {
+    const result = await busy(
+      event.target,
+      guarded(() => post("/api/admin/hue/reconnect", {}), { success: t("admin.hue_paired") }),
+    );
+    if (result) {
+      renderSettings(result.data);
+      loadHue();
+    }
+  });
+  $("hue-forget").addEventListener("click", async (event) => {
+    if (!window.confirm(t("admin.hue_forget_confirm"))) return;
+    const result = await busy(event.target, guarded(() => request("DELETE", "/api/admin/hue")));
+    if (result) {
+      renderSettings(result.data);
+      hueView = null;
+      renderHue();
+    }
+  });
+  $("hue-form").addEventListener("submit", (event) =>
+    saveForm(event, "/api/admin/settings/hue", { room: $("hue-room").value || null, slots: slotsFromForm() },
+      (current) => {
+        settings.hue = current.hue;
+        renderHue();
+        loadStatus();
+      }),
+  );
   $("pin-form").addEventListener("submit", async (event) => {
     event.preventDefault();
     if ($("pin-new").value !== $("pin-repeat").value) {

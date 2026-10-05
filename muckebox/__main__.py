@@ -9,6 +9,7 @@ import logging
 import os
 import secrets
 import signal
+import socket
 import sys
 import tempfile
 from collections.abc import Callable, Mapping
@@ -27,6 +28,7 @@ from muckebox.config import (
     load_settings,
 )
 from muckebox.covers import CoverStore
+from muckebox.hue.client import HueConnector, HueNetwork
 from muckebox.library import Library, LibraryFileError
 from muckebox.runtime.service import BackendFactory, RoomFinder, Runtime
 from muckebox.settings import SettingsFileError, SettingsStore
@@ -131,8 +133,11 @@ def build_services(settings: Settings, *, fake_sonos: bool = False) -> Services:
         from muckebox.sonos.fake import FakeHousehold
 
         log.warning("MUCKEBOX_FAKE_SONOS=1: using simulated speakers (demo mode)")
+        from muckebox.hue.fake import FakeHue
+
         household = FakeHousehold()
         backend_factory, room_finder = household.backend, household.find_rooms
+        hue: HueConnector = FakeHue()
     else:
         from muckebox.sonos.soco_backend import SocoBackend, configure_soco, find_rooms
 
@@ -142,6 +147,7 @@ def build_services(settings: Settings, *, fake_sonos: bool = False) -> Services:
             return SocoBackend(room=room, room_uid=room_uid, seed_ip=seed_ip)
 
         room_finder = find_rooms
+        hue = HueNetwork(devicetype=f"muckebox#{socket.gethostname()}"[:40])
     library = Library(settings.data_dir / "library.json")
     covers = CoverStore(settings.data_dir / "covers")
     covers.delete_unused(library.covers_in_use())
@@ -151,6 +157,7 @@ def build_services(settings: Settings, *, fake_sonos: bool = False) -> Services:
         settings.data_dir,
         backend_factory=backend_factory,
         room_finder=room_finder,
+        hue=hue,
     )
     return Services(
         settings=settings,

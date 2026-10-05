@@ -5,8 +5,8 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 # Sounds and pictures
 
-The games use short sounds and pictures that others made and shared under
-free licences. Thank you!
+The games and the light buttons use short sounds and pictures that others
+made and shared under free licences. Thank you!
 
 ## Sounds
 

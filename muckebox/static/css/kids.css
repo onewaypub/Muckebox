@@ -765,6 +765,55 @@ svg {
   }
 }
 
+/* -- light buttons ------------------------------------------------------------- */
+
+.lights {
+  display: flex;
+  justify-content: center;
+  gap: 20px;
+  padding: max(16px, env(safe-area-inset-top)) 16px 0;
+}
+
+.light {
+  width: var(--control);
+  height: var(--control);
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 10%);
+  display: grid;
+  place-items: center;
+  touch-action: none;
+  transition: background 200ms, box-shadow 200ms;
+}
+
+.light img {
+  width: 58%;
+  height: 58%;
+  pointer-events: none;
+}
+
+.light.active {
+  background: var(--accent);
+  box-shadow: 0 0 0 8px rgb(255 209 102 / 25%), 0 0 28px rgb(255 209 102 / 60%);
+}
+
+.light:disabled {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+[data-profile="big"] .lights {
+  gap: 10px;
+  padding: 0;
+}
+
+[data-profile="big"] .light {
+  width: 56px;
+  height: 56px;
+  background: rgb(255 255 255 / 8%);
+}
+
 /* -- empty library ------------------------------------------------------------- */
 
 .empty {

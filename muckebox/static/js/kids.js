@@ -59,6 +59,7 @@ const view = {
   pagePrev: $("page-prev"),
   pageNext: $("page-next"),
   pageDots: $("page-dots"),
+  lights: $("lights"),
   now: {
     cover: $("now-cover"),
     picture: $("now-picture"),
@@ -109,6 +110,9 @@ function applyLayout(state) {
     ? { left: $("head-slot"), play: $("now-buttons"), volume: $("now-volume") }
     : { left: $("bar-left"), play: $("bar-play"), volume: $("bar-volume") };
   if (view.toggle.parentElement === target.play) return;
+  // The light buttons: in the header ("big"), above the pages ("small").
+  if (big) $("head-slot").prepend(view.lights);
+  else document.querySelector(".pager").before(view.lights);
   target.left.append(view.moon, view.games);
   target.play.append(view.prev, view.toggle, view.next);
   target.volume.append(view.quieter, view.volume, view.louder);
@@ -311,6 +315,7 @@ function renderState() {
   view.tiles.hidden = bedtime;
   view.empty.hidden = bedtime || model.tiles.length > 0;
   renderVolume(state ? state.volume : null, bedtime);
+  renderLights(state);
   renderNow(state);
   renderPager();
   followPlaying(state);
@@ -369,6 +374,59 @@ function renderSlider(volume) {
   const limit = volume && volume.limit !== null && volume.limit !== undefined ? volume.limit : max;
   fill.style.width = `${Math.min(100, (value / max) * 100)}%`;
   over.style.left = `${Math.min(100, (limit / max) * 100)}%`;
+}
+
+// The light buttons: one per Hue scene the parents chose. Allowed at any
+// time, also at bedtime. They react at the first touch (nothing to swipe here).
+function renderLights(state) {
+  const lights = state && state.lights;
+  const slots = lights ? lights.slots : [];
+  view.lights.hidden = slots.length === 0;
+  if (view.lights.children.length !== slots.length || view.lights.dataset.key !== slotsKey(slots)) {
+    view.lights.dataset.key = slotsKey(slots);
+    view.lights.replaceChildren(
+      ...slots.map((slot) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "light";
+        button.dataset.slot = String(slot.slot);
+        button.setAttribute("aria-label", t("kids.light"));
+        const img = document.createElement("img");
+        img.src = `${PICTURES}/${slot.picture}.svg`;
+        img.alt = "";
+        button.append(img);
+        button.addEventListener("pointerdown", (event) => {
+          if (event.isPrimary && (event.pointerType !== "mouse" || event.button === 0)) toggleLight(slot.slot);
+        });
+        // A click without a pointer press (detail 0) comes from the keyboard.
+        button.addEventListener("click", (event) => {
+          if (event.detail === 0) toggleLight(slot.slot);
+        });
+        return button;
+      }),
+    );
+  }
+  const cooling = isCooling(model.cooldowns, "light", performance.now());
+  [...view.lights.children].forEach((button, index) => {
+    button.classList.toggle("active", Boolean(slots[index] && slots[index].active));
+    button.disabled = !lights.available || cooling;
+  });
+}
+
+function slotsKey(slots) {
+  return slots.map((slot) => `${slot.slot}:${slot.picture}`).join(",");
+}
+
+function toggleLight(slot) {
+  if (isCooling(model.cooldowns, "light", performance.now())) return;
+  const seconds = (model.state && model.state.lights && model.state.lights.cooldown) || 3;
+  startCooldown("light", seconds);
+  command(() => post(`/api/lights/${slot}/toggle`), "light").then((data) => {
+    if (data && data.lights && model.state) {
+      model.state.lights = data.lights;
+      renderState();
+    }
+  });
 }
 
 // "Groß": what is playing, its chapter and how far it got.

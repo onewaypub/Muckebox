@@ -173,6 +173,57 @@ MESSAGES: dict[str, str] = {
     ),
     "admin.zone_ok": "✓ Zeitzone stimmt",
     "admin.pin_save": "PIN speichern",
+    "admin.lights": "Licht",
+    "admin.lights_lead": (
+        "Bis zu drei Licht-Knöpfe auf dem Tablet: je eine Szene aus der Hue-App. Antippen "
+        "schaltet die Szene ein, nochmal antippen das Licht im Raum aus. Die Knöpfe gehen immer, "
+        "auch zur Schlafenszeit."
+    ),
+    "admin.hue_connect": "Hue Bridge verbinden",
+    "admin.hue_connect_hint": (
+        "Ohne Adresse sucht die Muckebox im Netz (mDNS, wie die Hue-App). Steht die Bridge in "
+        "einem anderen Netz (VLAN) ohne mDNS-Weiterleitung, gib ihre IP-Adresse ein; die "
+        "Muckebox muss sie über TCP 443 erreichen dürfen."
+    ),
+    "admin.hue_ip": "IP-Adresse der Hue Bridge",
+    "admin.hue_ip_placeholder": "IP-Adresse (optional), z. B. 192.0.2.50",
+    "admin.hue_search": "Suchen",
+    "admin.searching_short": "Suche läuft …",
+    "admin.hue_none": (
+        "Keine Hue Bridge gefunden. Gib ihre IP-Adresse ein (in der Hue-App unter "
+        "Einstellungen → Bridges)."
+    ),
+    "admin.hue_pair": "Verbinden",
+    "admin.hue_press_button": "Jetzt den runden Knopf auf der Hue Bridge drücken …",
+    "admin.hue_pair_timeout": "Der Knopf wurde nicht gedrückt. Bitte noch einmal versuchen.",
+    "admin.hue_paired": "Hue Bridge verbunden",
+    "admin.cancel": "Abbrechen",
+    "admin.hue_ok": "Verbunden",
+    "admin.hue_reconnect": "Neu verbinden",
+    "admin.hue_forget": "Bridge trennen",
+    "admin.hue_forget_confirm": (
+        "Die Hue Bridge wirklich trennen? Raum und Licht-Knöpfe gehen verloren."
+    ),
+    "admin.hue_room": "Raum",
+    "admin.hue_room_none": "– Raum wählen –",
+    "admin.hue_slot": "Knopf {number}",
+    "admin.hue_slot_none": "– kein Knopf –",
+    "admin.hue_scene": "Szene",
+    "admin.hue_slots_hint": (
+        "Szenen legst du in der Hue-App an. Neue Szenen erscheinen hier nach dem Neuladen "
+        "der Seite."
+    ),
+    "admin.picture_sun": "Sonne",
+    "admin.picture_book": "Buch",
+    "admin.picture_star": "Stern",
+    "admin.picture_moon": "Mond",
+    "admin.picture_bulb": "Glühbirne",
+    "admin.sleep_lights": "Licht am Ende",
+    "admin.sleep_lights_hint": "wenn der Timer abgelaufen ist",
+    "admin.sleep_lights_keep": "Nichts ändern",
+    "admin.sleep_lights_off": "Licht aus",
+    "admin.sleep_lights_scene": "Szene „{name}“",
+    "kids.light": "Licht",
     "admin.resume": "Weiterhören",
     "admin.resume_position": "Stand: Titel {track}, {time}",
     "admin.resume_restart": "Von vorn",
