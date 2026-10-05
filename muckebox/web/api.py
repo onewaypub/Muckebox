@@ -13,6 +13,7 @@ from muckebox import __version__, assets
 from muckebox.library import TileNotFound
 from muckebox.runtime.cooldown import CoolingDown
 from muckebox.runtime.games import UnknownGame
+from muckebox.runtime.lights import LightsUnavailable
 from muckebox.runtime.service import Busy, Unavailable
 
 from . import auth
@@ -110,6 +111,29 @@ def volume(direction: str):
     except Unavailable as exc:
         raise ApiError(503, exc.code, exc.retry_in) from exc
     return jsonify(ok=True, volume=result)
+
+
+@bp.post("/api/lights/<int:slot>/toggle")
+def toggle_light(slot: int):
+    """A light button: its scene on, or the room off if the scene is on."""
+    runtime = _services().runtime
+    runtime.keeper.touch()  # a tap on the tablet
+    try:
+        lights = runtime.lights.toggle(slot)
+    except LookupError as exc:
+        raise ApiError(404, "not_found") from exc
+    except CoolingDown as exc:
+        raise ApiError(409, exc.code, exc.retry_in) from exc
+    except LightsUnavailable as exc:
+        raise lights_error(exc) from exc
+    return jsonify(ok=True, lights=lights)
+
+
+def lights_error(exc: LightsUnavailable) -> ApiError:
+    """409 for what the parents can fix, 503 while the bridge is away."""
+    if exc.code in ("hue_link_button", "hue_not_configured", "hue_not_found"):
+        return ApiError(409, exc.code)
+    return ApiError(503, exc.code, exc.retry_in)
 
 
 @bp.get("/covers/<name>")

@@ -47,6 +47,7 @@ changes increase the `api` number reported by `/api/state`.
 | `POST /api/games/<id>/start` (`freeze_dance`, `sound_quiz`, `move_like`, `breathing`) | Start a game. The server grants a round: at most what is left of the day's game time and never into the bedtime fade. The freeze dance starts its dance music; the quiz and "move like" pause the speaker (their sounds come from the tablet). The breathing exercise is not counted. | `200 {"ok": true, "game": {"id", "level", "seconds", "ends_at"}}`, `404`, `409 game_unavailable` / `game_running` / `games_limit_reached` / `bedtime` / `dance_music_missing` / `busy`, `503 <code>` |
 | `POST /api/games/end` | End the running game; unused time is given back. The freeze dance unmutes and pauses its music. | `200 {"ok": true, "games": {…}}` |
 | `POST /api/games/freeze_dance/mute` `{"muted": true}` | Freeze (mute the kids room's own speaker) or dance on. A mute lasts 12 s unless renewed; the server also unmutes when the game ends, at bedtime or on a room change. | `202`, `400`, `409 game_unavailable` |
+| `POST /api/lights/<slot>/toggle` | A light button (slot 1–3): its scene on, or the room off if the scene is on. Allowed at any time, also at bedtime. After a tap all light buttons wait 3 s. | `200 {"ok": true, "lights": {…}}`, `404`, `409 cooling_down` (with `retry_in`) / `hue_not_configured` / `hue_not_found`, `503 hue_unreachable` / `hue_certificate_changed` / `hue_unauthorized` |
 | `POST /api/sleep-timer/start` | The kids start the sleep timer (the moon button). Starting it again while it runs changes nothing. | `200 {"ok": true, "sleep_timer": {…}}`, `409 sleep_timer_off` / `bedtime` |
 | `POST /api/override` `{"pin": "…", "minutes": 15\|30\|60}` or `{"pin": "…", "until": "morning"}` | Parents allow more time from the kids tablet: 15/30/60 minutes from now (or from the end of an override that is still running), or until the next window starts. Also ends the kids' sleep lock. Creates no session. Failed PINs are counted per client separately from the parents' page (5 per client), but share one total of 20 per 15 minutes with it. | `200 {"ok": true, "schedule": {…}}`, `400`, `401 pin_wrong`, `409 schedule_off` (no usage times and no sleep lock), `429 pin_rate_limited` |
 
@@ -81,6 +82,8 @@ code such as `service_unavailable`.
   "track": {"number": 4, "count": 9, "title": "Kapitel 4", "seconds": 750,
             "duration": 1970, "at": 1790013000, "playing": true},
   "progress": {"t3f9c2a7e1b04d88": 0.38},
+  "lights": {"available": true, "cooldown": 3,
+             "slots": [{"slot": 1, "picture": "sun", "active": false}]},
   "last_error": null,
   "schedule": {"phase": "open", "ends_at": 1790013600, "opens_at": null,
                "fade_from": 1790013000, "override_until": null},
@@ -123,6 +126,10 @@ code such as `service_unavailable`.
   for radio and when nothing of ours plays.
 - `progress`: how far each album tile with *Weiterhören* got (0–1), for the
   bar on its cover.
+- `lights`: the light buttons the parents set up (empty `slots` without a
+  Hue bridge, room or buttons): the slot number, its picture and whether its
+  scene is on. Scenes deleted in the Hue app are left out. `available` is
+  false while the bridge cannot be reached (the buttons are dimmed).
 - `pending`: `null` or `{"action": "start", "tile_id": "…", "since": <unix time>}`.
 - `last_error`: `null` or `{"code": "…", "tile_id": "…", "at": <unix time>}`;
   cleared after a successful start or after 60 seconds.
@@ -151,7 +158,13 @@ require a same-origin `Origin` header when the browser sends one
 | `PUT /api/admin/settings/schedule` `{"enabled": true, "fade_minutes": 10, "days": {"mon": {"from": "07:00", "to": "19:00"}, "tue": null, …}}` | Usage times: one window per weekday (`to` after `from` on the same day, `"24:00"` = midnight; `null` = no limit that day), fade 0–30 minutes. `422 schedule_invalid` / `schedule_order_invalid`. |
 | `PUT /api/admin/settings/games` `{"daily_minutes": 15, "dance_tile": "t…" \| null, "items": {"sound_quiz": {"enabled": true, "level": 2}, …}}` | Games: each off by default, level 1 (2–3 years), 2 (4–5) or 3 (6+), one daily limit for all counted games (5–60 minutes), the tile that plays the freeze-dance music (null: whatever plays). `422 games_invalid`. The status adds `games {used_today, daily_seconds}`. |
 | `PUT /api/admin/settings/controls` `{"tap_cooldown": 5, "idle_minutes": 60, "profile": "small", "skip_buttons": false}` | Seconds the other tiles wait after a tile tap (0–30, 0 = off), minutes a tile may play without any tap on the tablet before it fades for a minute and pauses (0–240, 0 = off), the layout of the kids view (`small` or `big`) and whether `small` shows previous/next. Fields left out get their defaults. `422 controls_invalid`. The status adds `idle {minutes, paused_at}` (local time of the last such pause, or null). |
-| `PUT /api/admin/settings/sleep-timer` `{"enabled": true, "minutes": 30, "wake": "07:00"}` | The kids' sleep timer: shown as a moon button when enabled; 5–90 minutes; afterwards the tiles stay locked until the next window, or until `wake` on days without one. `422 sleep_timer_invalid`. |
+| `PUT /api/admin/settings/sleep-timer` `{"enabled": true, "minutes": 30, "wake": "07:00", "lights": "keep"}` | The kids' sleep timer: shown as a moon button when enabled; 5–90 minutes; afterwards the tiles stay locked until the next window, or until `wake` on days without one. `lights`: at the end leave the lights (`keep`), switch the room `off`, or recall a scene (its id). `422 sleep_timer_invalid`. |
+| `GET /api/admin/hue` | The paired bridge (`ip`, `id`, `name`; never the key or the certificate), the chosen room and buttons, `available`, `problem`, and read fresh from the bridge: `rooms` (with lights) and `scenes` (`id`, `name`, `room`). |
+| `POST /api/admin/hue/search` `{"ip": "192.0.2.50" \| null}` | The bridge at that address, or all bridges found by mDNS (`_hue._tcp`; works across VLANs with an mDNS reflector). `{"ok": true, "bridges": [{"ip", "id", "name"}]}`. `422 hue_ip_invalid`, `503 hue_unreachable`. The Hue cloud is never asked. |
+| `POST /api/admin/hue/pair` `{"ip": "…"}` | Pair with the bridge: works within 30 s after its button was pressed (`409 hue_link_button` until then; the page retries). The certificate seen now is pinned. Answers like `GET /api/admin/settings`. |
+| `POST /api/admin/hue/reconnect` | Take over a new certificate of the paired bridge (e.g. after a firmware update) if the stored key still works (`503 hue_unauthorized` otherwise: pair again). |
+| `DELETE /api/admin/hue` | Forget the bridge, the room and the buttons. |
+| `PUT /api/admin/settings/hue` `{"room": "<id>", "slots": [{"scene": "<id>", "picture": "sun"}]}` | The room or zone and up to three light buttons; pictures `sun`, `book`, `star`, `moon`, `bulb`. `422 hue_invalid`. |
 | `DELETE /api/admin/sleep-timer` | End a running sleep timer before it runs out. Answers with `schedule` and `sleep_timer`. |
 | `POST /api/admin/override` `{"minutes": 15\|30\|60}` or `{"until": "morning"}`, `DELETE /api/admin/override` | Allow more time now, or end the override (the music fades and pauses again). `{"ok": true, "schedule": {…}}`; `409 schedule_off`. |
 | `PUT /api/admin/settings/time-zone` `{"zone": "Europe/Berlin" \| null}` | The zone for the usage times; `null` falls back to `TZ` or the system zone. `422 time_zone_invalid`. Answers like `GET /api/admin/settings` (which includes `time_zone`). |

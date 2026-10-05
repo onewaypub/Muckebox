@@ -15,6 +15,7 @@ from flask import Blueprint, current_app, jsonify, request
 from muckebox import __version__
 from muckebox.covers import CoverError, normalise
 from muckebox.library import LibraryError, RevConflict, TileNotFound, favorite_source
+from muckebox.runtime.lights import LightsUnavailable
 from muckebox.runtime.service import Busy, Unavailable
 from muckebox.schedule import schedule_to_json
 from muckebox.settings import (
@@ -22,6 +23,7 @@ from muckebox.settings import (
     SettingsFileError,
     controls_to_json,
     games_to_json,
+    hue_to_json,
     sleep_timer_to_json,
     validate_seed_ip,
 )
@@ -29,7 +31,7 @@ from muckebox.sonos.errors import SonosError
 from muckebox.sonos.model import Favorite
 
 from . import auth
-from .api import cover_url
+from .api import cover_url, lights_error
 from .errors import ApiError
 
 log = logging.getLogger(__name__)
@@ -171,6 +173,7 @@ def _settings_response():
             "sleep_timer": sleep_timer_to_json(current.sleep_timer),
             "games": games_to_json(current.games),
             "controls": controls_to_json(current.controls),
+            "hue": hue_to_json(current.hue),
         },
         sonos=services.runtime.state.get("sonos"),
     )
@@ -215,6 +218,73 @@ def set_games():
 @auth.require_admin
 def set_controls():
     _settings_call(_services().store.set_controls, _body())
+    return _settings_response()
+
+
+# -- Hue lights ------------------------------------------------------------------------
+
+
+def _hue_ip(value: object) -> str | None:
+    try:
+        return validate_seed_ip(value)
+    except SettingsError as exc:
+        raise ApiError(422, "hue_ip_invalid") from exc
+
+
+def _hue_call(function, *args):
+    try:
+        return function(*args)
+    except LightsUnavailable as exc:
+        raise lights_error(exc) from exc
+
+
+@bp.get("/hue")
+@auth.require_admin
+def hue():
+    """The paired bridge (never its key), its rooms and scenes, and the choice."""
+    services = _services()
+    view = services.runtime.lights.admin_view()
+    return jsonify(ok=True, hue=hue_to_json(services.store.current().hue), **view)
+
+
+@bp.post("/hue/search")
+@auth.require_admin
+def hue_search():
+    ip = _hue_ip(_body().get("ip"))
+    bridges = _hue_call(_services().runtime.lights.search, ip)
+    return jsonify(ok=True, bridges=[{"ip": b.ip, "id": b.id, "name": b.name} for b in bridges])
+
+
+@bp.post("/hue/pair")
+@auth.require_admin
+def hue_pair():
+    """Pair with the bridge at "ip"; 409 hue_link_button until its button was pressed."""
+    ip = _hue_ip(_body().get("ip"))
+    if ip is None:
+        raise ApiError(422, "hue_ip_invalid")
+    _hue_call(_services().runtime.lights.pair, ip)
+    return _settings_response()
+
+
+@bp.post("/hue/reconnect")
+@auth.require_admin
+def hue_reconnect():
+    _hue_call(_services().runtime.lights.reconnect)
+    return _settings_response()
+
+
+@bp.delete("/hue")
+@auth.require_admin
+def hue_forget():
+    _services().runtime.lights.forget()
+    return _settings_response()
+
+
+@bp.put("/settings/hue")
+@auth.require_admin
+def set_hue():
+    """The room and up to three light buttons: {"room", "slots": [{"scene", "picture"}]}."""
+    _settings_call(_services().store.set_hue, _body())
     return _settings_response()
 
 

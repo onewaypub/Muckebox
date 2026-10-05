@@ -112,7 +112,14 @@ def make_store(tmp_path, household):
 
 
 @pytest.fixture
-def make_services(tmp_path, household, make_store):
+def fake_hue():
+    from muckebox.hue.fake import FakeHue
+
+    return FakeHue()
+
+
+@pytest.fixture
+def make_services(tmp_path, household, make_store, fake_hue):
     """Build the app's services on FakeHousehold, with lanes that run inline."""
     from muckebox.config import load_settings
     from muckebox.covers import CoverStore
@@ -134,6 +141,7 @@ def make_services(tmp_path, household, make_store):
             room_finder=household.find_rooms,
             clock=FakeClock(),
             lane_factory=lambda name, idle, interval: InlineLane(name),
+            hue=fake_hue,
         )
         return Services(
             settings=settings,
