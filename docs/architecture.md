@@ -126,6 +126,21 @@ track's number, title and seconds; the tablet counts the seconds on locally.
 The pages use two typefaces shipped in `muckebox/static/fonts/` (Bricolage
 Grotesque and Figtree, SIL OFL 1.1), so no page loads anything from outside.
 
+## Philips Hue
+
+`muckebox/hue/` talks to the bridge's local API v2 (`HueClient`), finds
+bridges by mDNS (`discovery.py`, zeroconf) and has a `FakeBridge` for tests
+and the demo mode, mirroring `muckebox/sonos/`. Pairing asks the bridge for
+an application key while its button is pressed; the certificate seen then is
+pinned (SHA-256 via urllib3 `assert_fingerprint`), so no CA is shipped.
+
+`runtime/lights.py` runs on its own lane, so a slow or missing bridge never
+delays the music: it polls the active scene every 5 s, switches a slot's scene
+on (or the room's `grouped_light` off on a second tap), opens its own breaker
+when the bridge is away, and notices the sleep timer's end itself (lights off
+or to a scene, once per end, recorded as `lights_done_end` in `timers.json`).
+Light buttons are never locked by the usage times.
+
 ## Browser baseline
 
 The kids view and the admin page support **iOS/iPadOS 16.4+ (Safari)** and
