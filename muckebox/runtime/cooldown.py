@@ -18,9 +18,11 @@ from .clock import Clock
 TILE = "tile"
 SKIP = "skip"
 TOGGLE = "toggle"
+LIGHT = "light"
 #: Fixed waits for the transport buttons; the tile wait is a setting.
 SKIP_SECONDS = 3
 TOGGLE_SECONDS = 1
+LIGHT_SECONDS = 3
 
 
 class CoolingDown(Exception):

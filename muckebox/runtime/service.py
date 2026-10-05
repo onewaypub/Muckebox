@@ -31,6 +31,8 @@ from pathlib import Path
 from typing import Any
 
 from muckebox import __version__
+from muckebox.hue.client import HueConnector
+from muckebox.hue.errors import HueUnreachable
 from muckebox.library import Library, Tile, TileNotFound
 from muckebox.localtime import Zone, ZoneResolver, local_time
 from muckebox.settings import (
@@ -50,6 +52,7 @@ from .clock import Clock, SystemClock
 from .cooldown import SKIP, SKIP_SECONDS, TILE, TOGGLE, TOGGLE_SECONDS, Cooldown
 from .games import MUTE_LEASE, ActiveGame, Games
 from .lanes import Lane
+from .lights import Lights
 from .resume import ResumeStore
 from .state import StateCache
 from .timekeeper import Refused, TimeKeeper
@@ -74,6 +77,22 @@ ROOM_SEARCH_MIN_INTERVAL = 5.0  # a new search at most this often
 # Seconds to wait for running Sonos calls when shutting down (after the web
 # server has let running requests finish, which takes up to 5 s itself).
 STOP_TIMEOUT = 2.0
+
+
+class NoHue:
+    """No Hue support wired in (a HueConnector): every bridge is unreachable."""
+
+    def find(self, ip: str | None) -> list:
+        return []
+
+    def pair(self, ip: str) -> Any:
+        raise HueUnreachable(ip)
+
+    def fingerprint(self, ip: str) -> str:
+        raise HueUnreachable(ip)
+
+    def client(self, ip: str, key: str, fingerprint: str) -> Any:
+        raise HueUnreachable(ip)
 
 
 class Unavailable(Exception):
@@ -171,6 +190,7 @@ class Runtime:
         lane_factory: Callable[[str, Callable[[], None] | None, float], Any] = Lane,
         policy: CommandPolicy | None = None,
         zones: ZoneResolver | None = None,
+        hue: HueConnector | None = None,
     ) -> None:
         self.store = store
         self.library = library
@@ -188,6 +208,9 @@ class Runtime:
         self.keeper = TimeKeeper(store, self.timers, self.clock, self.zones)
         self.games = Games(store, self.timers, self.keeper, self.clock)
         self.cooldown = Cooldown(self.clock)
+        self.lights = Lights(
+            store, self.timers, self.clock, hue or NoHue(), lane_factory=lane_factory
+        )
         self._mute_owner: RoomSession | None = None  # the room a game muted
         self._muted = False
         self._dance_owns_music = False
@@ -237,12 +260,12 @@ class Runtime:
     def start(self) -> None:
         # The lanes always run: without a room their idle tasks do nothing,
         # and choosing a room later needs them.
-        for lane in (self.transport_lane, self.volume_lane, self.setup_lane):
+        for lane in (self.transport_lane, self.volume_lane, self.setup_lane, self.lights.lane):
             lane.start()
 
     def stop(self, timeout: float = STOP_TIMEOUT) -> None:
         """Stop all lanes, waiting at most ``timeout`` seconds in total."""
-        lanes = (self.transport_lane, self.volume_lane, self.setup_lane)
+        lanes = (self.transport_lane, self.volume_lane, self.setup_lane, self.lights.lane)
         for lane in lanes:
             lane.request_stop()
         deadline = self.clock.monotonic() + timeout
@@ -323,6 +346,7 @@ class Runtime:
             "view": {"profile": controls.profile, "skip_buttons": controls.skip_buttons},
             "track": data["track"],
             "progress": self._progress(),
+            "lights": self.lights.document(),
             "last_error": last_error,
             **times,
             "games": self.games.document(),
@@ -450,6 +474,7 @@ class Runtime:
                 "source": zone.source,
             },
             **self.keeper.document(),
+            "lights": self.lights.status(),
             "idle": {
                 "minutes": current.controls.idle_minutes,
                 "paused_at": _iso(self.keeper.idle_paused_at, zone),

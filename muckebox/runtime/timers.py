@@ -4,8 +4,9 @@
 
 It holds what must survive a restart but is not a setting: the parents'
 override, the kids' sleep timer and lock, which end of the usage time has
-already been handled, the volume before a fade, today's game time and
-whether a game muted the speaker.
+already been handled, the volume before a fade, today's game time, whether
+a game muted the speaker and whether the lights were switched at the end
+of the sleep timer.
 
 Changes happen in memory (also from web requests); ``save()`` writes them
 from the transport lane, never while a request waits and never under the
@@ -51,6 +52,8 @@ class TimerState:
     games_seconds: float = 0.0
     #: A game muted the speaker (unmute after a crash or restart).
     game_mute: bool = False
+    #: The sleep timer end whose lights were handled (scene or off).
+    lights_done_end: float | None = None
 
 
 class TimersFile:
@@ -129,4 +132,7 @@ def _from_json(data: object) -> TimerState:
         games_date=date if isinstance(date, str) else None,
         games_seconds=_number(data.get("games_seconds", 0.0)),
         game_mute=data.get("game_mute") is True,
+        lights_done_end=_number(data["lights_done_end"])
+        if data.get("lights_done_end") is not None
+        else None,
     )
