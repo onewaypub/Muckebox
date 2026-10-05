@@ -221,6 +221,42 @@ def set_controls():
     return _settings_response()
 
 
+# -- touch diagnosis -------------------------------------------------------------------
+
+
+def _touch_response():
+    log = _services().runtime.touchlog
+    return jsonify(ok=True, active=log.active(), remaining=log.remaining(), events=log.events())
+
+
+@bp.get("/diag/touch")
+@auth.require_admin
+def touch_log():
+    return _touch_response()
+
+
+@bp.post("/diag/touch")
+@auth.require_admin
+def touch_switch():
+    """{"on": true} starts the touch diagnosis for 30 minutes; false ends it."""
+    on = _body().get("on")
+    if not isinstance(on, bool):
+        raise ApiError(400, "bad_request")
+    log = _services().runtime.touchlog
+    if on:
+        log.start()
+    else:
+        log.stop()
+    return _touch_response()
+
+
+@bp.delete("/diag/touch")
+@auth.require_admin
+def touch_clear():
+    _services().runtime.touchlog.clear()
+    return _touch_response()
+
+
 # -- Hue lights ------------------------------------------------------------------------
 
 

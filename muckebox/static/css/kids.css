@@ -1494,3 +1494,55 @@ svg {
   justify-items: center;
   gap: 16px;
 }
+
+/* -- touch diagnosis (parents switch it on for a while) ------------------------- */
+
+.touch-diag {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  pointer-events: none;
+}
+
+.touch-diag-label {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgb(231 111 81 / 85%);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.touch-dot {
+  position: absolute;
+  width: 44px;
+  height: 44px;
+  margin: -22px 0 0 -22px;
+  border: 4px solid;
+  border-radius: 50%;
+  animation: touch-fade 4s linear forwards;
+}
+
+.touch-dot.down {
+  border-color: #3ddc84;
+}
+
+.touch-dot.up {
+  width: 24px;
+  height: 24px;
+  margin: -12px 0 0 -12px;
+  border-color: #4cc9f0;
+}
+
+.touch-dot.cancel {
+  border-color: #ff4d4d;
+  border-style: dashed;
+}
+
+@keyframes touch-fade {
+  to {
+    opacity: 0;
+  }
+}

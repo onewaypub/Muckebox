@@ -260,6 +260,11 @@ one part at a time.
   0 = off; only tiles are paused, never music started from the Sonos app,
   and paused time does not count). Here you also choose the layout of the
   kids view, *Klein* or *Groß*, and whether *Klein* shows previous/next.
+  *Touch-Diagnose* (30 minutes) shows what the tablet receives when your
+  child presses it: the tablet draws every touch as a dot, and this page
+  lists each press with where it landed, how long it lasted, how far the
+  finger slid and whether a tile started. *Herunterladen* saves the list
+  for a bug report.
 - **Nutzungszeiten:** switch them on and set one window per weekday (or
   "ganzer Tag frei"), and how many minutes before the end the music fades.
   The status line says what applies right now. *+15/+30/+60 Min.* and *Bis

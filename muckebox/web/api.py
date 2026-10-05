@@ -129,6 +129,20 @@ def toggle_light(slot: int):
     return jsonify(ok=True, lights=lights)
 
 
+@bp.post("/api/diag/touch")
+def touch_diagnosis():
+    """The tablet's touch events while the parents run the touch diagnosis."""
+    body = request.get_json(silent=True)
+    events = body.get("events") if isinstance(body, dict) else None
+    try:
+        kept = _services().runtime.touchlog.add(events)
+    except PermissionError as exc:
+        raise ApiError(409, "diag_off") from exc
+    except ValueError as exc:
+        raise ApiError(400, "bad_request") from exc
+    return jsonify(ok=True, kept=kept)
+
+
 def lights_error(exc: LightsUnavailable) -> ApiError:
     """409 for what the parents can fix, 503 while the bridge is away."""
     if exc.code in ("hue_link_button", "hue_not_configured", "hue_not_found"):

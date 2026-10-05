@@ -12,6 +12,7 @@ import { ApiError, get, post } from "./api.js";
 import { initBedtime, padIsOpen, renderBedtime } from "./bedtime.js";
 import { gameIsOpen, initGames, renderGames } from "./games.js";
 import { loadMessages, t, translatePage } from "./i18n.js";
+import { diagNote, setTouchDiag, targetName } from "./touchdiag.js";
 import {
   cooldownGroup,
   formatTime,
@@ -220,10 +221,18 @@ function onPressStart(event) {
   if (!event.isPrimary || (event.pointerType === "mouse" && event.button !== 0)) return;
   const node = event.target.closest(".tile");
   endPress();
-  press = { id: node ? node.dataset.id : null, node, x: event.clientX, y: event.clientY, moved: 0 };
+  press = {
+    id: node ? node.dataset.id : null,
+    node,
+    x: event.clientX,
+    y: event.clientY,
+    moved: 0,
+    at: performance.now(),
+    target: targetName(event.target),
+  };
   if (node) {
     node.classList.add("pressed");
-    press.timer = setTimeout(() => firePress(), HOLD_MS);
+    press.timer = setTimeout(() => firePress("tile-hold"), HOLD_MS);
   }
   // The finger may slide off the tile: its release still belongs to this press.
   view.tiles.setPointerCapture(event.pointerId);
@@ -231,14 +240,23 @@ function onPressStart(event) {
 
 function onPressMove(event) {
   if (!press || !event.isPrimary) return;
-  press.moved = Math.max(press.moved, Math.hypot(event.clientX - press.x, event.clientY - press.y));
-  if (press.moved >= TAP_SLOP) clearTimeout(press.timer); // a swipe, not a tap
+  const moved = Math.hypot(event.clientX - press.x, event.clientY - press.y);
+  if (moved >= TAP_SLOP && press.moved < TAP_SLOP) {
+    clearTimeout(press.timer); // a swipe, not a tap
+    note("press-moved", moved);
+  }
+  press.moved = Math.max(press.moved, moved);
+}
+
+function note(type, moved = press.moved) {
+  diagNote(type, { ms: Math.round(performance.now() - press.at), moved: Math.round(moved), target: press.target });
 }
 
 // The tile starts once per press: after resting, or on lifting the finger.
-function firePress() {
-  if (!press || press.fired || press.moved >= TAP_SLOP || !press.node.isConnected) return;
+function firePress(how) {
+  if (!press || !press.id || press.fired || press.moved >= TAP_SLOP || !press.node.isConnected) return;
   press.fired = true;
+  note(how);
   playTile(press.id);
 }
 
@@ -248,10 +266,16 @@ function onPressEnd(event) {
   const dy = event.clientY - press.y;
   press.moved = Math.max(press.moved, Math.hypot(dx, dy));
   if (profile() === "small" && Math.abs(dx) >= SWIPE && Math.abs(dx) > Math.abs(dy)) {
+    note("press-swipe");
     scrollToPage(model.page + (dx < 0 ? 1 : -1));
-  } else if (press.id) {
-    firePress();
+  } else {
+    firePress("tile-release");
   }
+  endPress();
+}
+
+function cancelPress() {
+  if (press && !press.fired) note("press-cancel");
   endPress();
 }
 
@@ -421,6 +445,7 @@ function slotsKey(slots) {
 
 function toggleLight(slot) {
   if (isCooling(model.cooldowns, "light", performance.now())) return;
+  diagNote("light", { target: `light:${slot}` });
   const seconds = (model.state && model.state.lights && model.state.lights.cooldown) || 3;
   startCooldown("light", seconds);
   command(() => post(`/api/lights/${slot}/toggle`), "light").then((data) => {
@@ -554,6 +579,7 @@ function applyState(state) {
     model.etag = null;
   }
   model.state = state;
+  setTouchDiag(Boolean(state.diag));
   if (!state.pending) model.localPending = null;
   renderState();
 }
@@ -654,7 +680,7 @@ function bindControls() {
   view.tiles.addEventListener("pointermove", onPressMove);
   view.tiles.addEventListener("pointerup", onPressEnd);
   // The browser took over (scrolling the "big" grid): no tap.
-  view.tiles.addEventListener("pointercancel", endPress);
+  view.tiles.addEventListener("pointercancel", cancelPress);
   view.tiles.addEventListener("lostpointercapture", endPress);
   window.addEventListener("resize", () => scrollToPage(model.page, false));
   // The progress of the "big" layout moves on between two polls.

@@ -45,6 +45,11 @@ games have no points and keep no results.
 
 To delete everything, stop the container and delete the data folder.
 
+**Touch diagnosis:** while parents run it (at most 30 minutes), the tablet
+sends where and how long it is touched to Muckebox. These entries stay in
+memory only, are never written to disk, and are gone when the diagnosis is
+cleared or Muckebox restarts.
+
 ## Cookies and logs
 
 - **Cookies:** the kids view uses none. The parents' page sets one cookie
