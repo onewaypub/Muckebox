@@ -39,7 +39,12 @@ that need little screen.
   the next morning. Parents allow more time on the parents' page, or right
   on the kids tablet with a hidden 3-second press on the moon and the PIN.
 - **Sleep timer:** the kids start it themselves with a moon button; after
-  the chosen time the music fades out and the tiles rest until morning.
+  the chosen time the music fades out and the tiles rest until morning. If
+  you use Philips Hue, the lights can go off or switch to a night light then.
+- **Light buttons (Philips Hue, optional):** up to three round buttons on the
+  tablet switch scenes of the kids room that you made in the Hue app ("Hell",
+  "Lesen", "Nachtlicht"); tapping the lit one again turns the room's lights
+  off. Locally through the Hue Bridge: no Hue cloud, no Hue account.
 - **Calm against button mashing:** after a tile starts, the other tiles wait
   a few seconds (default 5); next/previous wait 3 seconds and play/pause one,
   so twenty taps in a row do not turn the room into a disco.
@@ -164,6 +169,8 @@ Muckebox needs these connections:
 | Tablets, parents' phone | Muckebox host | TCP 8484 (`PORT`) | The web UI |
 | Muckebox host | Sonos speakers | TCP 1400 | Controlling the speakers |
 | Muckebox host | Sonos speakers | UDP 1900 multicast | Only without a speaker address on the parents' page: for the room search and to find the chosen room again after each start |
+| Muckebox host | Hue Bridge (optional) | TCP 443 | The light buttons (HTTPS, the bridge's certificate is pinned at pairing) |
+| Muckebox host | Hue Bridge (optional) | UDP 5353 multicast (mDNS) | Only for *Suchen* on the *Licht* page without an address |
 | Muckebox host | Internet | TCP 443, some cover art TCP 80, and DNS | When the parents' page shows favorites (thumbnails) and when parents add favorites or share links. Share-link lookups use HTTPS only. |
 
 **Speakers in another VLAN** (for example an IoT network in UniFi): the
@@ -174,6 +181,14 @@ again; Muckebox reads the list of all rooms from that speaker. Allow the host
 to reach the **whole speaker network** on TCP 1400, because the room you
 control and its group coordinator may be different speakers. No rule from the
 speakers back to the host is needed.
+
+**Hue Bridge in another VLAN:** *Suchen* on the *Licht* page uses mDNS, like
+the Hue app. If your router forwards mDNS between the networks (often called
+*mDNS reflector* or *mDNS repeater*; in UniFi *Multicast DNS*), the search
+finds the bridge. Otherwise enter the bridge's IP address (give it a fixed
+one with a DHCP reservation; the Hue app shows it under Settings → Bridges).
+Either way the Muckebox host must be allowed to reach the bridge on TCP 443.
+The Hue cloud discovery is not used.
 
 **Several Sonos systems in one network:** the search without a speaker
 address shows the rooms of the system that answers first. Enter the address
@@ -232,6 +247,12 @@ one part at a time.
   renamed, moved and removed, and you can upload your own picture (JPEG or
   PNG, up to 10 MB). For album tiles, *Weiterhören* shows where the album
   stopped; *Von vorn* starts it from the beginning next time.
+- **Licht:** connect a Hue Bridge (search, or enter its address; then press
+  the round button on the bridge within 30 seconds), choose the room and up
+  to three buttons, each a scene and a picture. The buttons work at any time,
+  also at bedtime. *Neu verbinden* takes over a new certificate of the bridge
+  (e.g. after a firmware update); *Bridge trennen* forgets it. On the
+  *Einschlaf-Timer* page you choose what the lights do at its end.
 - **Lautstärke & Bedienung:** the limit (1–100) with a preview of the
   tablet, the step of the louder/quieter buttons, how many seconds the other
   tiles wait after a tile starts (0–30, 0 = off), and after how many minutes

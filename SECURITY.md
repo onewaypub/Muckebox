@@ -57,6 +57,13 @@ Muckebox is designed for a trusted home network:
   check. The
   parents' page is not affected: its login cookie is bound to Muckebox's own
   address.
+- With Philips Hue, `settings.json` holds the key the bridge gave Muckebox.
+  It allows switching **all** lights of the household, so it never leaves the
+  server: no API answer and no log contains it. The bridge's certificate is
+  pinned at pairing (trust on first use); a changed certificate is refused
+  until the parents confirm it with *Neu verbinden*. To revoke the key, remove
+  "muckebox" from the apps connected to the bridge in the Hue app's settings. Anybody on the home network
+  can switch the chosen light buttons, like the kids.
 - Muckebox controls the speakers through the local Sonos UPnP interface,
   which itself has no authentication. Muckebox cannot make that interface
   more secure than it is.
