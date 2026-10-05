@@ -409,7 +409,9 @@ function renderLights(state) {
   const cooling = isCooling(model.cooldowns, "light", performance.now());
   [...view.lights.children].forEach((button, index) => {
     button.classList.toggle("active", Boolean(slots[index] && slots[index].active));
-    button.disabled = !lights.available || cooling;
+    // Waiting after a tap: the lit scene shows at once, the others fade a little.
+    button.classList.toggle("waiting", cooling);
+    button.disabled = !lights.available;
   });
 }
 
