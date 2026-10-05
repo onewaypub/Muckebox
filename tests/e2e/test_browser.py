@@ -740,7 +740,7 @@ def test_kids_switch_the_lights(page, server, layout):
     buttons.nth(1).tap()
     expect(buttons.nth(1)).to_have_class(re.compile(r"\bactive\b"))
     assert "group-kids" in server.hue.bridge.lit
-    expect(buttons.nth(1)).to_be_enabled(timeout=5000)  # after the 3 s wait
+    expect(buttons.nth(1)).not_to_have_class(re.compile(r"\bwaiting\b"), timeout=5000)
     buttons.nth(1).tap()
     expect(buttons.nth(1)).not_to_have_class(re.compile(r"\bactive\b"))
     assert "group-kids" not in server.hue.bridge.lit

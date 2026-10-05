@@ -793,9 +793,18 @@ svg {
   pointer-events: none;
 }
 
+/* On: a yellow ring and glow (a yellow fill would hide the sun and the moon). */
 .light.active {
-  background: var(--accent);
-  box-shadow: 0 0 0 8px rgb(255 209 102 / 25%), 0 0 28px rgb(255 209 102 / 60%);
+  background: rgb(255 209 102 / 22%);
+  box-shadow: 0 0 0 5px var(--accent), 0 0 30px rgb(255 209 102 / 60%);
+}
+
+.light.waiting {
+  pointer-events: none;
+}
+
+.light.waiting:not(.active) {
+  opacity: 0.6;
 }
 
 .light:disabled {
