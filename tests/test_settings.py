@@ -494,6 +494,8 @@ def test_reset_pin_keeps_the_new_sections(tmp_path):
         ("set_hue", {"slots": [{"picture": "sun"}]}, "hue_invalid"),
         ("set_hue", [], "hue_invalid"),
         ("set_controls", {"skip_buttons": "yes"}, "controls_invalid"),
+        ("set_controls", {"now_view": 1}, "controls_invalid"),
+        ("set_controls", {"tap_sound": None}, "controls_invalid"),
     ],
 )
 def test_invalid_new_settings(tmp_path, setter, data, code):

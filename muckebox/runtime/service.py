@@ -345,7 +345,12 @@ class Runtime:
                 "skip": SKIP_SECONDS,
                 "toggle": TOGGLE_SECONDS,
             },
-            "view": {"profile": controls.profile, "skip_buttons": controls.skip_buttons},
+            "view": {
+                "profile": controls.profile,
+                "skip_buttons": controls.skip_buttons,
+                "now_view": controls.now_view,
+                "tap_sound": controls.tap_sound,
+            },
             "track": data["track"],
             "progress": self._progress(),
             "lights": self.lights.document(),

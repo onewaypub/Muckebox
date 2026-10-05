@@ -64,6 +64,20 @@ SPDX-License-Identifier: AGPL-3.0-or-later
         </button>
         <div id="page-dots" class="page-dots" aria-hidden="true"></div>
 
+        <!-- "Klein": the playing tile, big; a tap pauses, the house goes back -->
+        <section id="playing" class="now-view" hidden>
+          <button id="home" class="home" type="button" data-i18n-label="kids.home">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
+          </button>
+          <button id="playing-art" class="playing-art" type="button" data-i18n-label="kids.pause">
+            <img id="playing-cover" class="playing-cover" alt="" hidden>
+            <img id="playing-picture" class="playing-picture" alt="">
+            <span class="playing-paused" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+            </span>
+          </button>
+        </section>
+
         <section id="bedtime" class="bedtime" hidden>
           <button id="moon" class="moon" type="button" data-i18n-label="kids.bedtime">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.34 2.02C6.59 1.82 2 6.42 2 12c0 5.52 4.48 10 10 10 3.71 0 6.93-2.02 8.66-5.02-7.51-.25-12.09-8.43-8.32-14.96"/></svg>
@@ -168,7 +182,6 @@ SPDX-License-Identifier: AGPL-3.0-or-later
         <span class="progress" aria-hidden="true" hidden><i></i></span>
         <span class="badge-pending" aria-hidden="true"></span>
       </span>
-      <span class="equalizer" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
       <span class="title"></span>
     </button>
   </template>

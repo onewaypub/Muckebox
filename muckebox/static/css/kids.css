@@ -199,60 +199,6 @@ svg {
   box-shadow: 0 0 0 10px var(--accent), 0 20px 40px rgb(0 0 0 / 35%);
 }
 
-/* The equalizer pill under the playing tile. */
-.tile .equalizer {
-  position: absolute;
-  left: 50%;
-  bottom: -22px;
-  display: none;
-  align-items: flex-end;
-  gap: 5px;
-  height: 52px;
-  padding: 12px 18px;
-  border-radius: 999px;
-  background: var(--accent);
-  transform: translateX(-50%);
-}
-
-.tile.playing .equalizer {
-  display: flex;
-}
-
-.equalizer i {
-  width: 8px;
-  height: 100%;
-  border-radius: 4px;
-  background: var(--bg-deep);
-  transform-origin: bottom;
-  animation: equalizer 900ms ease-in-out infinite alternate;
-}
-
-.equalizer i:nth-child(2) {
-  animation-delay: -300ms;
-}
-
-.equalizer i:nth-child(3) {
-  animation-delay: -600ms;
-}
-
-.equalizer i:nth-child(4) {
-  animation-delay: -150ms;
-}
-
-.tile.paused .equalizer i {
-  animation-play-state: paused;
-}
-
-@keyframes equalizer {
-  from {
-    transform: scaleY(0.3);
-  }
-
-  to {
-    transform: scaleY(1);
-  }
-}
-
 .tile .badge-pending {
   position: absolute;
   top: 12px;
@@ -525,10 +471,6 @@ svg {
   color: var(--accent);
 }
 
-[data-profile="big"] .tile .equalizer {
-  display: none;
-}
-
 [data-profile="big"] .now {
   display: flex;
   flex-direction: column;
@@ -765,6 +707,125 @@ svg {
   }
 }
 
+/* -- "small": the playing tile, big ------------------------------------------- */
+
+.pager.now-playing .tiles,
+.pager.now-playing .page-arrow,
+.pager.now-playing .page-dots {
+  visibility: hidden;
+}
+
+.now-view {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px calc(var(--control) + 40px) 32px;
+}
+
+.playing-art {
+  position: relative;
+  height: 100%;
+  max-width: 100%;
+  aspect-ratio: 1;
+  padding: 0;
+  border: 0;
+  border-radius: calc(var(--tile-radius) * 1.3);
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 0 0 12px var(--accent), 0 24px 48px rgb(0 0 0 / 35%);
+  touch-action: none;
+}
+
+.playing-cover {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.playing-picture {
+  width: 70%;
+  height: 70%;
+  pointer-events: none;
+}
+
+/* Paused: a big play sign over the picture says "tap me". */
+.playing-paused {
+  position: absolute;
+  inset: 0;
+  display: none;
+  place-items: center;
+  background: rgb(20 37 61 / 35%);
+}
+
+.playing-paused svg {
+  width: 38%;
+  height: 38%;
+  padding: 6%;
+  border-radius: 50%;
+  background: var(--accent);
+  fill: var(--bg-deep);
+}
+
+.now-view.paused .playing-paused {
+  display: grid;
+}
+
+.home {
+  position: absolute;
+  top: 24px;
+  left: max(20px, env(safe-area-inset-left));
+  width: var(--control);
+  height: var(--control);
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 14%);
+  color: var(--text);
+  display: grid;
+  place-items: center;
+}
+
+.home svg {
+  width: 54%;
+  height: 54%;
+}
+
+@media (max-aspect-ratio: 1/1) {
+  .now-view {
+    padding: calc(var(--control) + 40px) 24px 32px;
+  }
+
+  .playing-art {
+    width: 100%;
+    height: auto;
+    max-height: 100%;
+  }
+}
+
+/* -- instant feedback: a little hop when a tap starts something ------------------- */
+
+.hop {
+  animation: hop 380ms ease-out;
+}
+
+@keyframes hop {
+  30% {
+    transform: scale(1.12);
+  }
+
+  60% {
+    transform: scale(0.96);
+  }
+
+  to {
+    transform: scale(1);
+  }
+}
+
 /* -- light buttons ------------------------------------------------------------- */
 
 .lights {
@@ -980,17 +1041,6 @@ svg {
 
   .volume[data-kind="dots"] {
     gap: 5px;
-  }
-
-  .tile .equalizer {
-    bottom: -14px;
-    height: 34px;
-    padding: 8px 12px;
-    gap: 3px;
-  }
-
-  .equalizer i {
-    width: 5px;
   }
 
   .volume[data-kind="dots"] i {

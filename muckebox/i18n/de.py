@@ -153,6 +153,8 @@ MESSAGES: dict[str, str] = {
         "Titel unter den Kacheln; was gerade läuft, mit Kapitel und Fortschritt."
     ),
     "admin.skip_buttons": "Vor/Zurück auch bei „Klein“ zeigen",
+    "admin.now_view": "Nach dem Start das Bild groß zeigen (mit Haus-Knopf zurück)",
+    "admin.tap_sound": "Leiser „Plopp“ vom Tablet, wenn ein Tipp etwas startet",
     "admin.games_lead": (
         "Kurze Runden, ruhiges Ende, keine Punkte. Erst nach dem Einschalten sichtbar."
     ),
@@ -248,6 +250,7 @@ MESSAGES: dict[str, str] = {
     "admin.sleep_lights_off": "Licht aus",
     "admin.sleep_lights_scene": "Szene „{name}“",
     "kids.light": "Licht",
+    "kids.home": "Alle Bilder",
     "admin.resume": "Weiterhören",
     "admin.resume_position": "Stand: Titel {track}, {time}",
     "admin.resume_restart": "Von vorn",

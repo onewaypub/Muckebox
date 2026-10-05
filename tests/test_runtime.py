@@ -1352,7 +1352,12 @@ def test_the_big_view_shows_the_track_and_its_progress(runtime, fake, library, a
     runtime.play_tile(album.id)
     listen_until(runtime, fake, 2, 300)
     doc = runtime.state_document()
-    assert doc["view"] == {"profile": "small", "skip_buttons": False}
+    assert doc["view"] == {
+        "profile": "small",
+        "skip_buttons": False,
+        "now_view": True,
+        "tap_sound": True,
+    }
     assert doc["track"] is None  # the small view shows no titles
     runtime.store.set_controls({"profile": "big"})
     clock.advance(10)

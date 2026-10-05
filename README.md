@@ -259,7 +259,9 @@ one part at a time.
   without a tap on the tablet a playing tile fades and pauses (0–240,
   0 = off; only tiles are paused, never music started from the Sonos app,
   and paused time does not count). Here you also choose the layout of the
-  kids view, *Klein* or *Groß*, and whether *Klein* shows previous/next.
+  kids view, *Klein* or *Groß*, whether *Klein* shows previous/next and the
+  playing tile big after a start, and the soft "plop" when a tap starts
+  something.
   *Touch-Diagnose* (30 minutes) shows what the tablet receives when your
   child presses it: the tablet draws every touch as a dot, and this page
   lists each press with where it landed, how long it lasted, how far the
@@ -280,8 +282,13 @@ one part at a time.
 ### Kids view (`/`)
 
 - **Klein:** six tiles per page; swipe or tap the arrows on the sides, the
-  dots below show the page. When a tile starts, the page turns to it. The
-  playing tile grows, gets a yellow ring and a little equalizer below.
+  dots below show the page. When a tile starts, the page turns to it; the
+  playing tile grows and gets a yellow ring. Right after a tile starts it is
+  shown big, like a picture book page: a tap on the big picture pauses or
+  continues (paused, a big play sign lies on it), the house in the corner
+  goes back to all tiles. A tap that starts something gives a soft "plop"
+  from the tablet and a little hop of the picture at once, while the speaker
+  still starts. Both can be switched off on the parents' page.
 - **Groß:** all tiles with their titles in a grid that scrolls; the panel on
   the left shows the cover and title of what is playing, the chapter
   ("Titel 4 von 9") and how far it got, with previous, play/pause and next,
