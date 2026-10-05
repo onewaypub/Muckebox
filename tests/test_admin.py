@@ -477,7 +477,7 @@ def test_settings_never_contain_pin_data(admin, services):
         "pin_generated": False,
         "time_zone": None,
     }
-    sections = {"schedule", "sleep_timer", "games", "controls"}
+    sections = {"schedule", "sleep_timer", "games", "controls", "hue"}
     assert set(settings) - sections == set(list(settings)[:6])
     assert data["sonos"]["status"] == "ok"
     text = admin.get("/api/admin/settings").get_data(as_text=True)
@@ -908,3 +908,84 @@ def test_parents_set_the_tap_wait_and_the_pause_without_taps(admin, services):
     assert status["idle"] == {"minutes": 90, "paused_at": None}
     response = admin.put("/api/admin/settings/controls", json={"tap_cooldown": 60}, headers=POST)
     assert error_code(response) == (422, "controls_invalid")
+
+
+# -- Hue lights -------------------------------------------------------------------------------
+
+
+def pair_and_choose(admin, fake_hue):
+    response = admin.post("/api/admin/hue/pair", json={"ip": fake_hue.bridge.ip}, headers=POST)
+    assert response.status_code == 200
+    slots = [
+        {"scene": "scene-bright", "picture": "sun"},
+        {"scene": "scene-night", "picture": "moon"},
+    ]
+    body = {"room": "room-kids", "slots": slots}
+    return admin.put("/api/admin/settings/hue", json=body, headers=POST)
+
+
+def test_parents_find_pair_and_choose_lights(admin, client, fake_hue, services):
+    found = admin.post("/api/admin/hue/search", json={"ip": None}, headers=POST).get_json()
+    assert found["bridges"] == [
+        {"ip": "192.0.2.50", "id": "001788fffe000001", "name": "Hue Bridge"}
+    ]
+    response = pair_and_choose(admin, fake_hue)
+    hue = response.get_json()["settings"]["hue"]
+    assert hue["bridge"] == {"ip": "192.0.2.50", "id": "001788fffe000001", "name": "Hue Bridge"}
+    assert [s["picture"] for s in hue["slots"]] == ["sun", "moon"]
+    view = admin.get("/api/admin/hue").get_json()
+    assert {r["name"] for r in view["rooms"]} == {"Kinderzimmer", "Wohnzimmer"}
+    assert view["available"] is True
+    # The kids switch the night light on and off again.
+    services.runtime.lights.poll()
+    lights = client.get("/api/state").get_json()["lights"]
+    assert [s["picture"] for s in lights["slots"]] == ["sun", "moon"]
+    response = client.post("/api/lights/2/toggle", headers=POST)
+    assert response.get_json()["lights"]["slots"][1]["active"] is True
+    again = client.post("/api/lights/2/toggle", headers=POST)
+    assert error_code(again) == (409, "cooling_down")
+    assert client.post("/api/lights/9/toggle", headers=POST).status_code == 404
+    status = admin.get("/api/admin/status").get_json()["lights"]
+    assert status == {
+        "configured": True,
+        "bridge": "Hue Bridge",
+        "available": True,
+        "problem": None,
+    }
+
+
+def test_secrets_of_the_bridge_never_leave_the_server(admin, fake_hue):
+    pair_and_choose(admin, fake_hue)
+    for path in ("/api/admin/settings", "/api/admin/hue", "/api/admin/status"):
+        text = admin.get(path).get_data(as_text=True)
+        assert fake_hue.bridge.key not in text
+        assert fake_hue.bridge.fingerprint not in text
+
+
+def test_pairing_before_the_button_writes_nothing(admin, fake_hue, services):
+    fake_hue.bridge.button_pressed = False
+    response = admin.post("/api/admin/hue/pair", json={"ip": fake_hue.bridge.ip}, headers=POST)
+    assert error_code(response) == (409, "hue_link_button")
+    assert services.store.current().hue.bridge is None
+    bad = admin.post("/api/admin/hue/pair", json={"ip": "http://x"}, headers=POST)
+    assert error_code(bad) == (422, "hue_ip_invalid")
+    gone = admin.post("/api/admin/hue/pair", json={"ip": "192.0.2.99"}, headers=POST)
+    assert error_code(gone)[1] == "hue_unreachable"
+
+
+def test_reconnect_and_forget(admin, fake_hue, services):
+    pair_and_choose(admin, fake_hue)
+    fake_hue.bridge.fingerprint = "cd" * 32
+    assert admin.post("/api/admin/hue/reconnect", headers=POST).status_code == 200
+    assert services.store.current().hue.bridge.fingerprint == "cd" * 32
+    response = admin.delete("/api/admin/hue", headers=POST)
+    assert response.get_json()["settings"]["hue"]["bridge"] is None
+    bad = admin.put(
+        "/api/admin/settings/hue", json={"slots": [{"scene": "s", "picture": "x"}]}, headers=POST
+    )
+    assert error_code(bad) == (422, "hue_invalid")
+
+
+def test_lights_need_a_bridge(client):
+    response = client.post("/api/lights/1/toggle", headers=POST)
+    assert error_code(response) == (409, "hue_not_configured")

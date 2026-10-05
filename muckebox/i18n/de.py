@@ -439,6 +439,7 @@ MESSAGES: dict[str, str] = {
     ),
     "error.games_invalid": "Die Einstellungen der Spiele sind ungültig.",
     "error.hue_invalid": "Die Licht-Einstellungen sind ungültig.",
+    "error.hue_ip_invalid": "Bitte eine IP-Adresse wie 192.0.2.50 oder einen Hostnamen eingeben.",
     "error.hue_unreachable": (
         "Die Hue Bridge ist nicht erreichbar. Läuft sie, und darf die Muckebox sie über "
         "TCP 443 erreichen?"
