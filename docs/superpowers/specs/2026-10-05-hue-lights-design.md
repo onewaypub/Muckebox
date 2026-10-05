@@ -43,11 +43,14 @@ in the home network: no Hue cloud, no Hue account.
   `username` is the application key.
 - **Identity:** `GET https://<ip>/api/0/config` (no key needed) gives the
   bridge id and name.
-- **TLS:** the bridge's certificate must name the bridge id (CN). It is
-  accepted if it chains to the Hue root CA shipped with Muckebox; otherwise
-  (older firmware with a self-signed certificate) its SHA-256 fingerprint is
-  pinned at pairing (trust on first use). A changed certificate is refused
-  with a clear message ("neu verbinden").
+- **TLS:** the bridge's certificate is pinned at pairing: its SHA-256
+  fingerprint is stored and every later connection must present the same
+  certificate (urllib3 `assert_fingerprint`; trust on first use). Muckebox
+  does not ship the Hue root CA (its licence for redistribution is unclear).
+  A changed certificate (e.g. after a firmware update) is refused with a
+  clear message; "Neu verbinden" on the parents' page takes the new
+  certificate over if the stored key still works, without pressing the
+  bridge button again.
 - **Reading:** `GET /clip/v2/resource/room`, `/scene`, `/grouped_light` with
   the header `hue-application-key`. A scene belongs to a room via
   `scene.group`; it is active when `scene.status.active` is not `inactive`.
@@ -65,9 +68,10 @@ in the home network: no Hue cloud, no Hue account.
   about Hue runs on the transport or volume lane.
 - **Kids command:** tapping a slot recalls its scene; tapping the active slot
   turns the room off. Cooldown group `light`, 3 s.
-- **Sleep timer end:** when the sleep timer's end is handled (the existing
-  "pause once" path), the light lane recalls the chosen scene or turns the
-  room off — once per end.
+- **Sleep timer end:** the light lane notices the sleep timer's end itself
+  (independent of the speaker, so it also works while Sonos is unreachable),
+  recalls the chosen scene or turns the room off — once per end, recorded in
+  `timers.json`, and only within 15 minutes after the end.
 - State document, section `lights`:
   `{"available": bool, "slots": [{"slot": 1, "picture": "moon", "active": bool}], "cooldown": 3}`;
   empty `slots` when Hue is not set up.
@@ -119,7 +123,7 @@ status.
 ## Tests
 
 Unit tests with `FakeBridge` and a fake clock (pairing incl. error 101,
-TLS check incl. fingerprint pinning, reading rooms/scenes, toggle and off,
+fingerprint pinning, reading rooms/scenes, toggle and off,
 cooldown, breaker, sleep-timer end, settings validation), API tests, an e2e
 test (light buttons in both layouts), demo mode with a simulated bridge.
 Real hardware only by hand, never in automated tests.
