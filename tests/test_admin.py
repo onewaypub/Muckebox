@@ -989,3 +989,30 @@ def test_reconnect_and_forget(admin, fake_hue, services):
 def test_lights_need_a_bridge(client):
     response = client.post("/api/lights/1/toggle", headers=POST)
     assert error_code(response) == (409, "hue_not_configured")
+
+
+# -- touch diagnosis ---------------------------------------------------------------------------
+
+
+def test_touch_diagnosis_from_the_tablet_to_the_parents(admin, client):
+    events = {
+        "events": [{"type": "pointerdown", "x": 10, "y": 20, "pt": "touch", "target": "tile:1"}]
+    }
+    assert error_code(client.post("/api/diag/touch", json=events, headers=POST)) == (
+        409,
+        "diag_off",
+    )
+    assert client.get("/api/state").get_json()["diag"] is False
+    started = admin.post("/api/admin/diag/touch", json={"on": True}, headers=POST).get_json()
+    assert started["active"] is True and started["remaining"] == 30 * 60
+    assert client.get("/api/state").get_json()["diag"] is True
+    assert client.post("/api/diag/touch", json=events, headers=POST).get_json()["kept"] == 1
+    assert client.post("/api/diag/touch", json={"events": "x"}, headers=POST).status_code == 400
+    log = admin.get("/api/admin/diag/touch").get_json()
+    assert log["events"] == [
+        {"type": "pointerdown", "x": 10, "y": 20, "pt": "touch", "target": "tile:1"}
+    ]
+    assert admin.delete("/api/admin/diag/touch", headers=POST).get_json()["events"] == []
+    stopped = admin.post("/api/admin/diag/touch", json={"on": False}, headers=POST).get_json()
+    assert stopped["active"] is False
+    assert admin.post("/api/admin/diag/touch", json={"on": "yes"}, headers=POST).status_code == 400

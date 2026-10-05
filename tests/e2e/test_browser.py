@@ -771,3 +771,38 @@ def test_parents_connect_the_bridge_and_choose_buttons(page, server):
     page.locator("#sleep-timer button[type=submit]").tap()
     expect(page.locator("#flash")).to_have_text("Gespeichert")
     assert server.store.current().sleep_timer.lights == "off"
+
+
+# -- touch diagnosis --------------------------------------------------------------------------
+
+
+def test_touch_diagnosis_shows_what_the_tablet_receives(page, server):
+    chromium_only(page)
+    server.add_tiles(0, 2, 3)
+    server.runtime.touchlog.start()
+    page.goto(server.url)
+    tiles = page.locator(".tile")
+    expect(tiles).to_have_count(3)
+    expect(page.locator(".touch-diag")).to_be_attached(timeout=10_000)
+    x, y = middle(tiles.nth(0).bounding_box())
+    touch(page, [(x, y)], hold_ms=600)  # a resting finger: started while still down
+    expect(page.locator(".touch-dot.down")).to_have_count(1)
+    expect(tiles.nth(0)).to_have_class(re.compile(r"\bplaying\b"))
+    deadline = time.time() + 6
+    while time.time() < deadline and not any(
+        e["type"] == "tile-hold" for e in server.runtime.touchlog.events()
+    ):
+        time.sleep(0.1)
+    types = [e["type"] for e in server.runtime.touchlog.events()]
+    assert "pointerdown" in types and "pointerup" in types and "tile-hold" in types
+    down = next(e for e in server.runtime.touchlog.events() if e["type"] == "pointerdown")
+    assert down["target"] == "tile:1" and down["pt"] == "touch"
+
+    log_in(page, server, to="volume")
+    rows = page.locator("#touch-rows tr")
+    expect(rows).to_have_count(1)
+    expect(rows.first).to_contain_text("tile:1")
+    expect(rows.first).to_contain_text("gestartet")
+    page.locator("#touch-stop").tap()
+    expect(page.locator("#touch-status")).to_have_text("Aus")
+    assert not server.runtime.touchlog.active()

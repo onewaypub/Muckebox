@@ -57,6 +57,7 @@ from .resume import ResumeStore
 from .state import StateCache
 from .timekeeper import Refused, TimeKeeper
 from .timers import TimersFile
+from .touchlog import TouchLog
 from .volume_guard import VolumeGuard
 
 log = logging.getLogger(__name__)
@@ -208,6 +209,7 @@ class Runtime:
         self.keeper = TimeKeeper(store, self.timers, self.clock, self.zones)
         self.games = Games(store, self.timers, self.keeper, self.clock)
         self.cooldown = Cooldown(self.clock)
+        self.touchlog = TouchLog(self.clock)
         self.lights = Lights(
             store, self.timers, self.clock, hue or NoHue(), lane_factory=lane_factory
         )
@@ -347,6 +349,7 @@ class Runtime:
             "track": data["track"],
             "progress": self._progress(),
             "lights": self.lights.document(),
+            "diag": self.touchlog.active(),
             "last_error": last_error,
             **times,
             "games": self.games.document(),

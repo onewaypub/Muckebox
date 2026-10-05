@@ -339,6 +339,36 @@ SPDX-License-Identifier: AGPL-3.0-or-later
           </section>
           <div><button type="submit" class="primary" data-i18n="admin.save"></button></div>
         </form>
+
+        <section id="touch-diag" class="card stack">
+          <div class="card-head">
+            <div>
+              <h2 data-i18n="admin.touch_diag"></h2>
+              <p class="hint" data-i18n="admin.touch_diag_hint"></p>
+            </div>
+          </div>
+          <p id="touch-status" class="strong"></p>
+          <div class="inline">
+            <button id="touch-start" type="button" class="primary" data-i18n="admin.touch_start"></button>
+            <button id="touch-stop" type="button" class="secondary" data-i18n="admin.touch_stop" hidden></button>
+            <button id="touch-refresh" type="button" class="secondary" data-i18n="admin.refresh"></button>
+            <button id="touch-clear" type="button" class="secondary" data-i18n="admin.touch_clear"></button>
+            <button id="touch-download" type="button" class="secondary" data-i18n="admin.touch_download"></button>
+          </div>
+          <div class="table-wrap">
+            <table id="touch-table" class="touch-table">
+              <thead><tr>
+                <th data-i18n="admin.touch_col_time"></th>
+                <th data-i18n="admin.touch_col_target"></th>
+                <th data-i18n="admin.touch_col_ms"></th>
+                <th data-i18n="admin.touch_col_moved"></th>
+                <th data-i18n="admin.touch_col_result"></th>
+                <th data-i18n="admin.touch_col_events"></th>
+              </tr></thead>
+              <tbody id="touch-rows"></tbody>
+            </table>
+          </div>
+        </section>
       </section>
 
       <!-- Spiele ------------------------------------------------------------------------------>

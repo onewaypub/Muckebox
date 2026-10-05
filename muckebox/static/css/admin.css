@@ -1730,6 +1730,35 @@ input[type="range"] {
   max-width: 440px;
 }
 
+/* -- touch diagnosis ---------------------------------------------------------------------- */
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+.touch-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.touch-table th,
+.touch-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line-soft);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.touch-table th {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.touch-table tr.missed td {
+  background: var(--danger-soft);
+}
+
 /* -- lights ----------------------------------------------------------------------------- */
 
 .pairing {

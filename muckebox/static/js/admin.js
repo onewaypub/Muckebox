@@ -144,6 +144,7 @@ function showPage() {
   if ($("app").hidden) return;
   if (page === "overview") loadStatus();
   if (page === "lights" || page === "sleep") loadHue();
+  if (page === "volume") loadTouch();
 }
 
 function showOnly(id) {
@@ -738,6 +739,98 @@ async function loadCredits() {
   );
 }
 
+// -- touch diagnosis ------------------------------------------------------------------------------------
+//
+// The tablet sends what it receives while the diagnosis runs; here each press
+// (finger down to up) becomes one row: where it landed, how long, how far the
+// finger moved, and what the tiles made of it.
+
+let touchEvents = [];
+let touchTimer = null;
+
+async function loadTouch() {
+  const result = await guarded(() => get("/api/admin/diag/touch"));
+  if (result) renderTouch(result.data);
+}
+
+async function switchTouch(on, button) {
+  const result = await busy(button, guarded(() => post("/api/admin/diag/touch", { on })));
+  if (result) renderTouch(result.data);
+}
+
+function renderTouch(data) {
+  touchEvents = data.events;
+  $("touch-start").hidden = data.active;
+  $("touch-stop").hidden = !data.active;
+  $("touch-status").textContent = data.active
+    ? t("admin.touch_running", { minutes: Math.ceil(data.remaining / 60), count: pressesOf(data.events).length })
+    : t("admin.touch_off");
+  const rows = pressesOf(data.events).slice(-40).reverse();
+  $("touch-rows").replaceChildren(
+    ...rows.map((press) =>
+      element(
+        "tr",
+        { className: press.result === "started" ? "" : "missed" },
+        element("td", { textContent: `${(press.t / 1000).toFixed(1)} s` }),
+        element("td", { textContent: press.target }),
+        element("td", { textContent: press.ms === null ? "–" : String(press.ms) }),
+        element("td", { textContent: press.moved === null ? "–" : String(press.moved) }),
+        element("td", { textContent: t(`admin.touch_result_${press.result}`) }),
+        element("td", { textContent: press.extra.join(", ") }),
+      ),
+    ),
+  );
+  clearInterval(touchTimer);
+  if (data.active) {
+    touchTimer = setInterval(() => {
+      if (currentPage() === "volume" && document.visibilityState === "visible") loadTouch();
+      else clearInterval(touchTimer);
+    }, 3000);
+  }
+}
+
+// One entry per press, with what happened to it.
+function pressesOf(events) {
+  const presses = [];
+  const open = new Map();
+  let last = null;
+  for (const event of events) {
+    if (event.type === "pointerdown") {
+      last = { t: event.t || 0, target: event.target || "?", pt: event.pt, ms: null, moved: null, result: "nothing", extra: [] };
+      if (event.pt && event.pt !== "touch") last.extra.push(event.pt);
+      open.set(event.id, last);
+      presses.push(last);
+    } else if (["pointerup", "pointercancel"].includes(event.type)) {
+      const press = open.get(event.id) || last;
+      if (!press) continue;
+      open.delete(event.id);
+      press.ms = event.ms ?? press.ms;
+      press.moved = event.moved ?? press.moved;
+      if (event.type === "pointercancel") {
+        press.extra.push("pointercancel");
+        if (press.result === "nothing") press.result = "cancelled";
+      }
+    } else if (["tile-hold", "tile-release", "light"].includes(event.type) && last) {
+      last.result = "started";
+      last.extra.push(event.type);
+    } else if (event.type === "press-moved" && last) {
+      last.result = "moved";
+    } else if (event.type === "press-swipe" && last) {
+      last.result = "swipe";
+    } else if (event.type === "contextmenu" && last) {
+      last.extra.push(event.type);
+    }
+  }
+  return presses;
+}
+
+function downloadTouch() {
+  const blob = new Blob([JSON.stringify(touchEvents, null, 1)], { type: "application/json" });
+  const link = element("a", { href: URL.createObjectURL(blob), download: "muckebox-touch.json" });
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+}
+
 // -- lights (Hue) ---------------------------------------------------------------------------------------
 
 let hueView = null; // rooms and scenes read from the bridge
@@ -1128,6 +1221,14 @@ function bind() {
       renderScheduleStatus(result.data.schedule);
       loadStatus();
     }
+  });
+  $("touch-start").addEventListener("click", (event) => switchTouch(true, event.target));
+  $("touch-stop").addEventListener("click", (event) => switchTouch(false, event.target));
+  $("touch-refresh").addEventListener("click", loadTouch);
+  $("touch-download").addEventListener("click", downloadTouch);
+  $("touch-clear").addEventListener("click", async (event) => {
+    const result = await busy(event.target, guarded(() => request("DELETE", "/api/admin/diag/touch")));
+    if (result) renderTouch(result.data);
   });
   $("hue-search").addEventListener("submit", searchBridges);
   $("hue-pair-cancel").addEventListener("click", stopPairing);

@@ -173,6 +173,30 @@ MESSAGES: dict[str, str] = {
     ),
     "admin.zone_ok": "✓ Zeitzone stimmt",
     "admin.pin_save": "PIN speichern",
+    "admin.touch_diag": "Touch-Diagnose",
+    "admin.touch_diag_hint": (
+        "Zeigt, was das Tablet bei jeder Berührung empfängt: Das Tablet malt jede Berührung als "
+        "Punkt (grün gedrückt, blau losgelassen, rot vom Browser abgebrochen), hier steht pro "
+        "Druck, wo er landete, wie lange er dauerte, wie weit der Finger rutschte und ob eine "
+        "Kachel startete. Läuft 30 Minuten; die Daten bleiben nur im Arbeitsspeicher."
+    ),
+    "admin.touch_start": "Diagnose starten (30 Min.)",
+    "admin.touch_stop": "Diagnose beenden",
+    "admin.touch_clear": "Löschen",
+    "admin.touch_download": "Herunterladen",
+    "admin.touch_running": "Läuft noch {minutes} Min. · {count} Berührungen",
+    "admin.touch_off": "Aus",
+    "admin.touch_col_time": "Zeit",
+    "admin.touch_col_target": "Ziel",
+    "admin.touch_col_ms": "Dauer (ms)",
+    "admin.touch_col_moved": "Bewegt (px)",
+    "admin.touch_col_result": "Ergebnis",
+    "admin.touch_col_events": "Ereignisse",
+    "admin.touch_result_started": "gestartet",
+    "admin.touch_result_moved": "zu weit gerutscht",
+    "admin.touch_result_swipe": "gewischt",
+    "admin.touch_result_cancelled": "vom Browser abgebrochen",
+    "admin.touch_result_nothing": "nichts passiert",
     "admin.lights": "Licht",
     "admin.lights_lead": (
         "Bis zu drei Licht-Knöpfe auf dem Tablet: je eine Szene aus der Hue-App. Antippen "
@@ -489,6 +513,7 @@ MESSAGES: dict[str, str] = {
         "Der Einschlaf-Timer braucht eine Dauer von 5 bis 90 Minuten und eine Aufwachzeit."
     ),
     "error.games_invalid": "Die Einstellungen der Spiele sind ungültig.",
+    "error.diag_off": "Die Touch-Diagnose ist nicht eingeschaltet.",
     "error.hue_invalid": "Die Licht-Einstellungen sind ungültig.",
     "error.hue_ip_invalid": "Bitte eine IP-Adresse wie 192.0.2.50 oder einen Hostnamen eingeben.",
     "error.hue_unreachable": (
