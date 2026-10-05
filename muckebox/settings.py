@@ -70,6 +70,14 @@ DEFAULT_IDLE_MINUTES = 60
 IDLE_MINUTES = (0, 240)  # 0 = off
 #: Layouts of the kids view: "small" (0-6 years) and "big" (7-14 years).
 PROFILES = ("small", "big")
+#: Pictures of the light buttons, and how many there may be.
+LIGHT_PICTURES = ("sun", "book", "star", "moon", "bulb")
+MAX_LIGHT_SLOTS = 3
+#: What the sleep timer does with the lights at its end (or a scene id).
+SLEEP_LIGHTS = ("keep", "off")
+_HUE_ID_RE = re.compile(r"^[A-Za-z0-9-]{1,64}$")
+_HUE_KEY_RE = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
+_FINGERPRINT_RE = re.compile(r"^[0-9a-f]{64}$")
 _TILE_ID_RE = re.compile(r"^t[0-9a-f]{8,32}$")
 
 # RFC 1123 host name: dot-separated labels of letters, digits and hyphens.
@@ -116,6 +124,8 @@ class SleepTimerSettings:
     minutes: int = DEFAULT_SLEEP_MINUTES
     #: Until when the tiles stay locked afterwards on days without a window.
     wake: clock_time = DEFAULT_WAKE
+    #: The lights at the end: "keep", "off" or the id of a Hue scene.
+    lights: str = "keep"
 
 
 @dataclass(frozen=True)
@@ -152,6 +162,31 @@ class ControlSettings:
 
 
 @dataclass(frozen=True)
+class HueBridge:
+    ip: str
+    id: str
+    name: str
+    #: The application key from pairing and the pinned certificate: secrets
+    #: that never leave the server.
+    key: str
+    fingerprint: str
+
+
+@dataclass(frozen=True)
+class HueSlot:
+    scene: str
+    picture: str
+
+
+@dataclass(frozen=True)
+class HueSettings:
+    bridge: HueBridge | None = None
+    #: The room or zone whose lights the kids switch.
+    room: str | None = None
+    slots: tuple[HueSlot, ...] = ()
+
+
+@dataclass(frozen=True)
 class StoredSettings:
     room: str | None
     room_uid: str | None
@@ -165,6 +200,7 @@ class StoredSettings:
     sleep_timer: SleepTimerSettings = field(default_factory=lambda: SleepTimerSettings())
     games: GameSettings = field(default_factory=lambda: GameSettings())
     controls: ControlSettings = field(default_factory=lambda: ControlSettings())
+    hue: HueSettings = field(default_factory=lambda: HueSettings())
 
     @property
     def configured(self) -> bool:
@@ -245,7 +281,10 @@ def validate_sleep_timer(data: object) -> SleepTimerSettings:
         wake = parse_time(data.get("wake", format_time(DEFAULT_WAKE)))
     except ValueError:
         raise SettingsError("sleep_timer_invalid") from None
-    return SleepTimerSettings(enabled, minutes, wake or DEFAULT_WAKE)
+    lights = data.get("lights", "keep")
+    if not isinstance(lights, str) or not (lights in SLEEP_LIGHTS or _HUE_ID_RE.match(lights)):
+        raise SettingsError("sleep_timer_invalid")
+    return SleepTimerSettings(enabled, minutes, wake or DEFAULT_WAKE, lights)
 
 
 def validate_games(data: object) -> GameSettings:
@@ -308,6 +347,77 @@ def sleep_timer_to_json(settings: SleepTimerSettings) -> dict[str, Any]:
         "enabled": settings.enabled,
         "minutes": settings.minutes,
         "wake": format_time(settings.wake),
+        "lights": settings.lights,
+    }
+
+
+def validate_hue_bridge(data: object) -> HueBridge | None:
+    if data is None:
+        return None
+    if not isinstance(data, dict):
+        raise SettingsError("hue_invalid")
+    name = data.get("name")
+    try:
+        ip = validate_seed_ip(data.get("ip"))
+    except SettingsError:
+        raise SettingsError("hue_invalid") from None
+    if (
+        ip is None
+        or not isinstance(data.get("id"), str)
+        or not _HUE_ID_RE.match(data["id"])
+        or not isinstance(name, str)
+        or not 1 <= len(name) <= 60
+        or _CONTROL_RE.search(name)
+        or not isinstance(data.get("key"), str)
+        or not _HUE_KEY_RE.match(data["key"])
+        or not isinstance(data.get("fingerprint"), str)
+        or not _FINGERPRINT_RE.match(data["fingerprint"])
+    ):
+        raise SettingsError("hue_invalid")
+    return HueBridge(ip, data["id"], name, data["key"], data["fingerprint"])
+
+
+def validate_hue_choice(data: object) -> tuple[str | None, tuple[HueSlot, ...]]:
+    """The room and the light buttons chosen on the parents' page."""
+    if not isinstance(data, dict):
+        raise SettingsError("hue_invalid")
+    room, slots = data.get("room"), data.get("slots", [])
+    if room is not None and not (isinstance(room, str) and _HUE_ID_RE.match(room)):
+        raise SettingsError("hue_invalid")
+    if not isinstance(slots, list) or len(slots) > MAX_LIGHT_SLOTS:
+        raise SettingsError("hue_invalid")
+    result = []
+    for slot in slots:
+        if (
+            not isinstance(slot, dict)
+            or not isinstance(slot.get("scene"), str)
+            or not _HUE_ID_RE.match(slot["scene"])
+            or slot.get("picture") not in LIGHT_PICTURES
+        ):
+            raise SettingsError("hue_invalid")
+        result.append(HueSlot(slot["scene"], slot["picture"]))
+    return room, tuple(result)
+
+
+def validate_hue(data: object) -> HueSettings:
+    if not isinstance(data, dict):
+        raise SettingsError("hue_invalid")
+    room, slots = validate_hue_choice(data)
+    return HueSettings(validate_hue_bridge(data.get("bridge")), room, slots)
+
+
+def hue_to_json(settings: HueSettings, secrets: bool = False) -> dict[str, Any]:
+    """For settings.json (``secrets``) or for the parents' page (never the key)."""
+    bridge = settings.bridge
+    shown = None
+    if bridge is not None:
+        shown = {"ip": bridge.ip, "id": bridge.id, "name": bridge.name}
+        if secrets:
+            shown |= {"key": bridge.key, "fingerprint": bridge.fingerprint}
+    return {
+        "bridge": shown,
+        "room": settings.room,
+        "slots": [{"scene": slot.scene, "picture": slot.picture} for slot in settings.slots],
     }
 
 
@@ -383,7 +493,18 @@ def generate_pin() -> str:
 # -- reading the file ---------------------------------------------------------------
 
 _KNOWN_SECTIONS = frozenset(
-    {"schema", "sonos", "volume", "admin", "time", "schedule", "sleep_timer", "games", "controls"}
+    {
+        "schema",
+        "sonos",
+        "volume",
+        "admin",
+        "time",
+        "schedule",
+        "sleep_timer",
+        "games",
+        "controls",
+        "hue",
+    }
 )
 
 
@@ -424,6 +545,7 @@ def _parse(data: dict[str, Any]) -> StoredSettings:
         sleep_timer = validate_sleep_timer(data.get("sleep_timer", {}))
         games = validate_games(data.get("games", {}))
         controls = validate_controls(data.get("controls", {}))
+        hue = validate_hue(data.get("hue", {}))
     except SettingsError as exc:
         raise ValueError(f"invalid settings ({exc})") from None
     return StoredSettings(
@@ -438,6 +560,7 @@ def _parse(data: dict[str, Any]) -> StoredSettings:
         sleep_timer=sleep_timer,
         games=games,
         controls=controls,
+        hue=hue,
     )
 
 
@@ -552,6 +675,21 @@ class SettingsStore:
     def set_controls(self, data: object) -> StoredSettings:
         controls = validate_controls(data)
         return self._update(lambda s: replace(s, controls=controls))
+
+    def set_hue_bridge(self, bridge: HueBridge | None) -> StoredSettings:
+        """A newly paired bridge (another bridge: the room and buttons start empty)."""
+
+        def change(settings: StoredSettings) -> StoredSettings:
+            same = bridge is not None and settings.hue.bridge is not None
+            same = same and settings.hue.bridge.id == bridge.id
+            hue = replace(settings.hue, bridge=bridge) if same else HueSettings(bridge=bridge)
+            return replace(settings, hue=hue)
+
+        return self._update(change)
+
+    def set_hue(self, data: object) -> StoredSettings:
+        room, slots = validate_hue_choice(data)
+        return self._update(lambda s: replace(s, hue=replace(s.hue, room=room, slots=slots)))
 
     def set_volume(self, max_volume: object, step: object) -> StoredSettings:
         max_volume, step = validate_volume(max_volume, step)
@@ -668,6 +806,7 @@ class SettingsStore:
             "sleep_timer": sleep_timer_to_json(settings.sleep_timer),
             "games": games_to_json(settings.games),
             "controls": controls_to_json(settings.controls),
+            "hue": hue_to_json(settings.hue, secrets=True),
         }
         owner = self._owner()
         payload = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")

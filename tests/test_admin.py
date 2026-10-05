@@ -786,7 +786,7 @@ def test_override_without_usage_times(client):
 
 
 def test_parents_set_up_the_sleep_timer(admin, client, services):
-    body = {"enabled": True, "minutes": 20, "wake": "06:45"}
+    body = {"enabled": True, "minutes": 20, "wake": "06:45", "lights": "off"}
     response = admin.put("/api/admin/settings/sleep-timer", json=body, headers=POST)
     assert response.get_json()["settings"]["sleep_timer"] == body
     bad = admin.put("/api/admin/settings/sleep-timer", json={"minutes": 200}, headers=POST)

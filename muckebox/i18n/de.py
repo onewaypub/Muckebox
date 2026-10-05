@@ -438,6 +438,21 @@ MESSAGES: dict[str, str] = {
         "Der Einschlaf-Timer braucht eine Dauer von 5 bis 90 Minuten und eine Aufwachzeit."
     ),
     "error.games_invalid": "Die Einstellungen der Spiele sind ungültig.",
+    "error.hue_invalid": "Die Licht-Einstellungen sind ungültig.",
+    "error.hue_unreachable": (
+        "Die Hue Bridge ist nicht erreichbar. Läuft sie, und darf die Muckebox sie über "
+        "TCP 443 erreichen?"
+    ),
+    "error.hue_link_button": "Bitte jetzt den runden Knopf auf der Hue Bridge drücken.",
+    "error.hue_certificate_changed": (
+        "Die Hue Bridge meldet sich mit einem neuen Zertifikat. Bitte unter „Licht“ neu verbinden."
+    ),
+    "error.hue_unauthorized": (
+        "Die Hue Bridge kennt die Muckebox nicht mehr. Bitte unter „Licht“ neu koppeln."
+    ),
+    "error.hue_not_found": "Diese Szene oder dieser Raum ist in der Hue-App nicht mehr da.",
+    "error.hue_error": "Die Hue Bridge hat einen Fehler gemeldet.",
+    "error.hue_not_configured": "Unter „Licht“ ist noch keine Hue Bridge verbunden.",
     "error.controls_invalid": (
         "Die Kachel-Sperre darf 0 bis 30 Sekunden dauern, die Pause ohne Tippen 0 bis 240 Minuten."
     ),

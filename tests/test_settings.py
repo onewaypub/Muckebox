@@ -421,6 +421,7 @@ def test_new_sections_have_defaults_and_round_trip(tmp_path):
         "enabled": True,
         "minutes": 45,
         "wake": "06:30",
+        "lights": "keep",
     }
     stored = games_to_json(reread.games)
     assert stored["items"]["sound_quiz"] == {"enabled": True, "level": 1}
@@ -486,6 +487,12 @@ def test_reset_pin_keeps_the_new_sections(tmp_path):
         ("set_controls", {"idle_minutes": True}, "controls_invalid"),
         ("set_controls", None, "controls_invalid"),
         ("set_controls", {"profile": "teen"}, "controls_invalid"),
+        ("set_sleep_timer", {"minutes": 30, "lights": "../x"}, "sleep_timer_invalid"),
+        ("set_hue", {"room": "r 1"}, "hue_invalid"),
+        ("set_hue", {"slots": [{"scene": "s1", "picture": "dragon"}]}, "hue_invalid"),
+        ("set_hue", {"slots": [{"scene": "s1", "picture": "sun"}] * 4}, "hue_invalid"),
+        ("set_hue", {"slots": [{"picture": "sun"}]}, "hue_invalid"),
+        ("set_hue", [], "hue_invalid"),
         ("set_controls", {"skip_buttons": "yes"}, "controls_invalid"),
     ],
 )
@@ -493,3 +500,60 @@ def test_invalid_new_settings(tmp_path, setter, data, code):
     with pytest.raises(SettingsError) as info:
         getattr(store(tmp_path), setter)(data)
     assert info.value.code == code
+
+
+def hue_bridge(**changes):
+    from muckebox.settings import HueBridge
+
+    values = {
+        "ip": "192.0.2.50",
+        "id": "001788fffe000001",
+        "name": "Hue Bridge",
+        "key": "secret-key-123",
+        "fingerprint": "ab" * 32,
+    } | changes
+    return HueBridge(**values)
+
+
+def test_hue_round_trip_and_the_public_view_has_no_secrets(tmp_path):
+    from muckebox.settings import hue_to_json
+
+    st = store(tmp_path)
+    assert st.current().hue.bridge is None
+    st.set_hue_bridge(hue_bridge())
+    st.set_hue({"room": "room-kids", "slots": [{"scene": "scene-night", "picture": "moon"}]})
+    st.set_sleep_timer({"enabled": True, "minutes": 20, "lights": "scene-night"})
+    reread = SettingsStore(tmp_path, scrypt=CHEAP).current()
+    assert reread.hue.bridge == hue_bridge()
+    assert reread.hue.room == "room-kids"
+    assert reread.hue.slots[0].picture == "moon"
+    assert reread.sleep_timer.lights == "scene-night"
+    public = json.dumps(hue_to_json(reread.hue))
+    assert "secret-key-123" not in public and "ab" * 32 not in public
+    assert "secret-key-123" in (tmp_path / "settings.json").read_text()
+
+
+def test_another_bridge_starts_with_an_empty_choice(tmp_path):
+    st = store(tmp_path)
+    st.set_hue_bridge(hue_bridge())
+    st.set_hue({"room": "room-kids", "slots": [{"scene": "scene-night", "picture": "moon"}]})
+    st.set_hue_bridge(hue_bridge(fingerprint="cd" * 32))  # the same bridge, new certificate
+    assert st.current().hue.room == "room-kids"
+    st.set_hue_bridge(hue_bridge(id="001788fffe000002"))
+    assert (st.current().hue.room, st.current().hue.slots) == (None, ())
+    st.set_hue_bridge(None)
+    assert st.current().hue.bridge is None
+
+
+@pytest.mark.parametrize(
+    "bridge",
+    [
+        {"ip": "192.0.2.50", "id": "x", "name": "B", "key": "short", "fingerprint": "ab" * 32},
+        {"ip": "http://x", "id": "x", "name": "B", "key": "secret-key", "fingerprint": "ab" * 32},
+        {"ip": "192.0.2.50", "id": "x", "name": "B", "key": "secret-key", "fingerprint": "zz"},
+    ],
+)
+def test_a_hand_edited_hue_section_is_checked(tmp_path, bridge):
+    store(tmp_path)
+    edit(tmp_path, lambda d: d.update(hue={"bridge": bridge}))
+    assert store(tmp_path).load_problem == "settings_corrupt"
